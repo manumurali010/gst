@@ -1,0 +1,78 @@
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 56000.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 56000.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 56000.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 56000.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 50770.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 50770.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 50770.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 50770.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 50770.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 65300.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 50770.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 65300.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 50770.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 65300.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 50770.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 65300.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 50770.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 62778.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 50770.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 62778.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 50770.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 62778.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 0.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 50770.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 62778.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 50770.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 62778.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 6565.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 50770.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 62778.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 6565.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 50770.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 62778.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 6565.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 50770.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 62778.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 6565.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 50770.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 62778.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 6509.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 50770.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 62778.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 6509.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1
+
+--- Calculation Triggered ---
+Issue Cards: 1
+Card 0 Breakdown: {'CGST': {'tax': 50770.0, 'interest': 0, 'penalty': 0}, 'SGST': {'tax': 62778.0, 'interest': 0, 'penalty': 0}, 'IGST': {'tax': 6509.0, 'interest': 0, 'penalty': 0}, 'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}}
+Aggregated Totals: {'CGST': {'tax': 50770.0, 'interest': 0.0, 'penalty': 0.0}, 'SGST': {'tax': 62778.0, 'interest': 0.0, 'penalty': 0.0}, 'IGST': {'tax': 6509.0, 'interest': 0.0, 'penalty': 0.0}, 'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}}
+Tax Table Rows: 1

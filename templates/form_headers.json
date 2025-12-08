@@ -1,0 +1,72 @@
+{
+    "DRC-01": {
+        "title": "FORM GST DRC-01",
+        "subtitle": "[See rule 142(1)]",
+        "description": "Summary of the Show Cause Notice"
+    },
+    "DRC-01A": {
+        "title": "FORM GST DRC-01A",
+        "subtitle": "[See rule 142(1A)]",
+        "description": "Show Cause Notice"
+    },
+    "DRC-02": {
+        "title": "FORM GST DRC-02",
+        "subtitle": "[See rule 142(2)]",
+        "description": "Reply to Show Cause Notice"
+    },
+    "DRC-03": {
+        "title": "FORM GST DRC-03",
+        "subtitle": "[See rule 142(3)]",
+        "description": "Order of Determination of Tax"
+    },
+    "DRC-04": {
+        "title": "FORM GST DRC-04",
+        "subtitle": "[See rule 142(4)]",
+        "description": "Intimation of Tax Ascertained"
+    },
+    "DRC-05": {
+        "title": "FORM GST DRC-05",
+        "subtitle": "[See rule 142(5)]",
+        "description": "Payment in Response to Notice"
+    },
+    "DRC-07": {
+        "title": "FORM GST DRC-07",
+        "subtitle": "[See rule 142(1)]",
+        "description": "Show Cause Notice for Demand"
+    },
+    "DRC-08": {
+        "title": "FORM GST DRC-08",
+        "subtitle": "[See rule 142(6)]",
+        "description": "Order for Withdrawal of SCN"
+    },
+    "ASMT-10": {
+        "title": "FORM GST ASMT-10",
+        "subtitle": "[See rule 99(1)]",
+        "description": "Notice for Discrepancies in Return"
+    },
+    "ASMT-13": {
+        "title": "FORM GST ASMT-13",
+        "subtitle": "[See rule 100(1)]",
+        "description": "Assessment Order under Section 62"
+    },
+    "ASMT-14": {
+        "title": "FORM GST ASMT-14",
+        "subtitle": "[See rule 100(2)]",
+        "description": "Summary Assessment Order"
+    },
+    "ASMT-15": {
+        "title": "FORM GST ASMT-15",
+        "subtitle": "[See rule 100(3)]",
+        "description": "Assessment Order under Section 63"
+    },
+    "SCN": {
+        "title": "SHOW CAUSE NOTICE",
+        "subtitle": "[Under Section 73/74/74A]",
+        "description": "Show Cause Notice"
+    },
+    "Order-in-Original": {
+        "title": "ORDER-IN-ORIGINAL",
+        "subtitle": "[Under Section 73/74/74A]",
+        "description": "Order in Original"
+    }
+}

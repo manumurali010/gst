@@ -1,0 +1,96 @@
+{
+    "meta": {
+        "schema_version": "1.0.0",
+        "created_at": "2025-12-02T15:20:00+05:30",
+        "maintainer": "adjudication-team@example.gov"
+    },
+    "issues": [
+        {
+            "issue_id": "OUT_001",
+            "issue_name": "GSTR-3B vs GSTR-1 Outward Supply Mismatch",
+            "category": "Outward Liability",
+            "severity": "high",
+            "version": "1.0",
+            "templates": {
+                "brief_facts": "For the period {{period}}, the outward taxable supply declared in GSTR-1 amounts to ₹{{gstr1_taxable}}, whereas the outward taxable supply declared in GSTR-3B amounts to ₹{{gstr3b_taxable}}. This results in a difference of ₹{{value_difference}}. The corresponding tax difference amounts to ₹{{tax_difference}}.",
+                "grounds": "The taxpayer is required to report outward supplies consistently in both GSTR-1 and GSTR-3B. The detected mismatch indicates short declaration of outward taxable supplies in GSTR-3B, resulting in short payment of tax.",
+                "legal": "Section 59 of the CGST Act mandates self-assessment of tax, while Section 75(12) provides that tax declared in returns must be paid. Any underreported liability in GSTR-3B compared to GSTR-1 is recoverable as self-assessed tax.",
+                "conclusion": "In view of the above facts and legal provisions, differential tax of ₹{{tax_difference}} along with applicable interest is payable. The taxpayer is required to furnish justification or discharge the liability accordingly."
+            },
+            "table": {
+                "title": "Outward Supply Comparison – GSTR-1 vs GSTR-3B",
+                "columns": [
+                    {
+                        "key": "description",
+                        "label": "Description"
+                    },
+                    {
+                        "key": "gstr1",
+                        "label": "GSTR-1 Value (₹)"
+                    },
+                    {
+                        "key": "gstr3b",
+                        "label": "GSTR-3B Value (₹)"
+                    },
+                    {
+                        "key": "difference",
+                        "label": "Difference (₹)"
+                    }
+                ],
+                "rows": [
+                    {
+                        "description": "Taxable Outward Supplies",
+                        "gstr1": "{{gstr1_taxable}}",
+                        "gstr3b": "{{gstr3b_taxable}}",
+                        "difference": "{{value_difference}}"
+                    }
+                ]
+            },
+            "placeholders": [
+                {
+                    "name": "period",
+                    "type": "string"
+                },
+                {
+                    "name": "gstr1_taxable",
+                    "type": "number"
+                },
+                {
+                    "name": "gstr3b_taxable",
+                    "type": "number"
+                },
+                {
+                    "name": "value_difference",
+                    "type": "number",
+                    "computed": true
+                },
+                {
+                    "name": "tax_rate",
+                    "type": "number",
+                    "default": 18
+                },
+                {
+                    "name": "tax_difference",
+                    "type": "number",
+                    "computed": true
+                }
+            ],
+            "variables": {
+                "period": "",
+                "gstr1_taxable": 0,
+                "gstr3b_taxable": 0,
+                "tax_rate": 18
+            },
+            "calc_logic": "def compute(v):\n    g1 = float(v.get('gstr1_taxable', 0))\n    g3 = float(v.get('gstr3b_taxable', 0))\n    rate = float(v.get('tax_rate', 18))\n\n    value_diff = round(g1 - g3, 2)\n    tax_diff = round(value_diff * (rate / 100), 2) if value_diff > 0 else 0\n    \n    # Standardized keys for auto-calculation\n    return {\n        'value_difference': value_diff,\n        'tax_difference': tax_diff,\n        'calculated_tax': tax_diff,\n        'calculated_interest': 0,\n        'calculated_penalty': 0\n    }",
+            "tax_demand_mapping": {
+                "tax": "calculated_tax",
+                "interest": "calculated_interest",
+                "penalty": "calculated_penalty"
+            },
+            "required_documents": [
+                "GSTR-1 Summary",
+                "GSTR-3B Summary"
+            ]
+        }
+    ]
+}

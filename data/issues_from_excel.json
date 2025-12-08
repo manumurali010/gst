@@ -1,0 +1,946 @@
+{
+    "meta": {
+        "version": "2.0",
+        "source": "excel_import"
+    },
+    "issues": [
+        {
+            "issue_id": "GSTR_3B_VS_GSTR_1",
+            "issue_name": "GSTR 3B VS GSTR 1",
+            "templates": {
+                "brief_facts": "The amount of taxable value & tax declared in GSTR-1 is self-assessed liability as per Sec 59 of CGST Act 2017, read with Rule 59 of CGST Rules, 2017. Accordingly, any tax paid in GSTR-3B/DRC-03 should match with liability declared in GSTR-1. In cases of any difference, the same is liable for recovery under Sec 79 of CGST Act, read with Sec 75(12) of CGST Act 2017.  The discrepancy is tabulated below for your reference and you are requested to give clarification or pay the liability along with applicable interest& Penalty.",
+                "grounds": "",
+                "legal": "Section 39, Section 59, Rule 61",
+                "conclusion": ""
+            },
+            "grid_data": [
+                [
+                    {
+                        "ref": "B15",
+                        "var": "cell_15_2",
+                        "value": "1. Taxable value as per GSTR 1 (after considering Amendment, cr/dr notes & Advances)",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C15",
+                        "var": "cell_15_3",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "D15",
+                        "var": "cell_15_4",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "E15",
+                        "var": "cell_15_5",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "F15",
+                        "var": "cell_15_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G15",
+                        "var": "cell_15_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H15",
+                        "var": "cell_15_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I15",
+                        "var": "cell_15_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B16",
+                        "var": "cell_16_2",
+                        "value": "2. Taxable value as per GSTR 3B",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C16",
+                        "var": "cell_16_3",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "D16",
+                        "var": "cell_16_4",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "E16",
+                        "var": "cell_16_5",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "F16",
+                        "var": "cell_16_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G16",
+                        "var": "cell_16_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H16",
+                        "var": "cell_16_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I16",
+                        "var": "cell_16_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B17",
+                        "var": "cell_17_2",
+                        "value": "3.Difference",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C17",
+                        "var": "cell_17_3",
+                        "value": "=C15-C16",
+                        "type": "formula",
+                        "formula": "=C15-C16",
+                        "python_formula": "v['cell_15_3']-v['cell_16_3']"
+                    },
+                    {
+                        "ref": "D17",
+                        "var": "cell_17_4",
+                        "value": "=D15-D16",
+                        "type": "formula",
+                        "formula": "=D15-D16",
+                        "python_formula": "v['cell_15_4']-v['cell_16_4']"
+                    },
+                    {
+                        "ref": "E17",
+                        "var": "cell_17_5",
+                        "value": "=E15-E16",
+                        "type": "formula",
+                        "formula": "=E15-E16",
+                        "python_formula": "v['cell_15_5']-v['cell_16_5']"
+                    },
+                    {
+                        "ref": "F17",
+                        "var": "cell_17_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G17",
+                        "var": "cell_17_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H17",
+                        "var": "cell_17_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I17",
+                        "var": "cell_17_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B18",
+                        "var": "cell_18_2",
+                        "value": "4.Tax Liability as per GSTR 1",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C18",
+                        "var": "cell_18_3",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "D18",
+                        "var": "cell_18_4",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "E18",
+                        "var": "cell_18_5",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "F18",
+                        "var": "cell_18_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G18",
+                        "var": "cell_18_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H18",
+                        "var": "cell_18_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I18",
+                        "var": "cell_18_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B19",
+                        "var": "cell_19_2",
+                        "value": "5.Tax Liability as per GSTR 3B",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C19",
+                        "var": "cell_19_3",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "D19",
+                        "var": "cell_19_4",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "E19",
+                        "var": "cell_19_5",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "F19",
+                        "var": "cell_19_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G19",
+                        "var": "cell_19_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H19",
+                        "var": "cell_19_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I19",
+                        "var": "cell_19_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B20",
+                        "var": "cell_20_2",
+                        "value": "6.Difference (Liability)",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C20",
+                        "var": "cell_20_3",
+                        "value": "=C18-C19",
+                        "type": "formula",
+                        "formula": "=C18-C19",
+                        "python_formula": "v['cell_18_3']-v['cell_19_3']"
+                    },
+                    {
+                        "ref": "D20",
+                        "var": "cell_20_4",
+                        "value": "=D18-D19",
+                        "type": "formula",
+                        "formula": "=D18-D19",
+                        "python_formula": "v['cell_18_4']-v['cell_19_4']"
+                    },
+                    {
+                        "ref": "E20",
+                        "var": "cell_20_5",
+                        "value": "=E18-E19",
+                        "type": "formula",
+                        "formula": "=E18-E19",
+                        "python_formula": "v['cell_18_5']-v['cell_19_5']"
+                    },
+                    {
+                        "ref": "F20",
+                        "var": "cell_20_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G20",
+                        "var": "cell_20_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H20",
+                        "var": "cell_20_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I20",
+                        "var": "cell_20_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B21",
+                        "var": "cell_21_2",
+                        "value": "Liability",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C21",
+                        "var": "cell_21_3",
+                        "value": "=C20",
+                        "type": "formula",
+                        "formula": "=C20",
+                        "python_formula": "v['cell_20_3']"
+                    },
+                    {
+                        "ref": "D21",
+                        "var": "cell_21_4",
+                        "value": "=D20",
+                        "type": "formula",
+                        "formula": "=D20",
+                        "python_formula": "v['cell_20_4']"
+                    },
+                    {
+                        "ref": "E21",
+                        "var": "cell_21_5",
+                        "value": "=E20",
+                        "type": "formula",
+                        "formula": "=E20",
+                        "python_formula": "v['cell_20_5']"
+                    },
+                    {
+                        "ref": "F21",
+                        "var": "cell_21_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G21",
+                        "var": "cell_21_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H21",
+                        "var": "cell_21_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I21",
+                        "var": "cell_21_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ]
+            ],
+            "cell_map": {
+                "B15": "cell_15_2",
+                "C15": "cell_15_3",
+                "D15": "cell_15_4",
+                "E15": "cell_15_5",
+                "F15": "cell_15_6",
+                "G15": "cell_15_7",
+                "H15": "cell_15_8",
+                "I15": "cell_15_9",
+                "B16": "cell_16_2",
+                "C16": "cell_16_3",
+                "D16": "cell_16_4",
+                "E16": "cell_16_5",
+                "F16": "cell_16_6",
+                "G16": "cell_16_7",
+                "H16": "cell_16_8",
+                "I16": "cell_16_9",
+                "B17": "cell_17_2",
+                "C17": "cell_17_3",
+                "D17": "cell_17_4",
+                "E17": "cell_17_5",
+                "F17": "cell_17_6",
+                "G17": "cell_17_7",
+                "H17": "cell_17_8",
+                "I17": "cell_17_9",
+                "B18": "cell_18_2",
+                "C18": "cell_18_3",
+                "D18": "cell_18_4",
+                "E18": "cell_18_5",
+                "F18": "cell_18_6",
+                "G18": "cell_18_7",
+                "H18": "cell_18_8",
+                "I18": "cell_18_9",
+                "B19": "cell_19_2",
+                "C19": "cell_19_3",
+                "D19": "cell_19_4",
+                "E19": "cell_19_5",
+                "F19": "cell_19_6",
+                "G19": "cell_19_7",
+                "H19": "cell_19_8",
+                "I19": "cell_19_9",
+                "B20": "cell_20_2",
+                "C20": "cell_20_3",
+                "D20": "cell_20_4",
+                "E20": "cell_20_5",
+                "F20": "cell_20_6",
+                "G20": "cell_20_7",
+                "H20": "cell_20_8",
+                "I20": "cell_20_9",
+                "B21": "cell_21_2",
+                "C21": "cell_21_3",
+                "D21": "cell_21_4",
+                "E21": "cell_21_5",
+                "F21": "cell_21_6",
+                "G21": "cell_21_7",
+                "H21": "cell_21_8",
+                "I21": "cell_21_9",
+                "B22": "cell_22_2",
+                "C22": "cell_22_3",
+                "D22": "cell_22_4",
+                "E22": "cell_22_5",
+                "F22": "cell_22_6",
+                "G22": "cell_22_7",
+                "H22": "cell_22_8",
+                "I22": "cell_22_9",
+                "B23": "cell_23_2",
+                "C23": "cell_23_3",
+                "D23": "cell_23_4",
+                "E23": "cell_23_5",
+                "F23": "cell_23_6",
+                "G23": "cell_23_7",
+                "H23": "cell_23_8",
+                "I23": "cell_23_9",
+                "B24": "cell_24_2",
+                "C24": "cell_24_3",
+                "D24": "cell_24_4",
+                "E24": "cell_24_5",
+                "F24": "cell_24_6",
+                "G24": "cell_24_7",
+                "H24": "cell_24_8",
+                "I24": "cell_24_9"
+            },
+            "tax_demand_mapping": {
+                "tax_cgst": "cell_21_3",
+                "tax_sgst": "cell_21_4",
+                "tax_igst": "cell_21_5",
+                "interest": null,
+                "penalty": null
+            }
+        },
+        {
+            "issue_id": "RCM_VS_GSTR_3B",
+            "issue_name": "RCM VS GSTR 3B",
+            "templates": {
+                "brief_facts": "The input tax credit under RCM/Import of services as per sect 16 of the CGST Act 2017 cannot be claimed for any amount which is not paid. Thus, the credit taken in GSTR-3B (table 4A2 and 4A3) should match with the amount of Tax paid under RCM in GSTR-3B. The discrepancy is tabulated below and you are requested to give clarification or pay the liability along with applicable interest & Penalty.",
+                "grounds": "",
+                "legal": "Section 9, Section 39, Section 59",
+                "conclusion": ""
+            },
+            "grid_data": [
+                [
+                    {
+                        "ref": "B15",
+                        "var": "cell_15_2",
+                        "value": "1. Taxable value of inward supplies attracting tax under RCM in GSTR 2A",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C15",
+                        "var": "cell_15_3",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "D15",
+                        "var": "cell_15_4",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "E15",
+                        "var": "cell_15_5",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "F15",
+                        "var": "cell_15_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G15",
+                        "var": "cell_15_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H15",
+                        "var": "cell_15_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I15",
+                        "var": "cell_15_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B16",
+                        "var": "cell_16_2",
+                        "value": "2. Taxable value of supplies under RCM as per 3.1(d) of GSTR 3B",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C16",
+                        "var": "cell_16_3",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "D16",
+                        "var": "cell_16_4",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "E16",
+                        "var": "cell_16_5",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "F16",
+                        "var": "cell_16_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G16",
+                        "var": "cell_16_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H16",
+                        "var": "cell_16_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I16",
+                        "var": "cell_16_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B17",
+                        "var": "cell_17_2",
+                        "value": "3. Difference",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C17",
+                        "var": "cell_17_3",
+                        "value": "=C15-C16",
+                        "type": "formula",
+                        "formula": "=C15-C16",
+                        "python_formula": "v['cell_15_3']-v['cell_16_3']"
+                    },
+                    {
+                        "ref": "D17",
+                        "var": "cell_17_4",
+                        "value": "=D15-D16",
+                        "type": "formula",
+                        "formula": "=D15-D16",
+                        "python_formula": "v['cell_15_4']-v['cell_16_4']"
+                    },
+                    {
+                        "ref": "E17",
+                        "var": "cell_17_5",
+                        "value": "=E15-E16",
+                        "type": "formula",
+                        "formula": "=E15-E16",
+                        "python_formula": "v['cell_15_5']-v['cell_16_5']"
+                    },
+                    {
+                        "ref": "F17",
+                        "var": "cell_17_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G17",
+                        "var": "cell_17_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H17",
+                        "var": "cell_17_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I17",
+                        "var": "cell_17_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B18",
+                        "var": "cell_18_2",
+                        "value": "4. ITC of inward supplies attracting tax under RCM in GSTR 2A",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C18",
+                        "var": "cell_18_3",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "D18",
+                        "var": "cell_18_4",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "E18",
+                        "var": "cell_18_5",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "F18",
+                        "var": "cell_18_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G18",
+                        "var": "cell_18_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H18",
+                        "var": "cell_18_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I18",
+                        "var": "cell_18_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B19",
+                        "var": "cell_19_2",
+                        "value": "5. Tax liability as declared in Table 3.1(d) of GSTR 3B",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C19",
+                        "var": "cell_19_3",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "D19",
+                        "var": "cell_19_4",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "E19",
+                        "var": "cell_19_5",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "F19",
+                        "var": "cell_19_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G19",
+                        "var": "cell_19_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H19",
+                        "var": "cell_19_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I19",
+                        "var": "cell_19_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B20",
+                        "var": "cell_20_2",
+                        "value": "6.Difference",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C20",
+                        "var": "cell_20_3",
+                        "value": "=C18-C19",
+                        "type": "formula",
+                        "formula": "=C18-C19",
+                        "python_formula": "v['cell_18_3']-v['cell_19_3']"
+                    },
+                    {
+                        "ref": "D20",
+                        "var": "cell_20_4",
+                        "value": "=D18-D19",
+                        "type": "formula",
+                        "formula": "=D18-D19",
+                        "python_formula": "v['cell_18_4']-v['cell_19_4']"
+                    },
+                    {
+                        "ref": "E20",
+                        "var": "cell_20_5",
+                        "value": "=E18-E19",
+                        "type": "formula",
+                        "formula": "=E18-E19",
+                        "python_formula": "v['cell_18_5']-v['cell_19_5']"
+                    },
+                    {
+                        "ref": "F20",
+                        "var": "cell_20_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G20",
+                        "var": "cell_20_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H20",
+                        "var": "cell_20_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I20",
+                        "var": "cell_20_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ],
+                [
+                    {
+                        "ref": "B21",
+                        "var": "cell_21_2",
+                        "value": "7.Liability",
+                        "type": "static"
+                    },
+                    {
+                        "ref": "C21",
+                        "var": "cell_21_3",
+                        "value": "=C20",
+                        "type": "formula",
+                        "formula": "=C20",
+                        "python_formula": "v['cell_20_3']"
+                    },
+                    {
+                        "ref": "D21",
+                        "var": "cell_21_4",
+                        "value": "=D20",
+                        "type": "formula",
+                        "formula": "=D20",
+                        "python_formula": "v['cell_20_4']"
+                    },
+                    {
+                        "ref": "E21",
+                        "var": "cell_21_5",
+                        "value": "=E20",
+                        "type": "formula",
+                        "formula": "=E20",
+                        "python_formula": "v['cell_20_5']"
+                    },
+                    {
+                        "ref": "F21",
+                        "var": "cell_21_6",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "G21",
+                        "var": "cell_21_7",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "H21",
+                        "var": "cell_21_8",
+                        "value": null,
+                        "type": "input"
+                    },
+                    {
+                        "ref": "I21",
+                        "var": "cell_21_9",
+                        "value": null,
+                        "type": "input"
+                    }
+                ]
+            ],
+            "cell_map": {
+                "B15": "cell_15_2",
+                "C15": "cell_15_3",
+                "D15": "cell_15_4",
+                "E15": "cell_15_5",
+                "F15": "cell_15_6",
+                "G15": "cell_15_7",
+                "H15": "cell_15_8",
+                "I15": "cell_15_9",
+                "B16": "cell_16_2",
+                "C16": "cell_16_3",
+                "D16": "cell_16_4",
+                "E16": "cell_16_5",
+                "F16": "cell_16_6",
+                "G16": "cell_16_7",
+                "H16": "cell_16_8",
+                "I16": "cell_16_9",
+                "B17": "cell_17_2",
+                "C17": "cell_17_3",
+                "D17": "cell_17_4",
+                "E17": "cell_17_5",
+                "F17": "cell_17_6",
+                "G17": "cell_17_7",
+                "H17": "cell_17_8",
+                "I17": "cell_17_9",
+                "B18": "cell_18_2",
+                "C18": "cell_18_3",
+                "D18": "cell_18_4",
+                "E18": "cell_18_5",
+                "F18": "cell_18_6",
+                "G18": "cell_18_7",
+                "H18": "cell_18_8",
+                "I18": "cell_18_9",
+                "B19": "cell_19_2",
+                "C19": "cell_19_3",
+                "D19": "cell_19_4",
+                "E19": "cell_19_5",
+                "F19": "cell_19_6",
+                "G19": "cell_19_7",
+                "H19": "cell_19_8",
+                "I19": "cell_19_9",
+                "B20": "cell_20_2",
+                "C20": "cell_20_3",
+                "D20": "cell_20_4",
+                "E20": "cell_20_5",
+                "F20": "cell_20_6",
+                "G20": "cell_20_7",
+                "H20": "cell_20_8",
+                "I20": "cell_20_9",
+                "B21": "cell_21_2",
+                "C21": "cell_21_3",
+                "D21": "cell_21_4",
+                "E21": "cell_21_5",
+                "F21": "cell_21_6",
+                "G21": "cell_21_7",
+                "H21": "cell_21_8",
+                "I21": "cell_21_9",
+                "B22": "cell_22_2",
+                "C22": "cell_22_3",
+                "D22": "cell_22_4",
+                "E22": "cell_22_5",
+                "F22": "cell_22_6",
+                "G22": "cell_22_7",
+                "H22": "cell_22_8",
+                "I22": "cell_22_9",
+                "B23": "cell_23_2",
+                "C23": "cell_23_3",
+                "D23": "cell_23_4",
+                "E23": "cell_23_5",
+                "F23": "cell_23_6",
+                "G23": "cell_23_7",
+                "H23": "cell_23_8",
+                "I23": "cell_23_9",
+                "B24": "cell_24_2",
+                "C24": "cell_24_3",
+                "D24": "cell_24_4",
+                "E24": "cell_24_5",
+                "F24": "cell_24_6",
+                "G24": "cell_24_7",
+                "H24": "cell_24_8",
+                "I24": "cell_24_9"
+            },
+            "tax_demand_mapping": {
+                "tax_cgst": "cell_21_3",
+                "tax_sgst": "cell_21_4",
+                "tax_igst": "cell_21_5",
+                "interest": null,
+                "penalty": null
+            }
+        }
+    ]
+}

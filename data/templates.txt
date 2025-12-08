@@ -1,0 +1,11 @@
+1. It has been observed that you have claimed Input Tax Credit (ITC) of Rs. {amount} for the period {period} which is not reflected in your GSTR-2A/2B. This is in contravention of Section 16(2)(c) of the CGST Act, 2017 read with Rule 36(4) of the CGST Rules, 2017.
+
+2. On scrutiny of your returns, it is noticed that you have paid tax for the period {period} after the due date. However, the applicable interest under Section 50 of the CGST Act, 2017 has not been paid by you. You are hereby directed to pay the interest amount of Rs. {amount} immediately.
+
+3. It appears that you have under-declared your outward tax liability in GSTR-3B as compared to GSTR-1 for the financial year {period}. The difference in tax liability amounts to Rs. {amount}. You are requested to explain the reasons for this discrepancy or pay the differential tax along with applicable interest.
+
+4. During the course of inspection conducted at your business premises on {date}, it was found that you were not maintaining proper books of accounts as required under Section 35 of the CGST Act, 2017. Specifically, the stock register and purchase invoices were missing for the period {period}.
+
+5. You have claimed refund of Rs. {amount} under the category of "Inverted Duty Structure". However, upon verification, it is observed that the input services claimed by you are not eligible for refund under this category as per Section 54(3) of the CGST Act, 2017.
+
+6. Intelligence received indicates that you have availed ITC on the basis of fake invoices issued by non-existent suppliers. This is a serious offence under Section 132(1)(b) and (c) of the CGST Act, 2017. You are called upon to show cause why the ITC of Rs. {amount} should not be disallowed and penalty be imposed under Section 122.

@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: 'Bookman Old Style', serif;
+            font-size: 12pt;
+            line-height: 1.5;
+            margin: 40px;
+        }
+
+        p {
+            margin-bottom: 10px;
+            text-align: justify;
+        }
+
+        .header {
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .right-align {
+            text-align: right;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            margin-bottom: 10px;
+        }
+
+        td,
+        th {
+            border: 1px solid black;
+            padding: 5px;
+            vertical-align: top;
+        }
+
+        ol {
+            margin-top: 0;
+        }
+    </style>
+</head>
+
+<body>
+    <p>&nbsp;</p>
+
+    <p><strong>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {{ legal_name }}, {{ trade_name }}, {{ address }}
+        </strong>(hereinafter referred to as ‘the taxpayer’) is holding GST registration bearing GSTIN:<strong>{{ gstin
+            }} </strong>in the capacity of a ‘registered person’ as envisaged under section 2(94) of the Central Goods
+        and Services Tax Act, 2017 (hereinafter referred to as “the Act”) is a {{ constitution_of_business }} firm with
+        trade name <strong>M/s. {{ trade_name }}. </strong>&nbsp;</p>
+
+    <p>&nbsp;</p>
+
+    <ol start="2">
+        <li>All references in this Notice to a Section of the Central Goods and Services Tax Act, 2017 (CGST Act, 2017)
+            implies reference to the corresponding section of the Kerala State Goods and Services Tax Act, 2017 (KSGST
+            Act, 2017). Similarly, all references to a Rule of the Central Goods and Services Tax Rules, 2017 (CGST
+            Rules, 2017) implies reference to the corresponding Rules of the Kerala State Goods and Services Tax Rules,
+            2017 (KSGST Rules, 2017).</li>
+    </ol>
+
+    <p>&nbsp;</p>
+
+    <!-- Issues and their specific calculation tables -->
+    {{ issues_content | safe }}
+
+    <p>&nbsp;</p>
+
+    <ol start="4">
+        <li><strong>Demand-</strong> Based on the facts of the issue and reference of laws as mentioned above, whereas
+            it appears that <strong>{{ legal_name }}, {{ trade_name }}, {{ address }} </strong>is liable to pay tax
+            amounting to Rs. {{ total_amount }}/- (IGST Rs. {{ igst_total }}/-, CGST Rs. {{ cgst_total }}/- &amp; SGST
+            Rs. {{ sgst_total }}/-) for the contraventions made by them as discussed above, they are hereby directed to
+            Show Cause to <strong>{{ officer_designation }}, {{ jurisdiction }}</strong> as to why:</li>
+    </ol>
+
+    <p>&nbsp;</p>
+
+    <!-- Summary Tax Table -->
+    <div style="margin-left: 40px;">
+        <table style="width: 90%;">
+            <thead>
+                <tr>
+                    <th>Act</th>
+                    <th>Tax Period From</th>
+                    <th>Tax Period To</th>
+                    <th>Tax (₹)</th>
+                    <th>Interest (₹)</th>
+                    <th>Penalty (₹)</th>
+                    <th>Total (₹)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {{ tax_table | safe }}
+            </tbody>
+        </table>
+    </div>
+
+    <p>&nbsp;</p>
+
+    <ol>
+        {{ issue_template_demand | safe }}
+    </ol>
+
+    <p>&nbsp;</p>
+
+    <ol start="5">
+        <li><u>With regard to the above demand, where any person chargeable with tax under sub section (1) or sub
+                section (3) of Section 73 of CGST Act 2017/Kerala SGST Act, 2017 read with Section 20 of the IGST Act,
+                2017 pays the said tax along with interest payable under Section 50 within thirty days of issue of show
+                cause notice, no penalty shall be payable and all proceedings in respect of the said notice shall be
+                deemed to be concluded.</u></li>
+        <li>As per Section 29(3) of the CGST Act 2017/Kerala SGST Act, 2017 read with Section 20 of the IGST Act, 2017,
+            the cancellation of the registration under this Section shall not affect the liability of person to pay tax
+            and other dues under this Act or to discharge any obligation under this Act or the rules made thereunder for
+            any period prior to the date of cancellation whether or not such tax and other dues are determined before or
+            after the date of cancellation.</li>
+    </ol>
+
+    <p>&nbsp;</p>
+
+    <ol start="7">
+        <li><strong> {{ legal_name }}, {{ trade_name }}, {{ address }} </strong>is also directed to produce, at the time
+            of showing cause, all the evidences upon which they intend to rely on in support of their defence. They
+            should also indicate in their written reply as to whether they wish to be heard in person before the case is
+            adjudicated. If no such mention is made in their written reply or if they do not appear before the
+            adjudicating authority when the case is posted for personal hearing, it will be presumed that they do not
+            wish to be heard in person.&nbsp;</li>
+    </ol>
+
+    <p>&nbsp;</p>
+
+    <ol start="8">
+        <li>If no cause is shown against the action proposed to be taken <strong>within thirty days (30 days)</strong>
+            from the date of receipt of this notice or if they fail to appear before the adjudicating authority when the
+            case is posted for hearing, the case will be decided ex-parte on its own merits without any further
+            reference.</li>
+    </ol>
+
+    <p>&nbsp;</p>
+
+    <ol start="9">
+        <li>This notice is issued without prejudice to any other action that may be taken against them under the
+            provisions of the CGST Act, 2017/Kerala SGST Act, 2017 and IGST Act, 2017 as amended or the Rules made there
+            under or under any other law for the time being in force in India. Further, this notice is issued without
+            prejudice to the right to support it with any material evidence which may be collected at a later date and
+            which may be considered relevant to the proceedings in this matter.</li>
+    </ol>
+
+    <p>&nbsp;</p>
+
+    <ol start="10">
+        <li>The Department reserves the right to add, amend, delete or modify any part or portion of this show cause
+            notice, if considered necessary at any point of time before the case is adjudicated and such addition,
+            amendment, deletion or modification shall be deemed to be part and parcel of this notice.</li>
+    </ol>
+
+    <p>&nbsp;</p>
+
+    <ol start="11">
+        <li>In this Show Cause Notice, reliance is placed on the following documents:</li>
+    </ol>
+
+    <table>
+        <tbody>
+            <tr>
+                <td width="15%">
+                    <p>Si No.</p>
+                </td>
+                <td>
+                    <p>Description</p>
+                </td>
+            </tr>
+            {% for doc in reliance_documents %}
+            <tr>
+                <td>({{ loop.index }})</td>
+                <td>{{ doc }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td>(i)</td>
+                <td>{{ reliance_documents_placeholder }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <p>&nbsp;</p>
+
+    <div style="float: right; width: 300px;">
+        <p><strong>{{ officer_name }}</strong></p>
+        <p><strong>{{ designation }}</strong></p>
+    </div>
+    <div style="clear: both;"></div>
+
+    <p>&nbsp;</p>
+
+    <p>To,</p>
+    <p><strong>{{ legal_name }}, </strong></p>
+    <p><strong>{{ trade_name }}, </strong></p>
+    <p><strong>{{ gstin }}</strong></p>
+    <p><strong>{{ address }}</strong></p>
+
+    <p>&nbsp;</p>
+
+    <p>Copy submitted to:</p>
+    <p>&nbsp;</p>
+
+    <ul>
+        {% for copy in copy_submitted_to %}
+        <li>{{ copy }}</li>
+        {% else %}
+        <li>{{ copy_submitted_to_placeholder }}</li>
+        {% endfor %}
+    </ul>
+
+    <p>&nbsp;</p>
+    <p>&nbsp;</p>
+
+</body>
+
+</html>

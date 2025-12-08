@@ -1,0 +1,15 @@
+PyQt6
+
+pandas
+openpyxl
+reportlab
+python-docx
+pyinstaller
+xhtml2pdf
+weasyprint
+docx2pdf
+Pillow
+
+PyMuPDF
+
+Jinja2
