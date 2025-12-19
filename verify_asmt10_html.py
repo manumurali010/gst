@@ -44,10 +44,10 @@ def main():
     else:
         print("FAILURE: Negative margin for first page not found.")
 
-    if 'max-width: 380px;' in html:
-        print("SUCCESS: Recipient block has professional max-width.")
+    if '<table class="recipient"' in html:
+        print("SUCCESS: Recipient block switched to professional table layout.")
     else:
-        print("FAILURE: Recipient max-width not found.")
+        print("FAILURE: Recipient table not found.")
 
     if 'style="border: none; width: 50%;"' in html:
         print("SUCCESS: OC header columns have width 50% and no border.")

@@ -173,9 +173,13 @@ class ASMT10Generator:
                     match = re.search(r"<body[^>]*>(.*?)</body>", lh_full, re.DOTALL | re.IGNORECASE)
                     if match:
                         lh_content = match.group(1)
-                        # Remove placeholders if they exist in the letterhead template
+                        # Remove placeholders and strip problematic internal margins
                         lh_content = lh_content.replace('<div id="form-header-placeholder"></div>', '')
                         lh_content = lh_content.replace('<div id="content-placeholder"></div>', '')
+                        # Strip hardcoded margins and paddings that interfere with global layout
+                        lh_content = lh_content.replace('margin: 10px auto;', 'margin: 0 auto;')
+                        lh_content = lh_content.replace('margin-bottom: 20px;', 'margin-bottom: 5px;')
+                        lh_content = lh_content.replace('padding-top: 0px;', 'padding-top: 0;')
                     else:
                         lh_content = lh_full
         except Exception as e:
@@ -278,12 +282,16 @@ class ASMT10Generator:
                 <div class="form-rule">[See rule 99(1)]</div>
             </div>
             
-            <div class="recipient">
-                To,<br>
-                <p><strong>{legal_name}</strong></p>
-                <p>GSTIN: {gstin}</p>
-                <p>{addr_clean}</p>
-            </div>
+            <table class="recipient" style="width: 65%; border: none;">
+                <tr style="border: none;">
+                    <td style="border: none; text-align: left; padding: 0;">
+                        To,<br>
+                        <strong>{legal_name}</strong><br>
+                        GSTIN: {gstin}<br>
+                        {addr_clean}
+                    </td>
+                </tr>
+            </table>
 
             <div class="tax-period">
                 Tax period: {data.get('financial_year', 'N/A')}
