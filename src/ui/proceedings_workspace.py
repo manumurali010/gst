@@ -9,6 +9,7 @@ from src.ui.collapsible_box import CollapsibleBox
 from src.ui.rich_text_editor import RichTextEditor
 from src.ui.components.modern_card import ModernCard
 from src.ui.issue_card import IssueCard
+from src.ui.components.finalization_panel import FinalizationPanel
 import os
 import json
 from jinja2 import Template, Environment, FileSystemLoader
@@ -116,6 +117,7 @@ class ProceedingsWorkspace(QWidget):
             
             # Auto-load issues when switching to SCN tab
             if action == "scn":
+                self.load_scn_issue_templates()
                 self.load_scn_issues()
             
             # Trigger preview update if needed
@@ -175,47 +177,59 @@ class ProceedingsWorkspace(QWidget):
     def create_summary_tab(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        layout.setContentsMargins(10, 10, 10, 10)
         
-        card = ModernCard("Case Summary")
+        # Use Read-Only Finalization Panel
+        self.summary_panel = FinalizationPanel()
+        self.summary_panel.set_read_only(True)
         
-        self.summary_title = QLabel("Case Summary")
-        self.summary_title.setStyleSheet("font-size: 16px; font-weight: bold;")
-        # card.addWidget(self.summary_title) # Title already in card header
+        # Wrap in Scroll Area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(self.summary_panel)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         
-        self.summary_info = QLabel("Loading...")
-        card.addWidget(self.summary_info)
-        
-        layout.addWidget(card)
-        layout.addStretch()
+        layout.addWidget(scroll)
         return widget
 
     def update_summary_tab(self):
         if not self.proceeding_data:
             return
             
-        legal_name = self.proceeding_data.get('legal_name', 'Unknown')
-        # self.summary_title.setText(f"Case Summary: {legal_name}") # Card title is static for now
+        # Helper to get active issues depending on stage
+        current_issues = []
+        # Try to gather from active tab or DB
+        # Ideally, we want a unified list of issues for the whole case
+        # For now, we will merge SCN issues + DRC issues if available
+        # Or simpler: Just fetch 'Active' issues from DB
         
-        # Format Taxpayer Details
-        tp_details = self.proceeding_data.get('taxpayer_details', {})
-        if isinstance(tp_details, str):
-            import json
-            try: 
-                tp_details = json.loads(tp_details)
-            except: 
-                tp_details = {}
+        db_issues = self.db.get_active_issues()
+        if db_issues:
+            # DB returns list of dicts. 
+            # We need to enrich it with tax breakdowns if they are stored in 'data' json column
+            # For this summary view, we might need to rely on what's persisted.
+            current_issues = db_issues
+        
+        # Determine status doc ref
+        status = self.proceeding_data.get('status', 'Pending')
+        doc_type = "Case Summary"
+        ref_no = "-"
+        
+        if "SCN" in status:
+            doc_type = "Show Cause Notice"
+            ref_no = self.proceeding_data.get('scn_number', '-')
+        elif "DRC" in status:
+            doc_type = "Intimation (DRC-01A)"
+            ref_no = self.proceeding_data.get('oc_number', '-')
             
-        info_text = f"""<b>Case ID:</b> {self.proceeding_data.get('case_id', 'Pending')}<br>
-<b>GSTIN:</b> {self.proceeding_data.get('gstin')}<br>
-<b>Legal Name:</b> {legal_name}<br>
-<b>Trade Name:</b> {self.proceeding_data.get('trade_name', 'N/A')}<br>
-<b>Address:</b> {self.proceeding_data.get('address', 'N/A')}<br>
-<b>Financial Year:</b> {self.proceeding_data.get('financial_year')}<br>
-<b>Section:</b> {self.proceeding_data.get('initiating_section')}<br>
-<b>Form Type:</b> {self.proceeding_data.get('form_type')}<br>
-<b>Status:</b> {self.proceeding_data.get('status')}"""
-        
-        self.summary_info.setText(info_text)
+        self.summary_panel.load_data(
+            proceeding_data=self.proceeding_data,
+            issues_list=current_issues,
+            doc_type=doc_type,
+            doc_no=self.proceeding_data.get('case_id', '-'),
+            doc_date=QDate.currentDate().toString("dd/MM/yyyy"), # Or explicit date if stored
+            ref_no=ref_no
+        )
 
     def create_drc01a_tab(self):
         print("ProceedingsWorkspace: create_drc01a_tab start")
@@ -254,6 +268,7 @@ class ProceedingsWorkspace(QWidget):
         self.oc_date_input = QDateEdit()
         self.oc_date_input.setCalendarPopup(True)
         self.oc_date_input.setDate(QDate.currentDate())
+        self.oc_date_input.setMinimumDate(QDate.currentDate())
         self.oc_date_input.dateChanged.connect(self.trigger_preview)
         ref_layout.addWidget(oc_date_label)
         ref_layout.addWidget(self.oc_date_input)
@@ -508,84 +523,15 @@ class ProceedingsWorkspace(QWidget):
         return main_scroll
 
     def create_drc01a_finalization_panel(self):
-        """Create the Finalization Summary Panel"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(20, 20, 20, 20)
+        """Create the DRC-01A Finalization Summary Panel using reusable component"""
+        self.drc_fin_panel = FinalizationPanel()
         
-        # Header
-        header = QLabel("Confirm Finalization")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; color: #2c3e50; margin-bottom: 20px;")
-        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(header)
+        # Connect Signals
+        self.drc_fin_panel.cancel_btn.clicked.connect(self.hide_drc01a_finalization_panel)
+        self.drc_fin_panel.finalize_btn.clicked.connect(self.confirm_drc01a_finalization)
+        self.drc_fin_panel.preview_btn.clicked.connect(self.generate_pdf) 
         
-        # 1. Summary Card
-        summary_card = ModernCard("Document Summary")
-        
-        # Date of Issue
-        self.fin_date_lbl = QLabel("Date of Issue: -")
-        self.fin_date_lbl.setStyleSheet("font-size: 14px; font-weight: bold;")
-        summary_card.addWidget(self.fin_date_lbl)
-        
-        # Amounts Summary Table
-        self.fin_amounts_table = QTableWidget()
-        self.fin_amounts_table.setColumnCount(4)
-        self.fin_amounts_table.setHorizontalHeaderLabels(["Act", "Tax", "Interest", "Penalty"])
-        self.fin_amounts_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.fin_amounts_table.setMaximumHeight(150)
-        summary_card.addWidget(self.fin_amounts_table)
-        
-        # Sections
-        self.fin_sections_lbl = QLabel("Sections Applied: -")
-        summary_card.addWidget(self.fin_sections_lbl)
-        
-        layout.addWidget(summary_card)
-        
-        # 2. Impact Card
-        impact_card = ModernCard("System Updates")
-        impact_lbl = QLabel("Proceeding with finalization will perform the following actions:")
-        impact_lbl.setStyleSheet("font-weight: bold; margin-bottom: 5px;")
-        impact_card.addWidget(impact_lbl)
-        
-        actions_list = [
-            "✅ Update Proceeding Status to 'DRC-01A Issued'",
-            "✅ Create Entry in Review / Order Register",
-            "✅ Generate Permanent Document Number",
-            "✅ Lock this Draft"
-        ]
-        
-        for action in actions_list:
-            lbl = QLabel(action)
-            lbl.setStyleSheet("margin-left: 20px; color: #27ae60;")
-            impact_card.addWidget(lbl)
-            
-        layout.addWidget(impact_card)
-        
-        # 3. Remarks
-        remarks_card = ModernCard("Remarks (Optional)")
-        self.fin_remarks = QTextEdit()
-        self.fin_remarks.setPlaceholderText("Enter any internal remarks for this finalization...")
-        self.fin_remarks.setMaximumHeight(80)
-        remarks_card.addWidget(self.fin_remarks)
-        layout.addWidget(remarks_card)
-        
-        # Buttons
-        btn_layout = QHBoxLayout()
-        
-        back_btn = QPushButton("← Back to Edit")
-        back_btn.setStyleSheet("padding: 10px;")
-        back_btn.clicked.connect(self.hide_drc01a_finalization_panel)
-        btn_layout.addWidget(back_btn)
-        
-        confirm_btn = QPushButton("Confirm & Finalize")
-        confirm_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 10px 20px; font-weight: bold; font-size: 14px;")
-        confirm_btn.clicked.connect(self.confirm_drc01a_finalization)
-        btn_layout.addWidget(confirm_btn)
-        
-        layout.addLayout(btn_layout)
-        layout.addStretch()
-        
-        return widget
+        return self.drc_fin_panel
 
     def show_drc01a_finalization_panel(self):
         """Review and Show Finalization Panel"""
@@ -595,30 +541,17 @@ class ProceedingsWorkspace(QWidget):
             self.oc_number_input.setFocus()
             return
 
-        # 2. Populate Summary Data
-        self.fin_date_lbl.setText(f"Date of Issue: {self.oc_date_input.date().toString('dd-MM-yyyy')}")
+        oc_no = self.oc_number_input.text()
+        oc_date = self.oc_date_input.date().toString('dd-MM-yyyy')
         
-        # Populate Table
-        # Clone data from tax_table logic (simplified)
-        self.fin_amounts_table.setRowCount(0)
-        # Iterate tax table rows
-        for row in range(self.tax_table.rowCount()):
-            act_item = self.tax_table.item(row, 0)
-            if act_item and act_item.text() != "Total":
-                r = self.fin_amounts_table.rowCount()
-                self.fin_amounts_table.insertRow(r)
-                self.fin_amounts_table.setItem(r, 0, QTableWidgetItem(act_item.text()))
-                # Tax, Int, Pen (Cols 3, 4, 5)
-                self.fin_amounts_table.setItem(r, 1, QTableWidgetItem(self.tax_table.item(row, 3).text() if self.tax_table.item(row, 3) else "0"))
-                self.fin_amounts_table.setItem(r, 2, QTableWidgetItem(self.tax_table.item(row, 4).text() if self.tax_table.item(row, 4) else "0"))
-                self.fin_amounts_table.setItem(r, 3, QTableWidgetItem(self.tax_table.item(row, 5).text() if self.tax_table.item(row, 5) else "0"))
-
-        # Sections
-        # Just grab from DB since we selected one? Or parsing the text editor is hard.
-        # Use the combo box selection for now as "Primary Section"
-        sec_data = self.section_combo.currentData()
-        sec_title = sec_data.get('title', 'Unknown') if sec_data else "Manual Entry"
-        self.fin_sections_lbl.setText(f"Primary Section: {sec_title}")
+        self.drc_fin_panel.load_data(
+            proceeding_data=self.proceeding_data,
+            issues_list=self.issue_cards, # Passing rich objects
+            doc_type="DRC-01A",
+            doc_no=oc_no, # For DRC-01A, OC No is the main ref
+            doc_date=oc_date,
+            ref_no="-" # No sep ref for DRC
+        )
 
         # 3. Switch View
         self.drc01a_draft_container.hide()
@@ -634,24 +567,16 @@ class ProceedingsWorkspace(QWidget):
             # 1. Save Document as Final
             self.save_drc01a() # Ensure latest draft is saved
             
-            # Update Document is_final = 1
-            # We need to get the doc_id or update all DRC-01A for this proceeding?
-            # Ideally save_drc01a should handle "final" flag, but let's do an update query via DB manager 
-            # or just rely on status update
-            
             # 2. Update Proceeding Status
             self.db.update_proceeding(self.proceeding_id, {
                 "status": "DRC-01A Issued"
             })
             
-            # 3. Update Register (if needed)
-            # The Save has already updated OC Register? 
-            # We implemented add_oc_entry in DB manager but are we calling it?
-            # Let's ensure OC entry is created now if not before
+            # 3. Update Register
             oc_data = {
                 'OC_Number': self.oc_number_input.text(),
                 'OC_Date': self.oc_date_input.date().toString("yyyy-MM-dd"),
-                'OC_Content': f"DRC-01A Issued. {self.fin_remarks.toPlainText()}",
+                'OC_Content': f"DRC-01A Issued. {self.drc_fin_panel.fin_scn_remarks.toPlainText()}",
                 'OC_To': self.proceeding_data.get('legal_name', '')
             }
             self.db.add_oc_entry(self.proceeding_data['case_id'], oc_data)
@@ -835,6 +760,12 @@ class ProceedingsWorkspace(QWidget):
         ref_card = ModernCard("Reference Details (SCN)", collapsible=True)
         ref_layout = QHBoxLayout()
         
+        # SCN No
+        scn_no_label = QLabel("SCN No:")
+        self.scn_no_input = QLineEdit()
+        self.scn_no_input.setPlaceholderText("Enter SCN Number")
+        self.scn_no_input.textChanged.connect(self.trigger_preview)
+        
         # SCN OC No
         oc_label = QLabel("SCN OC No:")
         self.scn_oc_input = QLineEdit()
@@ -846,8 +777,12 @@ class ProceedingsWorkspace(QWidget):
         self.scn_date_input = QDateEdit()
         self.scn_date_input.setCalendarPopup(True)
         self.scn_date_input.setDate(QDate.currentDate())
+        self.scn_date_input.setMinimumDate(QDate.currentDate())
         self.scn_date_input.dateChanged.connect(self.trigger_preview)
         
+        ref_layout.addWidget(scn_no_label)
+        ref_layout.addWidget(self.scn_no_input)
+        ref_layout.addSpacing(20)
         ref_layout.addWidget(oc_label)
         ref_layout.addWidget(self.scn_oc_input)
         ref_layout.addSpacing(20)
@@ -899,6 +834,33 @@ class ProceedingsWorkspace(QWidget):
         draft_layout.addWidget(scn_issues_card)
         print("ProceedingsWorkspace: scn_issues_card added")
 
+        # Demand & Contraventions Card
+        print("ProceedingsWorkspace: creating demand_card")
+        self.demand_container_card = ModernCard("Demand & Contraventions", collapsible=True)
+        
+        # Regenerate Button
+        demand_header_layout = QHBoxLayout()
+        demand_header_layout.addStretch()
+        regenerate_btn = QPushButton("Sync with Issues")
+        regenerate_btn.setToolTip("Auto-generate demand text tiles based on added issues")
+        regenerate_btn.setStyleSheet("padding: 5px; font-size: 11px; background-color: #3498db; color: white; border-radius: 4px;")
+        regenerate_btn.clicked.connect(self.sync_demand_tiles)
+        demand_header_layout.addWidget(regenerate_btn)
+        
+        self.demand_container_card.addLayout(demand_header_layout)
+
+        # Container for Demand Tiles
+        self.demand_tiles_widget = QWidget()
+        self.demand_tiles_layout = QVBoxLayout(self.demand_tiles_widget)
+        self.demand_tiles_layout.setSpacing(10)
+        self.demand_tiles_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.demand_tiles = [] # List of tuples: (issue_id, modern_card, editor)
+        
+        self.demand_container_card.addWidget(self.demand_tiles_widget)
+        draft_layout.addWidget(self.demand_container_card)
+        print("ProceedingsWorkspace: demand_card added")
+
         print("ProceedingsWorkspace: creating reliance_card")
         rel_card = ModernCard("Reliance Placed on Documents", collapsible=True)
         self.reliance_editor = RichTextEditor("List documents here (e.g., 1. INS-01 dated...)")
@@ -936,10 +898,19 @@ class ProceedingsWorkspace(QWidget):
         docx_btn.clicked.connect(self.generate_docx)
         buttons_layout.addWidget(docx_btn)
         
+        finalize_btn = QPushButton("Finalize SCN")
+        finalize_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
+        finalize_btn.clicked.connect(self.show_scn_finalization_panel)
+        buttons_layout.addWidget(finalize_btn)
+        
         buttons_layout.addStretch()
         draft_layout.addLayout(buttons_layout)
         
         draft_layout.addStretch()
+        
+        # --- FINALIZATION CONTAINER (Initially Hidden) ---
+        self.scn_finalization_container = self.create_scn_finalization_panel()
+        self.scn_finalization_container.hide()
         
         # --- VIEW CONTAINER (Initially Hidden) ---
         self.scn_view_container = QWidget()
@@ -951,7 +922,7 @@ class ProceedingsWorkspace(QWidget):
         view_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         view_layout.addWidget(view_title)
         
-        view_msg = QLabel("A Show Cause Notice has already been generated for this case.")
+        view_msg = QLabel("A Show Cause Notice has already been generated and issued for this case.")
         view_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         view_layout.addWidget(view_msg)
         
@@ -969,14 +940,27 @@ class ProceedingsWorkspace(QWidget):
         
         view_layout.addStretch()
 
-        # Add both containers to main layout
+        # Add all containers to main layout
         layout.addWidget(self.scn_draft_container)
+        layout.addWidget(self.scn_finalization_container)
         layout.addWidget(self.scn_view_container)
         
-        layout.addStretch()
+        # Wrap in a centered container to constrain width
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        container_layout.addWidget(widget)
+        
+        # Set max width for the form content
+        widget.setMaximumWidth(850) 
+        
+        # Wrap in Scroll Area
+        main_scroll = QScrollArea()
+        main_scroll.setWidgetResizable(True)
+        main_scroll.setWidget(container)
+        
         print("ProceedingsWorkspace: create_scn_tab done")
-        return widget
-        return widget
+        return main_scroll
 
     def create_ph_intimation_tab(self):
         print("ProceedingsWorkspace: create_ph_intimation_tab start")
@@ -1020,9 +1004,22 @@ class ProceedingsWorkspace(QWidget):
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
         
-        layout.addStretch()
+        # Wrap in a centered container to constrain width
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        container_layout.addWidget(widget)
+        
+        # Set max width for the form content
+        widget.setMaximumWidth(850) 
+        
+        # Wrap in Scroll Area
+        main_scroll = QScrollArea()
+        main_scroll.setWidgetResizable(True)
+        main_scroll.setWidget(container)
+        
         print("ProceedingsWorkspace: create_ph_intimation_tab done")
-        return widget
+        return main_scroll
 
     def create_order_tab(self):
         print("ProceedingsWorkspace: create_order_tab start")
@@ -1056,9 +1053,97 @@ class ProceedingsWorkspace(QWidget):
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
         
-        layout.addStretch()
+        # Wrap in a centered container to constrain width
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        container_layout.addWidget(widget)
+        
+        # Set max width for the form content
+        widget.setMaximumWidth(850) 
+        
+        # Wrap in Scroll Area
+        main_scroll = QScrollArea()
+        main_scroll.setWidgetResizable(True)
+        main_scroll.setWidget(container)
+        
         print("ProceedingsWorkspace: create_order_tab done")
-        return widget
+        return main_scroll
+
+    
+    def create_scn_finalization_panel(self):
+        """Create the SCN Finalization Summary Panel using reusable component"""
+        self.scn_fin_panel = FinalizationPanel()
+        
+        # Connect Signals
+        self.scn_fin_panel.cancel_btn.clicked.connect(self.hide_scn_finalization_panel)
+        self.scn_fin_panel.finalize_btn.clicked.connect(self.confirm_scn_finalization)
+        self.scn_fin_panel.preview_btn.clicked.connect(self.generate_pdf) # Re-use existing PDF gen
+        
+        return self.scn_fin_panel
+
+    def show_scn_finalization_panel(self):
+        """Review and Show SCN Finalization Panel"""
+        # 1. Validate Inputs
+        if not self.scn_no_input.text().strip():
+            QMessageBox.warning(self, "Validation Error", "SCN Number is mandatory for finalization.")
+            self.scn_no_input.setFocus()
+            return
+
+        scn_no = self.scn_no_input.text()
+        scn_date = self.scn_date_input.date().toString('dd-MM-yyyy')
+        oc_no = self.scn_oc_input.text()
+
+        # 2. Prepare Data for Panel
+        # We need to pass the issue cards directly because they have the 'get_tax_breakdown' method
+        # AND we need to pass the tax payer / case info
+        
+        # Enrich proceeding data with taxpayer info if missing (it might be in parent/dashboard logic)
+        # But self.proceeding_data usually has it from load.
+        
+        self.scn_fin_panel.load_data(
+            proceeding_data=self.proceeding_data,
+            issues_list=self.scn_issue_cards, # Passing rich objects
+            doc_type="SCN",
+            doc_no=scn_no,
+            doc_date=scn_date,
+            ref_no=oc_no
+        )
+
+        # 3. Switch View
+        self.scn_draft_container.hide()
+        self.scn_finalization_container.show()
+        
+    def hide_scn_finalization_panel(self):
+        self.scn_finalization_container.hide()
+        self.scn_draft_container.show()
+        
+    def confirm_scn_finalization(self):
+        """Commit SCN Finalization"""
+        try:
+            # 1. Save Document as Final
+            self.save_document("SCN") # Ensure latest draft is saved
+            
+            # 2. Update Proceeding Status
+            self.db.update_proceeding(self.proceeding_id, {
+                "status": "SCN Issued"
+            })
+            
+            # 3. Update Register (SCN Register entry - implicitly done via status or explicit call?)
+            # Assuming we need to add to SCN register explicitly like OC
+            # Need to check DB manager for add_scn_entry or similar field
+            # For now, relying on Status Update which is key. 
+            
+            QMessageBox.information(self, "Success", "Show Cause Notice Finalized Successfully.")
+            
+            # 4. Switch to View Mode
+            self.scn_finalization_container.hide()
+            self.scn_view_container.show()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Finalization failed: {e}")
+            import traceback
+            traceback.print_exc()
 
     def load_scn_issue_templates(self):
         """Load issue templates from DB for SCN tab"""
@@ -1074,6 +1159,60 @@ class ProceedingsWorkspace(QWidget):
         except Exception as e:
             print(f"Error loading SCN issue templates: {e}")
 
+    def add_scn_issue_card(self, template, data=None):
+        """Helper to create and add SCN issue card with ModernCard wrapper"""
+        # Create ModernCard container
+        modern_card = ModernCard(title=f"{template['issue_name']}", collapsible=True)
+        
+        # Add Delete Button to Header
+        delete_btn = QPushButton()
+        delete_btn.setIcon(self.style().standardIcon(self.style().StandardPixmap.SP_TrashIcon))
+        delete_btn.setFixedSize(24, 24)
+        delete_btn.setStyleSheet("background: transparent; border: none; color: #e74c3c;")
+        delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        # Create IssueCard content
+        card = IssueCard(template, parent=self, mode="SCN", content_key="scn_content")
+        
+        # Load data if provided
+        if data:
+            card.load_data(data)
+            
+        modern_card.addWidget(card)
+        
+        # Connect signals
+        delete_btn.clicked.connect(lambda: self.remove_scn_issue_card(modern_card, card))
+        modern_card.header_layout.addWidget(delete_btn)
+        
+        def update_header_summary(values):
+            # Update Preview
+            self.trigger_preview()
+            
+            # Update Header Badge
+            total_tax = 0
+            if isinstance(values, dict):
+                 # Sum up tax components
+                 for key in ['CGST', 'SGST', 'IGST', 'Cess']:
+                     if key in values:
+                         total_tax += values[key].get('tax', 0)
+            
+            # Update title with badge if tax > 0
+            badge_text = f" <span style='color: #27ae60; font-size: 12px; background: #e8f8f5; padding: 2px 8px; border-radius: 10px;'>Tax: ₹{total_tax:,.2f}</span>"
+            modern_card.title_label.setText(f"{template['issue_name']} {badge_text}")
+
+        card.valuesChanged.connect(update_header_summary)
+        
+        # Initial header update if data loaded
+        if data:
+            # We need to trigger this initially to show the badge
+            # But get_tax_breakdown requires the table to be populated which happens in initialization
+            # Since card is initialized, we can call it.
+            update_header_summary(card.get_tax_breakdown())
+
+        self.scn_issues_layout.addWidget(modern_card)
+        self.scn_issue_cards.append(card)
+        return card
+
     def insert_scn_issue(self):
         """Insert selected issue template into SCN tab"""
         issue_id = self.scn_issue_combo.currentData()
@@ -1084,18 +1223,12 @@ class ProceedingsWorkspace(QWidget):
         if not template:
             return
             
-        card = IssueCard(template)
-        # Connect signals if needed (e.g., for preview updates)
-        card.valuesChanged.connect(lambda: self.trigger_preview())
-        card.removeClicked.connect(lambda: self.remove_scn_issue_card(card))
-        
-        self.scn_issues_layout.addWidget(card)
-        self.scn_issue_cards.append(card)
+        self.add_scn_issue_card(template)
         self.trigger_preview()
 
-    def remove_scn_issue_card(self, card):
-        self.scn_issues_layout.removeWidget(card)
-        card.deleteLater()
+    def remove_scn_issue_card(self, modern_card, card):
+        self.scn_issues_layout.removeWidget(modern_card)
+        modern_card.deleteLater()
         if card in self.scn_issue_cards:
             self.scn_issue_cards.remove(card)
         self.trigger_preview()
@@ -1103,15 +1236,24 @@ class ProceedingsWorkspace(QWidget):
     def load_scn_issues(self):
         """Auto-load issues from DB into SCN tab"""
         try:
-            # Clear existing cards
-            for card in self.scn_issue_cards:
-                card.setParent(None)
-                self.scn_issues_layout.removeWidget(card)
-                card.deleteLater()
+            # Clear existing cards properly
+            while self.scn_issues_layout.count():
+                item = self.scn_issues_layout.takeAt(0)
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
             self.scn_issue_cards = []
             
-            # Fetch issues from DB (Shared with DRC-01A)
-            saved_issues = self.db.get_case_issues(self.proceeding_id)
+            # Fetch issues from DB (Specific to SCN)
+            # 1. Try to load SCN stage issues
+            saved_issues = self.db.get_case_issues(self.proceeding_id, stage='SCN')
+            
+            # 2. If no SCN issues text, Import from DRC-01A (Clone)
+            if not saved_issues:
+                 print("SCN Issues empty. Cloning from DRC-01A...")
+                 success = self.db.clone_issues_for_scn(self.proceeding_id)
+                 if success:
+                     saved_issues = self.db.get_case_issues(self.proceeding_id, stage='SCN')
             
             if saved_issues:
                 all_templates = self.db.get_issue_templates()
@@ -1125,15 +1267,98 @@ class ProceedingsWorkspace(QWidget):
                     if not template:
                         template = {'issue_id': issue_id, 'issue_name': 'Unknown Issue', 'variables': {}}
                         
-                    card = IssueCard(template, parent=self)
-                    card.load_data(data)
-                    
-                    self.scn_issues_layout.addWidget(card)
-                    self.scn_issue_cards.append(card)
+                    self.add_scn_issue_card(template, data)
             
             self.trigger_preview()
         except Exception as e:
             print(f"Error loading SCN issues: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def sync_demand_tiles(self):
+        """Sync Demand Tiles with Issues"""
+        try:
+            # Clear existing tiles
+            while self.demand_tiles_layout.count():
+                item = self.demand_tiles_layout.takeAt(0)
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+            self.demand_tiles = []
+            
+            # Iterate through SCN issue cards
+            tax_numerals = []
+            
+            for i, card in enumerate(self.scn_issue_cards, 1):
+                data = card.get_data()
+                template = card.template
+                issue_id = template.get('issue_id', 'unknown')
+                issue_name = template.get('issue_name', f'Issue {i}')
+                
+                # Generate Tax Text (Clause i/ii/iii)
+                text = self.db.generate_single_issue_demand_text(data, i)
+                # Extract numeral (naive but sufficient for now)
+                roman = self.db.to_roman(i).lower()
+                tax_numerals.append(f"({roman})")
+                
+                # Create Tile
+                tile = ModernCard(f"And whereas - {issue_name} (Clause {roman})", collapsible=True)
+                
+                # Editor
+                editor = RichTextEditor()
+                formatted_text = text.replace('\n', '<br>')
+                editor.setHtml(formatted_text)
+                editor.setMinimumHeight(150)
+                editor.textChanged.connect(self.trigger_preview)
+                
+                tile.addWidget(editor)
+                self.demand_tiles_layout.addWidget(tile)
+                
+                self.demand_tiles.append({
+                    'issue_id': issue_id,
+                    'type': 'TAX',
+                    'card': tile,
+                    'editor': editor
+                })
+            
+            # Create Consolidated Interest Tile
+            if tax_numerals:
+                refs = ", ".join(tax_numerals[:-1]) + " and " + tax_numerals[-1] if len(tax_numerals) > 1 else tax_numerals[0]
+                interest_roman = self.db.to_roman(len(self.scn_issue_cards) + 1).lower()
+                
+                int_text = f"{interest_roman}. Interest at an appropriate rate under Section 50 of the CGST Act 2017 on the amount demanded at Para No. {refs} as mentioned above should not be demanded and recovered from them under Section 73(1) of the CGST Act 2017 and corresponding Section under Kerala SGST Act, 2017, read with Section 20 of the IGST Act, 2017;"
+                
+                int_tile = ModernCard(f"Interest Demand (Clause {interest_roman})", collapsible=True)
+                int_editor = RichTextEditor()
+                int_editor.setHtml(int_text)
+                int_editor.setMinimumHeight(120)
+                int_editor.textChanged.connect(self.trigger_preview)
+                int_tile.addWidget(int_editor)
+                self.demand_tiles_layout.addWidget(int_tile)
+                self.demand_tiles.append({'issue_id': 'INTEREST_GLOBAL', 'type': 'INTEREST', 'card': int_tile, 'editor': int_editor})
+
+                # Create Consolidated Penalty Tile
+                pen_roman = self.db.to_roman(len(self.scn_issue_cards) + 2).lower()
+                pen_text = f"{pen_roman}. Penalty should not be imposed on them under the provision of Section 73 (1) of CGST Act 2017 read with Section 122 (2) (a) of CGST Act, 2017 and corresponding section under the Kerala SGST Act, 2017 read with section 20 of the IGST Act, 2017, for the contraventions referred hereinabove."
+                
+                pen_tile = ModernCard(f"Penalty Demand (Clause {pen_roman})", collapsible=True)
+                pen_editor = RichTextEditor()
+                pen_editor.setHtml(pen_text)
+                pen_editor.setMinimumHeight(120)
+                pen_editor.textChanged.connect(self.trigger_preview)
+                pen_tile.addWidget(pen_editor)
+                self.demand_tiles_layout.addWidget(pen_tile)
+                self.demand_tiles.append({'issue_id': 'PENALTY_GLOBAL', 'type': 'PENALTY', 'card': pen_tile, 'editor': pen_editor})
+                
+            self.trigger_preview()
+            
+        except Exception as e:
+            print(f"Error syncing demand tiles: {e}")
+            import traceback
+            traceback.print_exc()
+                
+
+            QMessageBox.warning(self, "Error", f"Failed to generate demand text: {e}")
 
     def save_document(self, doc_type):
         if doc_type == "SCN":
@@ -1162,15 +1387,32 @@ class ProceedingsWorkspace(QWidget):
                 self.db.save_document(doc_data)
                 
                 # 3. Save Structured Draft Data to case_issues table
-                # This ensures SCN issues are saved and shared with DRC-01A
-                self.db.save_case_issues(self.proceeding_id, issues_list)
+                # This ensures SCN issues are saved separately from DRC-01A
+                self.db.save_case_issues(self.proceeding_id, issues_list, stage='SCN')
                 
                 # 4. Save Metadata
+                # Aggregate Demand Text from Tiles
+                full_demand_text = ""
+                demand_tiles_data = []
+                
+                if hasattr(self, 'demand_tiles') and self.demand_tiles:
+                    for tile in self.demand_tiles:
+                        editor = tile['editor']
+                        issue_id = tile['issue_id']
+                        content = editor.toHtml()
+                        full_demand_text += content + "<br><br>"
+                        demand_tiles_data.append({'issue_id': issue_id, 'content': content})
+                else:
+                    # Fallback if no tiles (shouldn't happen with new UI)
+                     full_demand_text = "<p>No demand details generated.</p>"
+
                 metadata = {
                     "scn_oc_number": self.scn_oc_input.text(),
                     "scn_date": self.scn_date_input.date().toString("yyyy-MM-dd"),
                     "reliance_documents": self.reliance_editor.toHtml(),
-                    "copy_submitted_to": self.copy_to_editor.toHtml()
+                    "copy_submitted_to": self.copy_to_editor.toHtml(),
+                    "demand_text": full_demand_text,
+                    "demand_tiles_data": demand_tiles_data
                 }
                 
                 # Update additional_details
@@ -1535,9 +1777,9 @@ class ProceedingsWorkspace(QWidget):
             fy = data.get('financial_year', '') or ''
             data['current_financial_year'] = fy
             
-            # OC No (SCN Specific)
+            # OC No & SCN No (SCN Specific)
             data['oc_no'] = self.scn_oc_input.text() or "____"
-            data['scn_no'] = "____" # Placeholder or auto-generated
+            data['scn_no'] = self.scn_no_input.text() or "____"
             data['initiating_section'] = data.get('initiating_section', '') or "____"
             
             # Taxpayer Details (Already in data, but ensure keys match template)
@@ -1562,7 +1804,7 @@ class ProceedingsWorkspace(QWidget):
             data['jurisdiction'] = "Paravur Range"
             
             # Issues & Demands
-            # Issues & Demands
+            # 2. Issues Content
             issues_html = ""
             demand_html = ""
             
@@ -1570,49 +1812,83 @@ class ProceedingsWorkspace(QWidget):
             igst_total = 0
             cgst_total = 0
             sgst_total = 0
-            
-            # Generate Issues HTML (Same as DRC-01A but for SCN body)
-            # Generate Issues HTML (Same as DRC-01A but for SCN body)
-            # Always fetch from DB for consistency ("Source of Truth")
-            saved_issues = self.db.get_case_issues(self.proceeding_id)
-            
-            # Load templates for titles if needed, but we can rely on saved data if we stored titles?
-            # Actually, our new schema stores 'issue_id' and 'data_json'.
-            # We need to look up the title from the template ID or store it in data_json.
-            # Let's load templates to be safe.
-            # Load templates using unified method
-            print("DEBUG: Loading issue templates...")
-            all_templates = self.db.get_issue_templates()
-            print(f"DEBUG: Loaded {len(all_templates)} templates.")
-            template_map = {t['issue_id']: t for t in all_templates if isinstance(t, dict) and 'issue_id' in t}
 
-            if saved_issues:
-                print(f"DEBUG: Found {len(saved_issues)} saved issues.")
-                for i, issue_record in enumerate(saved_issues):
-                    issue_id = issue_record['issue_id']
-                    issue_data = issue_record['data']
+            # Start numbering from Para 3 (Para 1=Intro, Para 2=References)
+            current_para_num = 3
+
+            if self.scn_issue_cards:
+                print(f"DEBUG: Rendering from {len(self.scn_issue_cards)} active cards cards.")
+                # FIX: Start enumerate from 1
+                for i, card in enumerate(self.scn_issue_cards, 1):
                     
-                    template = template_map.get(issue_id, {})
-                    title = template.get('issue_name', 'Issue')
+                    # --- Main Paragraph (e.g., "3. Issue No. 1: Title") ---
+                    title = card.template.get('issue_name', 'Issue')
                     
-                    # Issue Description
-                    issues_html += f"<h3>Issue {i+1}: {title}</h3>"
-                    issues_html += issue_data.get('content', '')
+                    # We use a table for alignment to mimic the "flex" look since QTextBrowser supports tables well
+                    issues_html += f"""
+                    <table style="width: 100%; margin-bottom: 10px; border: none;">
+                        <tr style="border: none;">
+                            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">{current_para_num}.</td>
+                            <td style="vertical-align: top; border: none; font-weight: bold;">Issue No. {i}: {title}</td>
+                        </tr>
+                    </table>
+                    """
                     
-                    # Generate Table HTML dynamically
-                    try:
-                        table_html = IssueCard.generate_table_html(template, issue_data.get('variables', {}))
-                        issues_html += table_html
-                    except Exception as e:
-                        print(f"Error generating table for issue {issue_id}: {e}")
+                    # --- Sub Paragraphs (e.g., "3.1 Content...") ---
+                    sub_para_count = 1
+                    
+                    raw_html = card.generate_html()
+                    parts = raw_html.split('<div style="margin-bottom: 20px;')
+                    
+                    editor_part = parts[0]
+                    table_part = '<div style="margin-bottom: 20px;' + parts[1] if len(parts) > 1 else ""
+                    
+                    # Regex split for paragraphs
+                    import re
+                    editor_part = re.sub(r'<p>\s*&nbsp;\s*</p>', '', editor_part)
+                    editor_part = re.sub(r'<p>\s*</p>', '', editor_part)
+                    paras = re.findall(r'<p.*?>(.*?)</p>', editor_part, re.DOTALL)
+                    
+                    # Fallback for raw text
+                    if not paras and editor_part.strip():
+                        paras = [editor_part]
                         
-                    issues_html += "<br><hr><br>"
+                    for p_content in paras:
+                        if p_content.strip():
+                            num_str = f"{current_para_num}.{sub_para_count}"
+                            issues_html += f"""
+                            <table style="width: 100%; margin-bottom: 10px; border: none;">
+                                <tr style="border: none;">
+                                    <td style="width: 50px; vertical-align: top; border: none; padding-left: 15px; font-weight: bold;">{num_str}</td>
+                                    <td style="vertical-align: top; border: none;">{p_content}</td>
+                                </tr>
+                            </table>
+                            """
+                            sub_para_count += 1
                     
-                    # Demand Summary
-                    demand_html += f"<li>Demand for {title}...</li>"
+                    # Table as Sub-Para
+                    if table_part:
+                        num_str = f"{current_para_num}.{sub_para_count}"
+                        issues_html += f"""
+                        <div style="display: flex; margin-bottom: 10px;">
+                            <table style="width: 100%; border: none;">
+                                <tr style="border: none;">
+                                    <td style="width: 50px; vertical-align: top; border: none; padding-left: 15px; font-weight: bold;">{num_str}</td>
+                                    <td style="vertical-align: top; border: none;">{table_part}</td>
+                                </tr>
+                            </table>
+                        </div>
+                        """
+                        sub_para_count += 1
+                        
+                    current_para_num += 1
+                    
+                    # Demand Summary Calculations
+                    # demand_html += f"<li>Demand for {title}...</li>"
                     
                     # Totals
-                    breakdown = issue_data.get('tax_breakdown', {})
+                    card_data = card.get_data()
+                    breakdown = card_data.get('tax_breakdown', {})
                     for act, vals in breakdown.items():
                         tax = vals.get('tax', 0)
                         total_tax += tax
@@ -1620,11 +1896,46 @@ class ProceedingsWorkspace(QWidget):
                         elif act == 'CGST': cgst_total += tax
                         elif act == 'SGST': sgst_total += tax
             else:
-                 issues_html = "<p>No issues drafted yet.</p>"
+                issues_html = "<p>No issues selected.</p>"
+
+            # Pass the next available para number to the template for subsequent sections
+            data['next_para_num'] = current_para_num
+            
+            # Explicitly calculate subsequent paragraph numbers
+            data['para_demand'] = current_para_num
+            data['para_payment'] = current_para_num + 1
+            data['para_evidence'] = current_para_num + 2  # Was "As per Section 29..." merged? No, separate.
+            # Wait, "As per Section 29" was Para 6 in template, "With regard to..." was Para 5.
+            # Let's map them exactly to the template structure:
+            # Para N: Demand
+            # Para N+1: "With regard to..." (Payment/Penalty waiver)
+            # Para N+2: "As per Section 29..." (Cancellation liability)
+            # Para N+3: Hearing / Evidence
+            # Para N+4: Ex-parte warning
+            
+            data['para_waiver'] = current_para_num + 1
+            data['para_cancellation'] = current_para_num + 2
+            data['para_hearing'] = current_para_num + 3
+            data['para_exparte'] = current_para_num + 4
+            
+            # Additional clauses usually present in SCN
+            data['para_prejudice'] = current_para_num + 5
+            data['para_amendment'] = current_para_num + 6
+            data['para_reliance'] = current_para_num + 7
             
             data['issues_content'] = issues_html
-            data['issues_templates'] = issues_html # Keep for backward compat if needed
-            data['issue_template_demand'] = demand_html
+            data['issues_templates'] = issues_html
+            
+            # Demand Text (Loaded from Editor)
+            # Demand Text (Loaded from Editor or Tiles)
+            if hasattr(self, 'demand_tiles') and self.demand_tiles:
+                 full_text = ""
+                 for tile in self.demand_tiles:
+                     full_text += tile['editor'].toHtml() + "<br><br>"
+                 data['demand_text'] = full_text
+            else:
+                 # Fallback (though editor removed)
+                 data['demand_text'] = "<p>No demand details generated.</p>"
             
             # Generate Tax Table HTML (Reuse DRC-01A table logic)
             data['tax_table'] = self.generate_tax_table_html()
@@ -1754,7 +2065,7 @@ class ProceedingsWorkspace(QWidget):
         self.db.save_document(doc_data)
         
         # 3. Save Structured Draft Data to case_issues table
-        self.db.save_case_issues(self.proceeding_id, issues_list)
+        self.db.save_case_issues(self.proceeding_id, issues_list, stage='DRC-01A')
         
         # 4. Save Metadata
         self.save_drc01a_metadata()
@@ -2153,8 +2464,8 @@ class ProceedingsWorkspace(QWidget):
             # Check for structured data in proceedings table
             add_details = self.proceeding_data.get('additional_details', {})
             # 1. Restore Issues from case_issues table
-            saved_issues = self.db.get_case_issues(self.proceeding_id)
-            
+            saved_issues = self.db.get_case_issues(self.proceeding_id, stage='DRC-01A')
+        
             # Clear existing cards first
             for card in self.issue_cards:
                 card.setParent(None)
@@ -2207,6 +2518,64 @@ class ProceedingsWorkspace(QWidget):
                 if 'reply_date' in add_details: 
                     self.reply_date.setDate(QDate.fromString(add_details['reply_date'], "yyyy-MM-dd"))
                 
+                # SCN Metadata
+                if 'scn_oc_number' in add_details: self.scn_oc_input.setText(add_details['scn_oc_number'])
+                if 'scn_date' in add_details: self.scn_date_input.setDate(QDate.fromString(add_details['scn_date'], "yyyy-MM-dd"))
+                if 'reliance_documents' in add_details: self.reliance_editor.setHtml(add_details['reliance_documents'])
+                if 'copy_submitted_to' in add_details: self.copy_to_editor.setHtml(add_details['copy_submitted_to'])
+                
+                # Demand Text
+                # Demand Text / Tiles
+                if 'demand_tiles_data' in add_details:
+                    # Restore from per-issue tiles
+                    tiles_data = add_details['demand_tiles_data']
+                    
+                    # Clear current tiles
+                    while self.demand_tiles_layout.count():
+                        item = self.demand_tiles_layout.takeAt(0)
+                        widget = item.widget()
+                        if widget: widget.deleteLater()
+                    self.demand_tiles = []
+                    
+                    for tile_info in tiles_data:
+                         issue_id = tile_info.get('issue_id')
+                         content = tile_info.get('content')
+                         
+                         title_text = "Demand Clause"
+                         
+                         if issue_id == 'INTEREST_GLOBAL':
+                             title_text = "Interest Demand (Consolidated)"
+                         elif issue_id == 'PENALTY_GLOBAL':
+                             title_text = "Penalty Demand (Consolidated)"
+                         else:
+                             # Try to find issue name from loaded templates/cards
+                             issue_name = "Issue"
+                             for c in self.scn_issue_cards:
+                                 if c.template.get('issue_id') == issue_id:
+                                     issue_name = c.template.get('issue_name')
+                                     break
+                             title_text = f"And whereas - {issue_name}"
+                         
+                         tile = ModernCard(title_text, collapsible=True)
+                         editor = RichTextEditor()
+                         editor.setHtml(content)
+                         editor.setMinimumHeight(120 if 'GLOBAL' in str(issue_id) else 150)
+                         editor.textChanged.connect(self.trigger_preview)
+                         
+                         tile.addWidget(editor)
+                         self.demand_tiles_layout.addWidget(tile)
+                         self.demand_tiles.append({'issue_id': issue_id, 'card': tile, 'editor': editor})
+                
+                elif 'demand_text' in add_details:
+                    # Backward compatibility for single block text
+                    # We can create a generic tile for it
+                    self.sync_demand_tiles() # Reset to default structure first
+                    # Or just load it into a single tile? 
+                    # Prefer syncing new structure as migration
+                else:
+                    # Auto-generate
+                    self.sync_demand_tiles()
+
         except Exception as e:
             print(f"Error restoring draft state: {e}")
             import traceback

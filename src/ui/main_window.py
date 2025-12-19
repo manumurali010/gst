@@ -6,7 +6,7 @@ from src.ui.taxpayers import TaxpayersTab
 from src.ui.adjudication_wizard import AdjudicationWizard
 from src.ui.reports import ReportsTab
 from src.ui.pending_works import PendingWorksTab
-from src.ui.settings_dialog import SettingsDialog
+from src.ui.settings_tab import SettingsTab
 from src.ui.case_register import CaseRegister
 from src.ui.gst_handbook import GSTHandbook
 from src.ui.mail_merge import MailMergeTab
@@ -15,7 +15,7 @@ from src.ui.case_management import CaseManagement
 from src.ui.case_initiation_wizard import CaseInitiationWizard
 from src.ui.proceedings_workspace import ProceedingsWorkspace
 from src.ui.template_management import TemplateManagement
-from src.ui.developer.issue_manager import IssueManager
+from src.ui.developer.developer_console import DeveloperConsole
 from src.ui.components.sidebar import Sidebar
 from src.ui.styles import Styles, Theme
 
@@ -23,7 +23,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("THE GST DESK - Department of Goods & Services Tax")
-        self.setGeometry(100, 100, 1400, 900) # Increased size for sidebar
+        self.setGeometry(100, 100, 1280, 720) # Optimized for standard laptop screens
         
         # Apply Global Stylesheet
         self.setStyleSheet(Styles.get_main_stylesheet())
@@ -76,7 +76,7 @@ class MainWindow(QMainWindow):
         self.gst_handbook_tab = GSTHandbook()
         self.mail_merge_tab = MailMergeTab()
         self.template_management_tab = TemplateManagement(self.go_home)
-        self.issue_manager_tab = IssueManager()
+        self.developer_console_tab = DeveloperConsole()
 
         # Add screens to main stack
         self.stack.addWidget(self.dashboard)       # Index 0
@@ -88,7 +88,16 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.gst_handbook_tab) # Index 6
         self.stack.addWidget(self.mail_merge_tab)   # Index 7
         self.stack.addWidget(self.template_management_tab) # Index 8
-        self.stack.addWidget(self.issue_manager_tab) # Index 9
+        self.stack.addWidget(self.developer_console_tab) # Index 9
+        
+        # Scrutiny Module
+        from src.ui.scrutiny_tab import ScrutinyTab
+        self.scrutiny_tab = ScrutinyTab()
+        self.stack.addWidget(self.scrutiny_tab) # Index 10
+        
+        # Settings Tab
+        self.settings_tab = SettingsTab(self.go_home)
+        self.stack.addWidget(self.settings_tab) # Index 11
         
         # Set initial state
         self.sidebar.set_active_btn(0)
@@ -153,13 +162,4 @@ class MainWindow(QMainWindow):
         self.adjudication_wizard.load_case_data(case_data)
         self.stack.setCurrentIndex(2) # Adjudication Container
         self.adjudication_stack.setCurrentIndex(4) # Wizard
-    
-    def open_settings(self):
-        """Open the settings dialog"""
-        dialog = SettingsDialog(self)
-        result = dialog.exec()
-        
-        # Reload letterhead in wizard if settings were changed
-        if result:
-            self.adjudication_wizard.reload_letterhead()
 

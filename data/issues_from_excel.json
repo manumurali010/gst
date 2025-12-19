@@ -9,6 +9,7 @@
             "issue_name": "GSTR 3B VS GSTR 1",
             "templates": {
                 "brief_facts": "The amount of taxable value & tax declared in GSTR-1 is self-assessed liability as per Sec 59 of CGST Act 2017, read with Rule 59 of CGST Rules, 2017. Accordingly, any tax paid in GSTR-3B/DRC-03 should match with liability declared in GSTR-1. In cases of any difference, the same is liable for recovery under Sec 79 of CGST Act, read with Sec 75(12) of CGST Act 2017.  The discrepancy is tabulated below for your reference and you are requested to give clarification or pay the liability along with applicable interest& Penalty.",
+                "scn": "<p><b>Show Cause Notice Draft</b></p><p>Whereas it appears that there is a discrepancy between GSTR-3B and GSTR-1...</p>",
                 "grounds": "",
                 "legal": "Section 39, Section 59, Rule 61",
                 "conclusion": ""

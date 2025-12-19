@@ -8,6 +8,8 @@
             font-size: 12pt;
             line-height: 1.5;
             margin: 40px;
+            counter-reset: para-counter;
+            /* Initialize counter */
         }
 
         p {
@@ -37,133 +39,218 @@
             padding: 5px;
             vertical-align: top;
         }
-
-        ol {
-            margin-top: 0;
-        }
     </style>
 </head>
 
 <body>
-    <p>&nbsp;</p>
+    <!-- Letterhead -->
+    {{ letter_head | safe }}
 
-    <p><strong>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; {{ legal_name }}, {{ trade_name }}, {{ address }}
-        </strong>(hereinafter referred to as ‘the taxpayer’) is holding GST registration bearing GSTIN:<strong>{{ gstin
-            }} </strong>in the capacity of a ‘registered person’ as envisaged under section 2(94) of the Central Goods
-        and Services Tax Act, 2017 (hereinafter referred to as “the Act”) is a {{ constitution_of_business }} firm with
-        trade name <strong>M/s. {{ trade_name }}. </strong>&nbsp;</p>
+    <table style="border: none; width: 100%; margin-bottom: 20px;">
+        <tbody>
+            <tr style="border: none;">
+                <td style="border: none; text-align: left; width: 50%;">
+                    <strong>OC No:</strong> {{ oc_no }}
+                </td>
+                <td style="border: none; text-align: right; width: 50%;">
+                    <strong>Date:</strong> {{ issue_date }}
+                </td>
+            </tr>
+        </tbody>
+    </table>
 
-    <p>&nbsp;</p>
+    <div style="text-align: center; font-weight: bold; margin-bottom: 20px;">
+        SHOW CAUSE NOTICE No. {{ scn_no }}/{{ current_financial_year }}/GST-{{ designation }}
+    </div>
 
-    <ol start="2">
-        <li>All references in this Notice to a Section of the Central Goods and Services Tax Act, 2017 (CGST Act, 2017)
-            implies reference to the corresponding section of the Kerala State Goods and Services Tax Act, 2017 (KSGST
-            Act, 2017). Similarly, all references to a Rule of the Central Goods and Services Tax Rules, 2017 (CGST
-            Rules, 2017) implies reference to the corresponding Rules of the Kerala State Goods and Services Tax Rules,
-            2017 (KSGST Rules, 2017).</li>
-    </ol>
-
-    <p>&nbsp;</p>
-
-    <!-- Issues and their specific calculation tables -->
-    {{ issues_content | safe }}
-
-    <p>&nbsp;</p>
-
-    <ol start="4">
-        <li><strong>Demand-</strong> Based on the facts of the issue and reference of laws as mentioned above, whereas
-            it appears that <strong>{{ legal_name }}, {{ trade_name }}, {{ address }} </strong>is liable to pay tax
-            amounting to Rs. {{ total_amount }}/- (IGST Rs. {{ igst_total }}/-, CGST Rs. {{ cgst_total }}/- &amp; SGST
-            Rs. {{ sgst_total }}/-) for the contraventions made by them as discussed above, they are hereby directed to
-            Show Cause to <strong>{{ officer_designation }}, {{ jurisdiction }}</strong> as to why:</li>
-    </ol>
-
-    <p>&nbsp;</p>
-
-    <!-- Summary Tax Table -->
-    <div style="margin-left: 40px;">
-        <table style="width: 90%;">
-            <thead>
-                <tr>
-                    <th>Act</th>
-                    <th>Tax Period From</th>
-                    <th>Tax Period To</th>
-                    <th>Tax (₹)</th>
-                    <th>Interest (₹)</th>
-                    <th>Penalty (₹)</th>
-                    <th>Total (₹)</th>
-                </tr>
-            </thead>
-            <tbody>
-                {{ tax_table | safe }}
-            </tbody>
-        </table>
+    <div class="header">
+        FORM GST DRC-01<br>
+        [See rule 142(1)]<br>
+        Show Cause Notice under section {{ section }}
     </div>
 
     <p>&nbsp;</p>
 
-    <ol>
-        {{ issue_template_demand | safe }}
-    </ol>
+    <!-- Para 1 -->
+    <table style="width: 100%; margin-bottom: 10px; border: none;">
+        <tr style="border: none;">
+            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">1.</td>
+            <td style="vertical-align: top; border: none;">
+                <strong>{{ legal_name }}, {{ trade_name }}, {{ address }}
+                </strong>(hereinafter referred to as ‘the taxpayer’) is holding GST registration bearing
+                GSTIN:<strong>{{
+                    gstin
+                    }} </strong>in the capacity of a ‘registered person’ as envisaged under section 2(94) of the Central
+                Goods
+                and Services Tax Act, 2017 (hereinafter referred to as “the Act”) is a {{ constitution_of_business }}
+                firm
+                with
+                trade name <strong>M/s. {{ trade_name }}. </strong>
+            </td>
+        </tr>
+    </table>
+
+    <!-- Para 2 -->
+    <table style="width: 100%; margin-bottom: 10px; border: none;">
+        <tr style="border: none;">
+            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">2.</td>
+            <td style="vertical-align: top; border: none;">
+                All references in this Notice to a Section of the Central Goods and Services Tax Act, 2017 (CGST Act,
+                2017)
+                implies reference to the corresponding section of the Kerala State Goods and Services Tax Act, 2017
+                (KSGST
+                Act, 2017). Similarly, all references to a Rule of the Central Goods and Services Tax Rules, 2017 (CGST
+                Rules, 2017) implies reference to the corresponding Rules of the Kerala State Goods and Services Tax
+                Rules,
+                2017 (KSGST Rules, 2017).
+            </td>
+        </tr>
+    </table>
 
     <p>&nbsp;</p>
 
-    <ol start="5">
-        <li><u>With regard to the above demand, where any person chargeable with tax under sub section (1) or sub
-                section (3) of Section 73 of CGST Act 2017/Kerala SGST Act, 2017 read with Section 20 of the IGST Act,
-                2017 pays the said tax along with interest payable under Section 50 within thirty days of issue of show
-                cause notice, no penalty shall be payable and all proceedings in respect of the said notice shall be
-                deemed to be concluded.</u></li>
-        <li>As per Section 29(3) of the CGST Act 2017/Kerala SGST Act, 2017 read with Section 20 of the IGST Act, 2017,
-            the cancellation of the registration under this Section shall not affect the liability of person to pay tax
-            and other dues under this Act or to discharge any obligation under this Act or the rules made thereunder for
-            any period prior to the date of cancellation whether or not such tax and other dues are determined before or
-            after the date of cancellation.</li>
-    </ol>
+    <!-- Grounds of SCN Header -->
+    <div style="text-align: center; font-weight: bold; margin-bottom: 15px; text-decoration: underline;">
+        GROUNDS OF SCN
+    </div>
+
+    <!-- Issues (Dynamic Numbering) -->
+    {{ issues_content | safe }}
 
     <p>&nbsp;</p>
 
-    <ol start="7">
-        <li><strong> {{ legal_name }}, {{ trade_name }}, {{ address }} </strong>is also directed to produce, at the time
-            of showing cause, all the evidences upon which they intend to rely on in support of their defence. They
-            should also indicate in their written reply as to whether they wish to be heard in person before the case is
-            adjudicated. If no such mention is made in their written reply or if they do not appear before the
-            adjudicating authority when the case is posted for personal hearing, it will be presumed that they do not
-            wish to be heard in person.&nbsp;</li>
-    </ol>
+    <!-- Demand Section (Para X) -->
+    <table style="width: 100%; margin-bottom: 10px; border: none;">
+        <tr style="border: none;">
+            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">{{ next_para_num }}.</td>
+            <td style="vertical-align: top; border: none;">
+                <strong>Demand-</strong> Based on the facts of the issue and reference of laws as mentioned above,
+                whereas
+                it appears that <strong>{{ legal_name }}, {{ trade_name }}, {{ address }} </strong>is liable to pay tax
+                amounting to Rs. {{ total_amount }}/- (IGST Rs. {{ igst_total }}/-, CGST Rs. {{ cgst_total }}/- &amp;
+                SGST
+                Rs. {{ sgst_total }}/-) for the contraventions made by them as discussed above, they are hereby directed
+                to
+                Show Cause to <strong>{{ officer_designation }}, {{ jurisdiction }}</strong> as to why:
+            </td>
+        </tr>
+    </table>
 
     <p>&nbsp;</p>
 
-    <ol start="8">
-        <li>If no cause is shown against the action proposed to be taken <strong>within thirty days (30 days)</strong>
-            from the date of receipt of this notice or if they fail to appear before the adjudicating authority when the
-            case is posted for hearing, the case will be decided ex-parte on its own merits without any further
-            reference.</li>
-    </ol>
+    {{ demand_text | safe }}
 
     <p>&nbsp;</p>
 
-    <ol start="9">
-        <li>This notice is issued without prejudice to any other action that may be taken against them under the
-            provisions of the CGST Act, 2017/Kerala SGST Act, 2017 and IGST Act, 2017 as amended or the Rules made there
-            under or under any other law for the time being in force in India. Further, this notice is issued without
-            prejudice to the right to support it with any material evidence which may be collected at a later date and
-            which may be considered relevant to the proceedings in this matter.</li>
-    </ol>
+    <!-- Post-Demand (Para X+1) -->
+    <table style="width: 100%; margin-bottom: 10px; border: none;">
+        <tr style="border: none;">
+            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">{{ para_waiver }}.</td>
+            <td style="vertical-align: top; border: none;">
+                <u>With regard to the above demand, where any person chargeable with tax under sub section (1) or sub
+                    section (3) of Section 73 of CGST Act 2017/Kerala SGST Act, 2017 read with Section 20 of the IGST
+                    Act,
+                    2017 pays the said tax along with interest payable under Section 50 within thirty days of issue of
+                    show
+                    cause notice, no penalty shall be payable and all proceedings in respect of the said notice shall be
+                    deemed to be concluded.</u>
+            </td>
+        </tr>
+    </table>
+
+    <table style="width: 100%; margin-bottom: 10px; border: none;">
+        <tr style="border: none;">
+            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">{{ para_cancellation }}.</td>
+            <td style="vertical-align: top; border: none;">
+                As per Section 29(3) of the CGST Act 2017/Kerala SGST Act, 2017 read with Section 20 of the IGST Act,
+                2017,
+                the cancellation of the registration under this Section shall not affect the liability of person to pay
+                tax
+                and other dues under this Act or to discharge any obligation under this Act or the rules made thereunder
+                for
+                any period prior to the date of cancellation whether or not such tax and other dues are determined
+                before or
+                after the date of cancellation.
+            </td>
+        </tr>
+    </table>
 
     <p>&nbsp;</p>
 
-    <ol start="10">
-        <li>The Department reserves the right to add, amend, delete or modify any part or portion of this show cause
-            notice, if considered necessary at any point of time before the case is adjudicated and such addition,
-            amendment, deletion or modification shall be deemed to be part and parcel of this notice.</li>
-    </ol>
+    <table style="width: 100%; margin-bottom: 10px; border: none;">
+        <tr style="border: none;">
+            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">{{ para_hearing }}.</td>
+            <td style="vertical-align: top; border: none;">
+                <strong> {{ legal_name }}, {{ trade_name }}, {{ address }} </strong>is also directed to produce, at the
+                time
+                of showing cause, all the evidences upon which they intend to rely on in support of their defence. They
+                should also indicate in their written reply as to whether they wish to be heard in person before the
+                case is
+                adjudicated. If no such mention is made in their written reply or if they do not appear before the
+                adjudicating authority when the case is posted for personal hearing, it will be presumed that they do
+                not
+                wish to be heard in person.
+            </td>
+        </tr>
+    </table>
 
     <p>&nbsp;</p>
 
-    <ol start="11">
-        <li>In this Show Cause Notice, reliance is placed on the following documents:</li>
-    </ol>
+    <table style="width: 100%; margin-bottom: 10px; border: none;">
+        <tr style="border: none;">
+            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">{{ para_exparte }}.</td>
+            <td style="vertical-align: top; border: none;">
+                If no cause is shown against the action proposed to be taken <strong>within thirty days (30
+                    days)</strong>
+                from the date of receipt of this notice or if they fail to appear before the adjudicating authority when
+                the
+                case is posted for hearing, the case will be decided ex-parte on its own merits without any further
+                reference.
+            </td>
+        </tr>
+    </table>
+
+    <p>&nbsp;</p>
+
+    <table style="width: 100%; margin-bottom: 10px; border: none;">
+        <tr style="border: none;">
+            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">{{ para_prejudice }}.</td>
+            <td style="vertical-align: top; border: none;">
+                This notice is issued without prejudice to any other action that may be taken against them under the
+                provisions of the CGST Act, 2017/Kerala SGST Act, 2017 and IGST Act, 2017 as amended or the Rules made
+                there
+                under or under any other law for the time being in force in India. Further, this notice is issued
+                without
+                prejudice to the right to support it with any material evidence which may be collected at a later date
+                and
+                which may be considered relevant to the proceedings in this matter.
+            </td>
+        </tr>
+    </table>
+
+    <p>&nbsp;</p>
+
+    <table style="width: 100%; margin-bottom: 10px; border: none;">
+        <tr style="border: none;">
+            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">{{ para_amendment }}.</td>
+            <td style="vertical-align: top; border: none;">
+                The Department reserves the right to add, amend, delete or modify any part or portion of this show cause
+                notice, if considered necessary at any point of time before the case is adjudicated and such addition,
+                amendment, deletion or modification shall be deemed to be part and parcel of this notice.
+            </td>
+        </tr>
+    </table>
+
+    <p>&nbsp;</p>
+
+    <table style="width: 100%; margin-bottom: 10px; border: none;">
+        <tr style="border: none;">
+            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">{{ para_reliance }}.</td>
+            <td style="vertical-align: top; border: none;">
+                In this Show Cause Notice, reliance is placed on the following documents:
+            </td>
+        </tr>
+    </table>
 
     <table>
         <tbody>

@@ -264,12 +264,12 @@ class GSTHandbook(QWidget):
         
         # Display text with section number
         if section_no:
-            display_text = f"📄 Section {section_no}: {title[:50]}"
+            display_text = f"📄 Section {section_no} - {title[:80]}"
         else:
             # For sections without numbers, still show the title
-            display_text = f"📄 {title[:60]}"
+            display_text = f"📄 {title[:80]}"
         
-        if len(title) > 50:
+        if len(title) > 80:
             display_text += "..."
         
         section_item.setText(0, display_text)
@@ -283,7 +283,7 @@ class GSTHandbook(QWidget):
             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                         padding: 20px; border-radius: 10px; margin-bottom: 20px;">
                 <h2 style="color: white; margin: 0; font-size: 24px;">
-                    {f'Section {section_no}: {title}' if section_no else title}
+                    {f'Section {section_no} - {title}' if section_no else title}
                 </h2>
             </div>
             

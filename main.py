@@ -1,6 +1,17 @@
 import sys
 import os
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt, QCoreApplication
+
+# Fix for WebEngine OpenGL Context/GPU crashes
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --disable-d3d11 --no-sandbox --disable-software-rasterizer --disable-gpu-compositing"
+os.environ["QT_OPENGL"] = "software" # Force Qt to use software rendering
+QCoreApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
+
+try:
+    from PyQt6.QtWebEngineWidgets import QWebEngineView 
+except ImportError:
+    pass
 from src.ui.main_window import MainWindow
 
 def main():

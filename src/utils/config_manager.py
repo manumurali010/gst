@@ -117,3 +117,24 @@ class ConfigManager:
         """Set a specific setting value"""
         self.settings[key] = value
         return self.save_settings()
+
+    def get_letterhead_adjustments(self, filename):
+        """Get visual adjustments for a specific letterhead"""
+        adjustments = self.settings.get('lh_adjustments', {})
+        return adjustments.get(filename, {
+            "width": 100,      # percentage
+            "padding_top": 0,  # pixels
+            "margin_bottom": 20 # pixels
+        })
+
+    def set_letterhead_adjustments(self, filename, width, padding_top, margin_bottom):
+        """Save visual adjustments for a specific letterhead"""
+        if 'lh_adjustments' not in self.settings:
+            self.settings['lh_adjustments'] = {}
+        
+        self.settings['lh_adjustments'][filename] = {
+            "width": width,
+            "padding_top": padding_top,
+            "margin_bottom": margin_bottom
+        }
+        return self.save_settings()

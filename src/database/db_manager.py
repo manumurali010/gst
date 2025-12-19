@@ -12,7 +12,7 @@ class DatabaseManager:
 
     def ensure_files_exist(self):
         if not os.path.exists(TAXPAYERS_FILE):
-            df = pd.DataFrame(columns=["GSTIN", "Legal Name", "Trade Name", "Address", "State"])
+            df = pd.DataFrame(columns=["GSTIN", "Legal Name", "Trade Name", "Address", "State", "Email", "Mobile", "Status", "Constitution"])
             df.to_csv(TAXPAYERS_FILE, index=False)
         
         if not os.path.exists(CASES_FILE):
@@ -65,56 +65,105 @@ class DatabaseManager:
             print(f"Error searching taxpayers: {e}")
             return []
 
-    def import_taxpayers(self, file_path):
+
+    def import_taxpayers_bulk(self, files_map):
+        """
+        Import taxpayers from multiple files (Active, Suspended, Cancelled).
+        files_map: {'Active': path, 'Suspended': path, 'Cancelled': path}
+        """
         try:
-            if file_path.endswith('.csv'):
-                new_df = pd.read_csv(file_path)
-            elif file_path.endswith(('.xls', '.xlsx')):
-                new_df = pd.read_excel(file_path)
-            else:
-                return False, "Unsupported file format"
-
-            # Standardize columns
-            required_cols = ["GSTIN", "Legal Name", "Trade Name", "Address", "State", "Email", "Mobile", "Constitution"]
+            dfs = []
             
-            # Create a mapping dictionary for Excel columns
-            col_map = {
-                'E-mail Address': 'Email',
-                'Mobile No': 'Mobile',
-                'Constitution of </br>Business': 'Constitution',
-                'Constitution of Business': 'Constitution',
-                'Principal Place of Business </br>Address': 'Address',
-                'Principal Place of Business Address': 'Address'
-            }
+            # Helper to normalize columns
+            def normalize_col(name):
+                return str(name).strip().replace('\n', ' ')
+
+            for status, file_path in files_map.items():
+                if not file_path or not os.path.exists(file_path):
+                    continue
+                
+                try:
+                    # Read Excel
+                    df = pd.read_excel(file_path)
+                    
+                    # Normalize Headers
+                    df.columns = [normalize_col(c) for c in df.columns]
+                    
+                    # Map Columns
+                    # Expected: 'GSTIN', 'Trade Name/ Legal Name', 'Address of Principal Place of Business', 
+                    # 'Email Id', 'Mobile No.', 'Constitution of Business'
+                    
+                    rename_map = {
+                        'GSTIN': 'GSTIN',
+                        'Trade Name/ Legal Name': 'Legal Name', # Primary Name
+                        'Address of Principal Place of Business': 'Address',
+                        'Email Id': 'Email',
+                        'Mobile No.': 'Mobile',
+                        'Constitution of Business': 'Constitution'
+                    }
+                    
+                    # Fuzzy match rename (e.g. trailing spaces)
+                    final_rename = {}
+                    for col in df.columns:
+                        for k, v in rename_map.items():
+                            if k in col: # Check if keyword in column name (e.g. "Mobile No. ")
+                                final_rename[col] = v
+                    
+                    df = df.rename(columns=final_rename)
+                    
+                    # Add Status
+                    df['Status'] = status
+                    
+                    # Copy Legal Name to Trade Name if missing
+                    if 'Legal Name' in df.columns:
+                        df['Trade Name'] = df['Legal Name']
+                    
+                    # Ensure all required columns exist
+                    required = ["GSTIN", "Legal Name", "Trade Name", "Address", "State", "Email", "Mobile", "Status", "Constitution"]
+                    for col in required:
+                        if col not in df.columns:
+                            df[col] = "" # Fill missing
+                            
+                    # Select only schema columns
+                    df = df[required]
+                    dfs.append(df)
+                    
+                except Exception as e:
+                    print(f"Error processing {status} file: {e}")
+                    return False, f"Error in {status} file: {e}"
+
+            if not dfs:
+                return False, "No valid data found to import."
             
-            # Rename columns in new_df
-            for excel_col, db_col in col_map.items():
-                for actual_col in new_df.columns:
-                    if excel_col.lower() in actual_col.lower():
-                        new_df.rename(columns={actual_col: db_col}, inplace=True)
-                        break
-
-            new_df.columns = new_df.columns.str.strip()
+            # 1. Combine New Data
+            new_combined = pd.concat(dfs)
             
-            # Check if required columns exist (or at least GSTIN)
-            if "GSTIN" not in new_df.columns:
-                return False, "File must contain a 'GSTIN' column"
-
-            # Fill missing columns
-            for col in required_cols:
-                if col not in new_df.columns:
-                    new_df[col] = ""
-
-            # Save to CSV
+            # 2. Read Existing Data
             current_df = pd.read_csv(TAXPAYERS_FILE)
             
-            # Combine and drop duplicates based on GSTIN, keeping the new one
-            combined_df = pd.concat([new_df, current_df])
-            combined_df = combined_df.drop_duplicates(subset=['GSTIN'], keep='first')
+            # Ensure schema compatibility (if adding new columns to old CSV)
+            for col in new_combined.columns:
+                if col not in current_df.columns:
+                    current_df[col] = "" # Add new schema cols to old df
             
-            combined_df.to_csv(TAXPAYERS_FILE, index=False)
-            return True, f"Successfully imported {len(new_df)} records."
+            # 3. Upsert Logic
+            # Concatenate [New, Old]. Drop duplicates on GSTIN keeping FIRST (New).
+            final_df = pd.concat([new_combined, current_df])
+            final_df = final_df.drop_duplicates(subset=['GSTIN'], keep='first')
             
+            final_df.to_csv(TAXPAYERS_FILE, index=False)
+            return True, f"Successfully processed {len(new_combined)} records. Total Database: {len(final_df)}."
+
+        except Exception as e:
+            print(f"Bulk Import Error: {e}")
+            return False, str(e)
+
+    def reset_taxpayers_database(self):
+        """Reset the taxpayers database to empty"""
+        try:
+            df = pd.DataFrame(columns=["GSTIN", "Legal Name", "Trade Name", "Address", "State", "Email", "Mobile", "Status", "Constitution"])
+            df.to_csv(TAXPAYERS_FILE, index=False)
+            return True, "Database reset successfully."
         except Exception as e:
             return False, str(e)
 
@@ -506,18 +555,19 @@ class DatabaseManager:
             print(f"Error adding OC entry: {e}")
             return False
 
-    def save_case_issues(self, proceeding_id, issues_list):
+    def save_case_issues(self, proceeding_id, issues_list, stage='DRC-01A'):
         """
         Save a list of issues to the case_issues table.
-        Replaces existing issues for the proceeding to ensure consistency.
+        Replaces existing issues for the proceeding and STAGE to ensure consistency.
         issues_list: List of dicts, each containing 'issue_id' and 'data' (the full JSON state)
+        stage: 'DRC-01A' or 'SCN'
         """
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
             
-            # 1. Delete existing issues for this proceeding
-            cursor.execute("DELETE FROM case_issues WHERE proceeding_id = ?", (proceeding_id,))
+            # 1. Delete existing issues for this proceeding AND stage
+            cursor.execute("DELETE FROM case_issues WHERE proceeding_id = ? AND stage = ?", (proceeding_id, stage))
             
             # 2. Insert new issues
             for issue in issues_list:
@@ -525,9 +575,9 @@ class DatabaseManager:
                 data_json = json.dumps(issue.get('data', {}))
                 
                 cursor.execute("""
-                    INSERT INTO case_issues (proceeding_id, issue_id, data_json)
-                    VALUES (?, ?, ?)
-                """, (proceeding_id, issue_id, data_json))
+                    INSERT INTO case_issues (proceeding_id, issue_id, stage, data_json)
+                    VALUES (?, ?, ?, ?)
+                """, (proceeding_id, issue_id, stage, data_json))
                 
             conn.commit()
             conn.close()
@@ -538,7 +588,7 @@ class DatabaseManager:
             traceback.print_exc()
             return False
 
-    def get_case_issues(self, proceeding_id):
+    def get_case_issues(self, proceeding_id, stage='DRC-01A'):
         """
         Retrieve all issues for a proceeding.
         Returns a list of dicts with 'issue_id' and 'data' (parsed JSON).
@@ -550,9 +600,9 @@ class DatabaseManager:
             cursor.execute("""
                 SELECT issue_id, data_json 
                 FROM case_issues 
-                WHERE proceeding_id = ?
+                WHERE proceeding_id = ? AND stage = ?
                 ORDER BY id ASC
-            """, (proceeding_id,))
+            """, (proceeding_id, stage))
             
             rows = cursor.fetchall()
             issues = []
@@ -567,12 +617,137 @@ class DatabaseManager:
                     'issue_id': row[0],
                     'data': data
                 })
-                
+            
             conn.close()
             return issues
         except Exception as e:
             print(f"Error getting case issues: {e}")
             return []
+
+    def clone_issues_for_scn(self, proceeding_id):
+        """
+        Clone DRC-01A issues to SCN stage if SCN issues don't exist yet.
+        """
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # Check if SCN issues already exist
+            cursor.execute("SELECT count(*) FROM case_issues WHERE proceeding_id = ? AND stage = 'SCN'", (proceeding_id,))
+            if cursor.fetchone()[0] > 0:
+                conn.close()
+                return False # Already exists, don't overwrite
+                
+            # Fetch DRC-01A issues
+            cursor.execute("""
+                SELECT issue_id, data_json 
+                FROM case_issues 
+                WHERE proceeding_id = ? AND stage = 'DRC-01A'
+            """, (proceeding_id,))
+            
+            drc_issues = cursor.fetchall()
+            
+            # Insert as SCN issues
+            for row in drc_issues:
+                cursor.execute("""
+                    INSERT INTO case_issues (proceeding_id, issue_id, stage, data_json)
+                    VALUES (?, ?, 'SCN', ?)
+                """, (proceeding_id, row[0], row[1]))
+                
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error cloning issues for SCN: {e}")
+            return False
+
+    def generate_single_issue_demand_text(self, issue_data, index):
+        """Generates demand text clauses for a single issue"""
+        try:
+            from src.utils.number_utils import amount_to_words
+            
+            data = issue_data
+            breakdown = data.get('tax_breakdown', {})
+            
+            # Calculate Totals
+            total_demand = 0.0
+            cgst_demand = 0.0
+            sgst_demand = 0.0
+            igst_demand = 0.0
+            cess_demand = 0.0
+            
+            for act, vals in breakdown.items():
+                tax = float(vals.get('tax', 0))
+                total_demand += tax 
+                
+                if act == 'CGST': cgst_demand += tax
+                elif act == 'SGST': sgst_demand += tax
+                elif act == 'IGST': igst_demand += tax
+                elif act == 'Cess': cess_demand += tax
+            
+            formatted_total = f"{total_demand:,.2f}"
+            formatted_cgst = f"{cgst_demand:,.2f}"
+            formatted_sgst = f"{sgst_demand:,.2f}"
+            formatted_igst = f"{igst_demand:,.2f}"
+            amount_words = amount_to_words(total_demand)
+                    # Construct Tax Cause (Clause i)
+            # Use dynamic roman numeral passed in 'index' argument if possible, or just plain text lists
+            # For now, we return the text content. The prefixes (i., ii.) can be managed by the UI or kept here.
+            
+            clause_tax = f"{self.to_roman(index).lower()}. An amount of Rs. {formatted_total}/- ({amount_words}) (IGST Rs. {formatted_igst}/-, CGST- Rs. {formatted_cgst}/- and SGST- Rs. {formatted_sgst}/-) for the contraventions mentioned in issue {index} should not be demanded and recovered from them under the provisions of Section 73(1) of CGST Act 2017 /Kerala SGST Act, 2017 read with Section 20 of the IGST Act, 2017;"
+            
+            return clause_tax
+        except Exception as e:
+            print(f"Error generating single issue text: {e}")
+            return f"Error: {e}"
+
+    def to_roman(self, n):
+        """Helper to convert integer to Roman numeral"""
+        val = [
+            1000, 900, 500, 400,
+            100, 90, 50, 40,
+            10, 9, 5, 4,
+            1
+            ]
+        syb = [
+            "M", "CM", "D", "CD",
+            "C", "XC", "L", "XL",
+            "X", "IX", "V", "IV",
+            "I"
+            ]
+        roman_num = ''
+        i = 0
+        while  n > 0:
+            for _ in range(n // val[i]):
+                roman_num += syb[i]
+                n -= val[i]
+            i += 1
+        return roman_num
+
+    def generate_scn_demand_text(self, proceeding_id):
+        """
+        Generates SCN demand text based on stored issues.
+        Returns a formatted string with 3 clauses per issue.
+        """
+        try:
+            issues = self.get_case_issues(proceeding_id)
+            if not issues:
+                return "No issues found to generate demand text."
+            
+            text_blocks = []
+            for i, issue in enumerate(issues, 1):
+                data = issue.get('data', {})
+                # Use helper
+                issue_block = self.generate_single_issue_demand_text(data, i)
+                text_blocks.append(issue_block)
+                
+            return "\n\n".join(text_blocks)
+            
+        except Exception as e:
+            print(f"Error generating SCN demand text: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"Error generation demand text: {str(e)}"
 
     def init_sqlite(self):
         """Initialize SQLite database"""
@@ -1093,6 +1268,25 @@ class DatabaseManager:
             print(f"Error getting issue {issue_id}: {e}")
             return None
 
+    def delete_proceeding(self, pid):
+        """Delete a proceeding by ID"""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # Delete related issues first
+            cursor.execute("DELETE FROM case_issues WHERE proceeding_id = ?", (pid,))
+            
+            # Delete proceeding
+            cursor.execute("DELETE FROM proceedings WHERE id = ?", (pid,))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error deleting proceeding: {e}")
+            return False
+
     def publish_issue(self, issue_id, active=True):
         """Set the active status of an issue"""
         try:
@@ -1233,12 +1427,34 @@ class DatabaseManager:
             act_id = row['act_id']
             
             # Get Sections
-            cursor.execute("SELECT title, content FROM gst_sections WHERE act_id = ?", (act_id,))
+            cursor.execute("SELECT section_number, title, content FROM gst_sections WHERE act_id = ?", (act_id,))
             rows = cursor.fetchall()
             conn.close()
             
-            return [{'title': r['title'], 'content': r['content']} for r in rows]
+            return [{'section_number': r['section_number'], 'title': r['title'], 'content': r['content']} for r in rows]
 
         except Exception as e:
             print(f"Error fetching CGST sections: {e}")
+            return []
+
+    def get_scrutiny_cases(self):
+        """Get all ASMT-10 cases from proceedings table"""
+        try:
+            conn = self._get_conn()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, case_id, gstin, legal_name, financial_year, status, created_at 
+                FROM proceedings 
+                WHERE form_type = 'ASMT-10' 
+                ORDER BY created_at DESC
+            """)
+            
+            rows = cursor.fetchall()
+            conn.close()
+            
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Error getting scrutiny cases: {e}")
             return []

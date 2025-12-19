@@ -1587,7 +1587,7 @@ class AdjudicationWizard(QWidget):
         """Update the header label based on the current step"""
         steps = [
             "Step 1: Basic Details",
-            "Step 2: Brief Facts",
+            "Step 2: Grounds & Detailed Facts",
             "Step 3: Tax & Dues",
             "Step 4: Preview & Generate"
         ]
@@ -1601,19 +1601,92 @@ class AdjudicationWizard(QWidget):
     def update_templates_list(self):
         self.template_combo.clear()
         self.template_combo.addItem("Select a template to append...")
-        for i, tmpl in enumerate(self.templates_list):
-            # Show first 50 chars
-            preview = tmpl[:50].replace('\n', ' ') + "..."
-            self.template_combo.addItem(preview, userData=tmpl)
+        
+        # 1. Load active issues from DB (New Method)
+        active_issues = self.db.get_active_issues()
+        if active_issues:
+            self.template_combo.addItem("--- Active Issues ---")
+            for issue in active_issues:
+                # Issue JSON contains 'issue_name' and 'templates' dict
+                name = issue.get('issue_name', 'Unnamed Issue')
+                # Store full issue object
+                self.template_combo.addItem(f"Issue: {name}", userData={'type': 'issue', 'data': issue})
+        
+        # 2. Load legacy file templates (Fallback)
+        if self.templates_list:
+             self.template_combo.addItem("--- Legacy Templates ---")
+             for i, tmpl in enumerate(self.templates_list):
+                preview = tmpl[:50].replace('\n', ' ') + "..."
+                self.template_combo.addItem(preview, userData={'type': 'legacy', 'data': tmpl})
+
+    def extract_html_body(self, html):
+        """Extract content from body tag to avoid nested html document issues"""
+        import re
+        if not html: return ""
+        match = re.search(r'<body[^>]*>(.*?)</body>', html, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return html
 
     def add_template(self):
         idx = self.template_combo.currentIndex()
         if idx > 0:
-            tmpl = self.template_combo.itemData(idx)
-            current_text = self.facts_text.toPlainText()
-            if current_text:
-                current_text += "\n\n"
-            self.facts_text.setPlainText(current_text + tmpl)
+            item_data = self.template_combo.itemData(idx)
+            
+            # 1. Handle Active Issue (Dict)
+            if isinstance(item_data, dict) and item_data.get('type') == 'issue':
+                issue = item_data['data']
+                templates = issue.get('templates', {})
+                
+                # Construct formatted content
+                content_parts = []
+                
+                if templates.get('brief_facts'):
+                    clean_facts = self.extract_html_body(templates['brief_facts'])
+                    content_parts.append(f"<b>Brief Facts:</b><br>{clean_facts}")
+                    
+                if templates.get('grounds'):
+                    clean_grounds = self.extract_html_body(templates['grounds'])
+                    content_parts.append(f"<b>Grounds:</b><br>{clean_grounds}")
+                    
+                if templates.get('legal'):
+                    clean_legal = self.extract_html_body(templates['legal'])
+                    content_parts.append(f"<b>Legal Provisions:</b><br>{clean_legal}")
+                    
+                if templates.get('conclusion'):
+                    clean_concl = self.extract_html_body(templates['conclusion'])
+                    content_parts.append(f"<b>Conclusion:</b><br>{clean_concl}")
+                    
+                full_content = "<br><br>".join(content_parts)
+                
+                # Append to Facts Editor
+                cursor = self.facts_text.textCursor()
+                cursor.movePosition(cursor.MoveOperation.End)
+                self.facts_text.setTextCursor(cursor)
+                
+                if self.facts_text.toPlainText().strip():
+                     self.facts_text.insertHtml("<br><br><hr><br>")
+                
+                self.facts_text.insertHtml(full_content)
+                
+                # Also Auto-fill Issue Description if empty
+                if not self.issue_input.text():
+                    self.issue_input.setText(issue.get('issue_name', ''))
+                    
+            # 2. Handle Legacy Template (String)
+            elif isinstance(item_data, dict) and item_data.get('type') == 'legacy':
+                tmpl = item_data['data']
+                current_text = self.facts_text.toPlainText()
+                if current_text:
+                    current_text += "\n\n"
+                self.facts_text.setPlainText(current_text + tmpl)
+
+            # 3. Handle Old Format (Raw String) - Fallback
+            elif isinstance(item_data, str): 
+                current_text = self.facts_text.toPlainText()
+                if current_text:
+                    current_text += "\n\n"
+                self.facts_text.setPlainText(current_text + item_data)
 
     def add_amount_row(self):
         row = self.amount_table.rowCount()

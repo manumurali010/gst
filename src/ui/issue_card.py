@@ -11,12 +11,15 @@ class IssueCard(QFrame):
     # Signal emitted when remove button is clicked
     removeClicked = pyqtSignal()
 
-    def __init__(self, template, parent=None):
+    def __init__(self, template, parent=None, mode="DRC-01A", content_key="content"):
         super().__init__(parent)
         self.template = template
+        self.mode = mode
+        self.content_key = content_key
         self.variables = template.get('variables', {}).copy()
         self.calc_logic = template.get('calc_logic', "")
         self.tax_mapping = template.get('tax_demand_mapping', {})
+        self.data_snapshot = {} # To preserve other data (like DRC-01A content when in SCN mode)
         
         self.init_ui()
         self.calculate_values() # Initial calculation
@@ -29,7 +32,10 @@ class IssueCard(QFrame):
         
         # Header
         header_layout = QHBoxLayout()
-        self.title = QLabel(f"<b>{self.template.get('issue_name')}</b>")
+        title_text = self.template.get('issue_name', 'Issue')
+        if self.mode == "SCN":
+             title_text += " (SCN Draft)"
+        self.title = QLabel(f"<b>{title_text}</b>")
         self.title.setStyleSheet("font-size: 14px; color: #2c3e50;")
         header_layout.addWidget(self.title)
         
@@ -73,7 +79,8 @@ class IssueCard(QFrame):
         layout.addLayout(totals_layout)
         
         # Section 2: Brief Facts (Collapsible)
-        facts_card = ModernCard("Brief Facts & Grounds", collapsible=True)
+        label_text = "Draft Content" if self.mode == "SCN" else "Brief Facts & Grounds"
+        facts_card = ModernCard(label_text, collapsible=True)
         self.editor = RichTextEditor()
         self.editor.setMinimumHeight(150)
         self.update_editor_content()
@@ -188,7 +195,7 @@ class IssueCard(QFrame):
                         self.table.blockSignals(False)
                         
                 except Exception as e:
-                    # print(f"Formula Error {formula}: {e}")
+                    print(f"Formula Error {formula}: {e}")
                     pass
         
         # Populate variables with all cell values for placeholders
@@ -216,71 +223,8 @@ class IssueCard(QFrame):
         # We can pass the breakdown directly if needed, but for now just emit
         self.valuesChanged.emit(self.get_tax_breakdown())
 
-    def get_tax_breakdown(self):
-        """
-        Extract tax breakdown (CGST, SGST, IGST, Cess) from the table.
-        Assumes the LAST ROW contains the totals/difference.
-        """
-        breakdown = {
-            'CGST': {'tax': 0, 'interest': 0, 'penalty': 0},
-            'SGST': {'tax': 0, 'interest': 0, 'penalty': 0},
-            'IGST': {'tax': 0, 'interest': 0, 'penalty': 0},
-            'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}
-        }
-        
-        if not hasattr(self, 'table'):
-            return breakdown
-            
-        rows = self.table.rowCount()
-        cols = self.table.columnCount()
-        
-        if rows == 0:
-            return breakdown
-            
-        # Use the LAST row for values
-        target_row = rows - 1
-        
-        # Find columns by header name
-        # We assume headers are in the first row (row 0)
-        header_map = {}
-        for c in range(cols):
-            item = self.table.item(0, c)
-            if item:
-                header_text = item.text().strip().upper()
-                header_map[header_text] = c
-                
-        # Helper to get float value
-        def get_val(r, c):
-            if c is None: return 0.0
-            item = self.table.item(r, c)
-            if not item: return 0.0
-            try:
-                return float(item.text().replace(',', ''))
-            except:
-                return 0.0
+    # Removed duplicate get_tax_breakdown
 
-        # Extract values based on column headers
-        # We map "CGST", "SGST", "IGST" columns to the 'tax' component of the breakdown
-        # Interest and Penalty are usually separate columns or calculated elsewhere.
-        # BUT, the user's table might just have "CGST", "SGST", "IGST" as amounts.
-        # The standard DRC-01A table has Tax, Interest, Penalty columns.
-        # The Issue Table usually calculates the TAX amount (Difference).
-        # Interest and Penalty might be calculated in the main table or separate columns.
-        # For now, we assume the values in CGST/SGST/IGST columns of the issue table are TAX amounts.
-        
-        if 'CGST' in header_map:
-            breakdown['CGST']['tax'] = get_val(target_row, header_map['CGST'])
-            
-        if 'SGST' in header_map:
-            breakdown['SGST']['tax'] = get_val(target_row, header_map['SGST'])
-            
-        if 'IGST' in header_map:
-            breakdown['IGST']['tax'] = get_val(target_row, header_map['IGST'])
-            
-        if 'CESS' in header_map:
-            breakdown['Cess']['tax'] = get_val(target_row, header_map['CESS'])
-            
-        return breakdown
 
     def init_grid_ui(self, layout):
         """Initialize UI from Excel Grid Data"""
@@ -505,61 +449,94 @@ class IssueCard(QFrame):
                                 self.table.blockSignals(False)
                                 
                         except Exception as e:
-                            # print(f"Formula Error {formula}: {e}")
-                            pass
+                            print(f"Formula Error {formula}: {e}")
+                            # pass
 
-    def calculate_excel_table(self):
-        """Calculate values for dictionary-based table structure"""
-        # This handles the 'tables' (plural) or 'table' (singular) dict structure if it has formulas
-        # Currently OUT_001 uses 'calc_logic' (legacy), so this might not be hit for it.
-        # But we implement it for completeness.
-        
-        tables = self.template.get('tables') or self.template.get('table')
-        if not tables: return
-        
-        # If it's a single table dict (like in OUT_001)
-        if isinstance(tables, dict) and 'rows' in tables:
-            rows = tables['rows']
-            if isinstance(rows, list):
-                for row in rows:
-                    if isinstance(row, dict):
-                        for key, val in row.items():
-                            # Check if value looks like a formula {{...}} or just relies on variables
-                            pass
-            else:
-                # rows might be an int (count) or something else
-                pass
-        
-        # If we had explicit formulas in the table definition (not the case for OUT_001),
-        # we would evaluate them here.
-        pass
+    # Removed duplicate empty calculate_excel_table
+
+
+    def extract_html_body(self, html):
+        """Extract content from body tag to avoid nested html document issues"""
+        import re
+        if not html: return ""
+        match = re.search(r'<body[^>]*>(.*?)</body>', html, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return html
 
     def update_editor_content(self):
         """Populate editor with template text"""
+        import re
         # We construct the initial text from the template
         t = self.template.get('templates', {})
         
-        html = f"""
-        <div style="margin-bottom: 15px;">
-            <b>Brief Facts:</b><br>
-            {t.get('brief_facts', '')}
-        </div>
+        # Helper to safely get content
+        def get_content(key):
+            raw = t.get(key, '')
+            return self.extract_html_body(raw)
         
-        <div style="margin-bottom: 15px;">
-            <b>Grounds:</b><br>
-            {t.get('grounds', '')}
-        </div>
-        
-        <div style="margin-bottom: 15px;">
-            <b>Legal Provisions:</b><br>
-            {t.get('legal', '')}
-        </div>
-        
-        <div style="margin-bottom: 15px;">
-            <b>Conclusion:</b><br>
-            {t.get('conclusion', '')}
-        </div>
-        """
+        if self.mode == "SCN":
+            # SCN Mode
+            scn_raw = t.get('scn', '')
+            scn_body = self.extract_html_body(scn_raw)
+            
+            # Check if effectively empty (ignore empty tags)
+            # We strip all tags and check if any text remains
+            text_content = re.sub(r'<[^>]+>', '', scn_body).strip()
+            
+            # Fallback: If no specific SCN content, use the standard DRC-01A structure
+            if not text_content:
+                html = f"""
+                <div style="margin-bottom: 15px;">
+                    <b>Brief Facts:</b><br>
+                    {get_content('brief_facts')}
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <b>Grounds:</b><br>
+                    {get_content('grounds')}
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <b>Legal Provisions:</b><br>
+                    {get_content('legal')}
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <b>Conclusion:</b><br>
+                    {get_content('conclusion')}
+                </div>
+                """
+            else:
+                # Use specific SCN template (cleaned body)
+                html = f"""
+                <div style="margin-bottom: 15px;">
+                    {scn_body}
+                </div>
+                """
+        else:
+            # Default DRC-01A Mode
+            html = f"""
+            <div style="margin-bottom: 15px;">
+                <b>Brief Facts:</b><br>
+                {get_content('brief_facts')}
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <b>Grounds:</b><br>
+                {get_content('grounds')}
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <b>Legal Provisions:</b><br>
+                {get_content('legal')}
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <b>Conclusion:</b><br>
+                {get_content('conclusion')}
+            </div>
+            """
         
         # Replace placeholders in the text
         for var_name, var_val in self.variables.items():
@@ -567,57 +544,87 @@ class IssueCard(QFrame):
             
         self.editor.setHtml(html)
 
-    def generate_html(self):
-        """Generate HTML representation of this issue for the report"""
-        # 1. Text Content (Brief Facts, Grounds, etc.)
-        html = self.editor.toHtml()
-        
-        # 2. Append the specific tables for this issue
-        if 'grid_data' in self.template:
-            grid_data = self.template['grid_data']
-            html += f"""
-            <div style="margin-bottom: 15px; margin-top: 10px;">
-                <b>Calculation Table</b>
-                <table border="1" cellspacing="0" cellpadding="5" style="width: 100%; border-collapse: collapse; font-size: 10pt;">
-            """
-            
-            for r, row_data in enumerate(grid_data):
-                html += "<tr>"
-                for c, cell_info in enumerate(row_data):
-                    # Determine style based on type
-                    style = "border: 1px solid #000; padding: 4px;"
-                    ctype = cell_info.get('type', 'empty')
-                    
-                    if ctype == 'static':
-                        style += "background-color: #f2f2f2; font-weight: bold;"
-                    elif ctype == 'formula':
-                        style += "color: blue;"
-                        
-                    # Get current value from variables if it's a variable
-                    var_name = cell_info.get('var')
-                    val = cell_info.get('value', '')
-                    
-                    if var_name and var_name in self.variables:
-                        val = self.variables[var_name]
-                        
-                    # Format numbers
-                    try:
-                        if isinstance(val, (int, float)):
-                            val = f"{val:.2f}"
-                    except:
-                        pass
-                        
-                    html += f"<td style='{style}'>{val}</td>"
-                html += "</tr>"
+    # Removed duplicate generate_html
+
                 
 
     @staticmethod
     def generate_table_html(template, variables):
         """Generate HTML for the table portion of the card"""
         html = ""
-        # print(f"DEBUG: Generating table HTML for template {template.get('issue_id')}")
-        # print(f"DEBUG: Variables: {variables}")
         
+        # 0. Grid Data Support (Excel Import) - High Priority check
+        if 'grid_data' in template:
+            grid_data = template['grid_data']
+            rows = len(grid_data)
+            cols = len(grid_data[0]) if rows > 0 else 0
+            
+            html += """
+            <div style="margin-bottom: 20px; margin-top: 15px;">
+                <p style="font-weight: bold; margin-bottom: 8px; font-size: 11pt;">Calculation Table</p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 10pt; font-family: 'Bookman Old Style', serif; border: 2px solid #000;">
+            """
+            
+            for r, row_data in enumerate(grid_data):
+                html += "<tr>"
+                for c, cell_info in enumerate(row_data):
+                    val = cell_info.get('value', '')
+                    var_name = cell_info.get('var')
+                    ctype = cell_info.get('type', 'empty')
+                    
+                    # Resolve Value
+                    if var_name and var_name in variables:
+                        val = variables[var_name]
+                    
+                    # Styling
+                    style = "border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;"
+                    
+                    # Header detection (heuristic: static and row 0 or 1, or bold/gray in cell_info?)
+                    # For now, we assume imported Excel uses row 0-10 as header? No, 'grid_data' is just the table part.
+                    # The importer sets 'table_start_row' but only grid_data starting from there is saved.
+                    # So row 0 of grid_data is the first data row (headers were potentially skipped or included?).
+                    # Check importer:
+                    # current_row = table_start_row + 2
+                    # grid_data does NOT include headers currently based on importer logic!
+                    # Wait, importer loop: for r in range(current_row, max_row + 1): ... grid_data.append(row_data)
+                    # So grid_data is DATA ONLY.
+                    # This means we might be missing headers in the HTML if we only render grid_data.
+                    # But the User said "table appeared perfectly". In the Form UI, init_grid_ui renders grid_data.
+                    # Does init_grid_ui add headers?
+                    # self.table.horizontalHeader().setVisible(False)
+                    # It renders exactly what is in grid_data.
+                    # So if the import logic skipped headers, the form has no headers?
+                    # Unless `static` cells in row 0 are headers.
+                    
+                    if ctype == 'static':
+                        style += "background-color: #f2f2f2; font-weight: bold;"
+                    else:
+                        # Align numbers
+                        try:
+                            float(str(val).replace(',', '').replace('₹', '').strip())
+                            style += "text-align: right;"
+                        except:
+                            style += "text-align: left;"
+                            
+                    # Format float
+                    try:
+                        if isinstance(val, (int, float)):
+                            if 'tax' in str(var_name).lower() or 'int' in str(var_name).lower() or 'pen' in str(var_name).lower() or val > 1000:
+                                val = f"{val:,.2f}"
+                            else:
+                                val = str(val)
+                    except:
+                        pass
+                        
+                    html += f"<td style='{style}'>{val}</td>"
+                html += "</tr>"
+                
+            html += """
+                </table>
+            </div>
+            """
+            return html
+
         # New Schema Table Support (Excel-like Dict)
         if isinstance(template.get('tables'), dict) and template['tables'].get('rows', 0) > 0:
             table_data = template['tables']
@@ -735,22 +742,42 @@ class IssueCard(QFrame):
 
     def get_data(self):
         """Return current state for saving"""
-        return {
+        # Start with snapshot to preserve existing keys (e.g. 'content' if we are editing 'scn_content')
+        data = self.data_snapshot.copy()
+        
+        # Update with current state
+        data.update({
             'issue_id': self.template['issue_id'],
             'variables': self.variables,
-            'content': self.editor.toHtml(),
+            self.content_key: self.editor.toHtml(), # Save validity to specific key
             'tax_breakdown': self.get_tax_breakdown()
-        }
+        })
+        
+        # Also maintain legacy 'content' key if we are in default mode, just in case
+        if self.content_key == 'content':
+             pass # Already set above
+             
+        return data
 
     def load_data(self, data):
         """Restore state from saved data"""
+        self.data_snapshot = data.copy() # Store snapshot
+        
         # 1. Restore Variables
         if 'variables' in data:
             self.variables = data['variables']
             
         # 2. Restore Content
-        if 'content' in data:
-            self.editor.setHtml(data['content'])
+        # Use content_key, fallback to 'content' if specific key missing (unless strict?)
+        # For SCN, we might want to default to SCN template if no saved content exist.
+        content = data.get(self.content_key)
+        
+        if content:
+            self.editor.setHtml(content)
+        else:
+            # If no saved content for this key, keep the initialized template content
+            # (which was set in init_ui -> update_editor_content)
+            pass 
             
         # 3. Synchronize UI with Variables
         

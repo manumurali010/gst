@@ -45,7 +45,9 @@ def init_db():
         "form_type TEXT",
         "created_by TEXT",
         "taxpayer_details TEXT",
-        "additional_details TEXT"
+        "additional_details TEXT",
+        "oc_number TEXT",
+        "notice_date TEXT"
     ]
     
     for col_def in migration_cols:
@@ -159,12 +161,17 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         proceeding_id TEXT NOT NULL,
         issue_id TEXT NOT NULL, -- Template ID e.g. ITC_MISMATCH
+        stage TEXT DEFAULT 'DRC-01A', -- 'DRC-01A' or 'SCN'
         data_json TEXT, -- Stores all variables, content, and table rows
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (proceeding_id) REFERENCES proceedings(id) ON DELETE CASCADE
     );
     """)
+    
+    # Migration: Add stage column to case_issues if not exists
+    try: cursor.execute("ALTER TABLE case_issues ADD COLUMN stage TEXT DEFAULT 'DRC-01A'")
+    except: pass
     
     # 10. GST Acts Table
     cursor.execute("""

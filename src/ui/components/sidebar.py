@@ -193,7 +193,9 @@ class Sidebar(QFrame):
                 ("GST Handbook", "📘", 6),
                 ("Mail Merge", "📧", 7),
                 ("Templates", "📝", 8),
-                ("Developer", "🛠️", 9)
+                ("Developer", "🛠️", 9),
+                ("Scrutiny", "🔍", 10),
+                ("Settings", "⚙️", 11)
             ]
             for text, icon, idx in items:
                 self.add_button(text, icon, idx, self.handle_global_click)

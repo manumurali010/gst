@@ -1,76 +1,152 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                              QListWidget, QSplitter, QLineEdit, QComboBox, QTabWidget, 
                              QMessageBox, QFormLayout, QCheckBox, QTableWidget, QTableWidgetItem,
-                             QHeaderView, QTextEdit, QPlainTextEdit, QFrame, QScrollArea)
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+                             QHeaderView, QTextEdit, QPlainTextEdit, QFrame, QScrollArea, QListWidgetItem,
+                             QButtonGroup)
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
+from PyQt6.QtGui import QFont, QColor, QIcon
 import json
 import uuid
 from src.database.db_manager import DatabaseManager
 from src.ui.rich_text_editor import RichTextEditor
-from src.ui.rich_text_editor import RichTextEditor
 from src.ui.developer.table_builder import TableBuilderWidget
+from src.ui.components.section_selector import SectionSelectorDialog
+from src.ui.developer.logic_validator import LogicValidator
+
+class IssueListItemWidget(QWidget):
+    """Rich List Item for Issues"""
+    def __init__(self, name, issue_id, active, category):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(2)
+        
+        # Row 1: Name and Status Dot
+        row1 = QHBoxLayout()
+        name_lbl = QLabel(name)
+        name_lbl.setStyleSheet("font-weight: bold; font-size: 14px;")
+        row1.addWidget(name_lbl)
+        row1.addStretch()
+        
+        status_lbl = QLabel("●")
+        status_lbl.setStyleSheet(f"color: {'#27ae60' if active else '#95a5a6'}; font-size: 12px;")
+        row1.addWidget(status_lbl)
+        layout.addLayout(row1)
+        
+        # Row 2: ID and Category
+        row2 = QHBoxLayout()
+        id_lbl = QLabel(issue_id)
+        id_lbl.setStyleSheet("color: #7f8c8d; font-size: 11px; font-family: Consolas;")
+        row2.addWidget(id_lbl)
+        
+        row2.addStretch()
+        
+        cat_lbl = QLabel(category)
+        cat_lbl.setStyleSheet("background-color: #ecf0f1; color: #2c3e50; border-radius: 3px; padding: 2px 4px; font-size: 10px;")
+        row2.addWidget(cat_lbl)
+        
+        layout.addLayout(row2)
 
 class IssueManager(QWidget):
     def __init__(self):
         super().__init__()
         self.db = DatabaseManager()
         self.current_issue_id = None
+        self.all_issues = [] # Cache
         self.init_ui()
         self.load_issue_list()
 
     def init_ui(self):
         self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
         
         # Splitter
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.layout.addWidget(self.splitter)
         
-        # Left Pane: Issue List
+        # ---------------- Left Pane: Explorer ----------------
         left_widget = QWidget()
+        left_widget.setStyleSheet("background-color: #f8f9fa; border-right: 1px solid #dcdcdc;")
         left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
         
-        left_header = QLabel("Issues Repository")
-        left_header.setStyleSheet("font-size: 16px; font-weight: bold;")
-        left_layout.addWidget(left_header)
+        # 1. Header & Module Switcher
+        header_container = QWidget()
+        header_container.setStyleSheet("background-color: #fff; border-bottom: 1px solid #eee; padding: 10px;")
+        header_layout = QVBoxLayout(header_container)
         
+        title = QLabel("Issue Explorer")
+        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #2c3e50;")
+        header_layout.addWidget(title)
+        
+        # Module Toggle (Segmented Control style)
+        self.module_combo = QComboBox()
+        self.module_combo.addItems(["All Modules", "Scrutiny (ASMT-10)", "Adjudication (SCN/DRC)"])
+        self.module_combo.currentTextChanged.connect(self.filter_issues)
+        header_layout.addWidget(self.module_combo)
+        
+        # Search Bar
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Search issues...")
+        self.search_input.setStyleSheet("padding: 5px; border: 1px solid #ccc; border-radius: 4px;")
+        self.search_input.textChanged.connect(self.filter_issues)
+        header_layout.addWidget(self.search_input)
+        
+        left_layout.addWidget(header_container)
+        
+        # 2. List Widget
         self.issue_list = QListWidget()
+        self.issue_list.setFrameShape(QFrame.Shape.NoFrame)
+        self.issue_list.setStyleSheet("QListWidget::item { border-bottom: 1px solid #eee; padding: 5px; } QListWidget::item:selected { background-color: #e3f2fd; }")
         self.issue_list.currentRowChanged.connect(self.on_issue_selected)
         left_layout.addWidget(self.issue_list)
         
-        new_btn = QPushButton("+ Create New Issue")
-        new_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px;")
+        # 3. Valid/Draft Filter (Bottom Toolbar)
+        bottom_bar = QWidget()
+        bottom_bar.setStyleSheet("background-color: #fff; border-top: 1px solid #eee; padding: 5px;")
+        bottom_layout = QHBoxLayout(bottom_bar)
+        
+        new_btn = QPushButton(" + New Issue")
+        new_btn.setStyleSheet("background-color: #27ae60; color: white; border: none; padding: 8px; border-radius: 4px; font-weight: bold;")
         new_btn.clicked.connect(self.create_new_issue)
-        left_layout.addWidget(new_btn)
+        bottom_layout.addWidget(new_btn)
+        
+        left_layout.addWidget(bottom_bar)
         
         self.splitter.addWidget(left_widget)
         
-        # Right Pane: Editor
+        # ---------------- Right Pane: Editor ----------------
         self.editor_container = QWidget()
+        self.editor_container.setStyleSheet("background-color: #fff;")
         self.editor_layout = QVBoxLayout(self.editor_container)
         
-        # Editor Header
-        header_layout = QHBoxLayout()
-        self.editor_title = QLabel("Edit Issue")
-        self.editor_title.setStyleSheet("font-size: 18px; font-weight: bold;")
-        header_layout.addWidget(self.editor_title)
+        # Editor Toolbar
+        toolbar = QWidget()
+        toolbar.setStyleSheet("border-bottom: 1px solid #eee; padding: 10px;")
+        tb_layout = QHBoxLayout(toolbar)
+        tb_layout.setContentsMargins(0, 0, 0, 0)
         
-        header_layout.addStretch()
+        self.editor_title = QLabel("Edit Issue")
+        self.editor_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #2c3e50;")
+        tb_layout.addWidget(self.editor_title)
+        
+        tb_layout.addStretch()
         
         self.active_cb = QCheckBox("Active / Published")
-        header_layout.addWidget(self.active_cb)
+        tb_layout.addWidget(self.active_cb)
         
-        save_btn = QPushButton("Save Issue")
-        save_btn.setStyleSheet("background-color: #3498db; color: white; padding: 5px 15px;")
+        save_btn = QPushButton("Save Changes")
+        save_btn.setStyleSheet("background-color: #3498db; color: white; padding: 6px 15px; border: none; border-radius: 4px;")
         save_btn.clicked.connect(self.save_issue)
-        header_layout.addWidget(save_btn)
+        tb_layout.addWidget(save_btn)
         
         delete_btn = QPushButton("Delete")
-        delete_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 5px 15px;")
+        delete_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 6px 15px; border: none; border-radius: 4px;")
         delete_btn.clicked.connect(self.delete_issue)
-        header_layout.addWidget(delete_btn)
+        tb_layout.addWidget(delete_btn)
         
-        self.editor_layout.addLayout(header_layout)
+        self.editor_layout.addWidget(toolbar)
         
         # Tabs
         self.tabs = QTabWidget()
@@ -96,18 +172,13 @@ class IssueManager(QWidget):
         self.init_placeholders_tab()
         self.tabs.addTab(self.placeholders_tab, "Placeholders")
         
-        # 5. Logic Tab REMOVED as per user request
-        # self.logic_tab = QWidget()
-        # self.init_logic_tab()
-        # self.tabs.addTab(self.logic_tab, "Calculation Logic")
-        
-        # 6. Preview Tab
+        # 5. Preview Tab
         self.preview_tab = QWidget()
         self.init_preview_tab()
         self.tabs.addTab(self.preview_tab, "Preview")
         
         self.splitter.addWidget(self.editor_container)
-        self.splitter.setSizes([250, 750])
+        self.splitter.setSizes([300, 900]) # 300px sidebar
         
         # Initially disable editor until issue selected
         self.editor_container.setEnabled(False)
@@ -115,17 +186,18 @@ class IssueManager(QWidget):
     def init_metadata_tab(self):
         layout = QFormLayout(self.metadata_tab)
         layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
         
         self.issue_id_input = QLineEdit()
         self.issue_id_input.setReadOnly(True)
-        self.issue_id_input.setPlaceholderText("Auto-generated ID")
+        self.issue_id_input.setStyleSheet("background-color: #f0f0f0; color: #555;")
         layout.addRow("Issue ID:", self.issue_id_input)
         
         self.issue_name_input = QLineEdit()
         layout.addRow("Issue Name:", self.issue_name_input)
         
         self.category_input = QComboBox()
-        self.category_input.addItems(["Outward Liability", "ITC Mismatch", "RCM", "Ineligible ITC", "Other"])
+        self.category_input.addItems(["Scrutiny Summary", "Tax Liability", "ITC Mismatch", "RCM", "Exports", "Ineligible ITC", "Other"])
         self.category_input.setEditable(True)
         layout.addRow("Category:", self.category_input)
         
@@ -152,25 +224,53 @@ class IssueManager(QWidget):
         self.grounds_editor = RichTextEditor("Grounds...")
         self.template_subtabs.addTab(self.grounds_editor, "Grounds")
         
+        self.scn_editor = RichTextEditor("SCN Specific Facts...")
+        self.template_subtabs.addTab(self.scn_editor, "SCN Only")
+        
+        # Legal Tab with Insert Button
+        legal_widget = QWidget()
+        legal_layout = QVBoxLayout(legal_widget)
+        legal_layout.setContentsMargins(0,0,0,0)
+        
+        legal_toolbar = QHBoxLayout()
+        legal_toolbar.addStretch()
+        insert_legal_btn = QPushButton("Insert CGST Sections")
+        insert_legal_btn.setStyleSheet("background-color: #9b59b6; color: white;")
+        insert_legal_btn.clicked.connect(self.open_section_selector)
+        legal_toolbar.addWidget(insert_legal_btn)
+        legal_layout.addLayout(legal_toolbar)
+        
         self.legal_editor = RichTextEditor("Legal Provisions...")
-        self.template_subtabs.addTab(self.legal_editor, "Legal")
+        legal_layout.addWidget(self.legal_editor)
+        
+        self.template_subtabs.addTab(legal_widget, "Legal")
         
         self.conclusion_editor = RichTextEditor("Conclusion...")
         self.template_subtabs.addTab(self.conclusion_editor, "Conclusion")
         
         layout.addWidget(self.template_subtabs)
         
-        help_lbl = QLabel("Tip: Use {{placeholder_name}} to insert dynamic values.")
+        help_lbl = QLabel("Tip: Use {{variable_name}} to insert dynamic values like {{total_shortfall}} or {{period}}.")
         help_lbl.setStyleSheet("color: gray; font-style: italic;")
         layout.addWidget(help_lbl)
 
+    def open_section_selector(self):
+        dialog = SectionSelectorDialog(self)
+        if dialog.exec():
+            selected = dialog.get_selected_sections()
+            if selected:
+                html_fragments = []
+                for item in selected:
+                    title = item.get('title', '')
+                    content = item.get('content', '')
+                    fragment = f"<b>{title}</b><br>{content}<br><br>"
+                    html_fragments.append(fragment)
+
+                final_html = "".join(html_fragments)
+                self.legal_editor.insertHtml(final_html)
+
     def init_tables_tab(self):
         layout = QVBoxLayout(self.tables_tab)
-        
-        # For now, support single table configuration as per schema (list of tables, but UI needs to handle it)
-        # Let's assume 1 main table for simplicity in V1, or a list of tables.
-        # Schema says "tables": [ ... ]
-        
         self.table_builder = TableBuilderWidget()
         layout.addWidget(QLabel("Table Design & Logic:"))
         layout.addWidget(self.table_builder)
@@ -195,38 +295,9 @@ class IssueManager(QWidget):
         
         layout.addLayout(btn_layout)
 
-    def init_logic_tab(self):
-        layout = QVBoxLayout(self.logic_tab)
-        
-        self.logic_editor = QPlainTextEdit()
-        self.logic_editor.setPlaceholderText("def compute(v):\n    return {}")
-        self.logic_editor.setFont(QFont("Consolas", 10))
-        layout.addWidget(QLabel("Calculation Logic (Python):"))
-        layout.addWidget(self.logic_editor)
-        
-        # Test Section
-        test_layout = QHBoxLayout()
-        self.test_input_editor = QPlainTextEdit()
-        self.test_input_editor.setPlaceholderText("Test Input JSON:\n{\n  'val1': 100\n}")
-        self.test_input_editor.setMaximumHeight(100)
-        
-        self.test_output_lbl = QLabel("Result will appear here...")
-        self.test_output_lbl.setWordWrap(True)
-        self.test_output_lbl.setStyleSheet("border: 1px solid #ccc; padding: 5px;")
-        
-        test_layout.addWidget(self.test_input_editor, 1)
-        test_layout.addWidget(self.test_output_lbl, 1)
-        
-        layout.addLayout(test_layout)
-        
-        test_btn = QPushButton("Test Run Logic")
-        test_btn.clicked.connect(self.test_logic)
-        layout.addWidget(test_btn)
-
     def init_preview_tab(self):
         layout = QVBoxLayout(self.preview_tab)
         
-        # Toolbar
         toolbar = QHBoxLayout()
         refresh_btn = QPushButton("Refresh Preview")
         refresh_btn.clicked.connect(self.refresh_preview)
@@ -234,7 +305,6 @@ class IssueManager(QWidget):
         toolbar.addStretch()
         layout.addLayout(toolbar)
         
-        # Scroll Area for Preview
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         self.preview_content = QWidget()
@@ -245,13 +315,11 @@ class IssueManager(QWidget):
         layout.addWidget(scroll)
 
     def refresh_preview(self):
-        # Clear previous
         for i in reversed(range(self.preview_layout.count())): 
             self.preview_layout.itemAt(i).widget().setParent(None)
             
-        # Gather current data (simulate save)
         data = {
-            "issue_id": self.current_issue_id or "preview_id",
+            "issue_id": self.current_issue_id or "preview",
             "issue_name": self.issue_name_input.text() or "Preview Issue",
             "templates": {
                 "brief_facts": self.brief_facts_editor.toHtml(),
@@ -263,40 +331,65 @@ class IssueManager(QWidget):
             "placeholders": []
         }
         
-        # Placeholders
-        for row in range(self.placeholders_table.rowCount()):
-            name = self.placeholders_table.item(row, 0).text()
-            if not name: continue
-            p_type = self.placeholders_table.item(row, 1).text()
-            req = self.placeholders_table.cellWidget(row, 2).isChecked()
-            comp = self.placeholders_table.cellWidget(row, 3).isChecked()
-            data["placeholders"].append({
-                "name": name, "type": p_type, "required": req, "computed": comp
-            })
-            
-        # Create IssueCard
         from src.ui.issue_card import IssueCard
         try:
             card = IssueCard(data)
             self.preview_layout.addWidget(card)
         except Exception as e:
-            self.preview_layout.addWidget(QLabel(f"Error generating preview: {e}"))
+            self.preview_layout.addWidget(QLabel(f"Error: {e}"))
 
     # ---------------- Actions ----------------
 
     def load_issue_list(self):
+        self.all_issues = self.db.get_all_issues_metadata()
+        self.filter_issues()
+
+    def filter_issues(self):
+        query = self.search_input.text().lower()
+        module_idx = self.module_combo.currentIndex() # 0=All, 1=Scrutiny, 2=Adjudication
+        
         self.issue_list.clear()
-        issues = self.db.get_all_issues_metadata()
-        for issue in issues:
-            item_text = f"{issue['issue_name']} ({issue['issue_id']})"
-            self.issue_list.addItem(item_text)
-            # Store ID in item data? No, just use index or lookup. 
-            # Better to store ID.
-            item = self.issue_list.item(self.issue_list.count() - 1)
+        
+        for issue in self.all_issues:
+            # Module Filtering Logic
+            category = issue.get('category', '').lower()
+            tags = str(issue.get('tags', '')).lower()
+            name = issue.get('issue_name', '').lower()
+            
+            is_scrutiny = "scrutiny" in category or "liability" in category or "itc" in category or "rcm" in category
+            is_adjudication = "section 7" in category or "fraud" in category
+            
+            # Fallback if categories are generic
+            if not is_scrutiny and not is_adjudication:
+                # Assume scrutiny for now or check tags
+                pass
+            
+            target_module = False
+            if module_idx == 0: target_module = True
+            elif module_idx == 1 and is_scrutiny: target_module = True
+            elif module_idx == 2 and is_adjudication: target_module = True
+            
+            if not target_module: continue
+            
+            # Check Search Query
+            if query and (query not in name and query not in category and query not in str(issue.get('issue_id', ''))):
+                continue
+            
+            # Add to List
+            item = QListWidgetItem(self.issue_list)
+            item.setSizeHint(QSize(200, 60)) # Height for 2 rows
             item.setData(Qt.ItemDataRole.UserRole, issue['issue_id'])
+            
+            widget = IssueListItemWidget(
+                issue['issue_name'], 
+                issue['issue_id'], 
+                bool(issue.get('active')), 
+                issue['category']
+            )
+            self.issue_list.setItemWidget(item, widget)
 
     def create_new_issue(self):
-        self.current_issue_id = str(uuid.uuid4())
+        self.current_issue_id = f"CUST-{uuid.uuid4().hex[:6].upper()}"
         self.issue_id_input.setText(self.current_issue_id)
         self.issue_name_input.clear()
         self.category_input.setCurrentIndex(0)
@@ -305,34 +398,31 @@ class IssueManager(QWidget):
         self.tags_input.clear()
         self.active_cb.setChecked(False)
         
-        # Clear Editors
         self.brief_facts_editor.setHtml("")
+        self.scn_editor.setHtml("")
         self.grounds_editor.setHtml("")
         self.legal_editor.setHtml("")
         self.conclusion_editor.setHtml("")
         self.table_builder.set_data({})
-        # self.logic_editor.setPlainText(LogicValidator.get_default_logic_template()) # Logic removed
         self.placeholders_table.setRowCount(0)
         
         self.editor_container.setEnabled(True)
         self.editor_title.setText("Create New Issue")
 
     def on_issue_selected(self, row):
+        if row < 0: return
         item = self.issue_list.item(row)
-        if not item: return
         issue_id = item.data(Qt.ItemDataRole.UserRole)
         self.load_issue(issue_id)
 
     def load_issue(self, issue_id):
         issue = self.db.get_issue(issue_id)
-        if not issue:
-            return
+        if not issue: return
             
         self.current_issue_id = issue_id
         self.editor_container.setEnabled(True)
         self.editor_title.setText(f"Edit Issue: {issue.get('issue_name')}")
         
-        # Populate Metadata
         self.issue_id_input.setText(issue_id)
         self.issue_name_input.setText(issue.get('issue_name', ''))
         self.category_input.setCurrentText(issue.get('category', ''))
@@ -340,32 +430,18 @@ class IssueManager(QWidget):
         self.version_input.setText(issue.get('version', '1.0'))
         self.tags_input.setText(", ".join(issue.get('tags', [])))
         
-        # Active status is in master, but we loaded full JSON. 
-        # Wait, get_issue returns JSON from issues_data. 
-        # We need to check active status from master or if we stored it in JSON too.
-        # My save_issue stores active in master only. 
-        # Let's fetch metadata again or assume we passed it.
-        # For now, let's default to unchecked and maybe fix get_issue to include active status if needed.
-        # Actually, let's just fetch metadata for active status.
-        meta = [m for m in self.db.get_all_issues_metadata() if m['issue_id'] == issue_id]
-        if meta:
-            self.active_cb.setChecked(bool(meta[0]['active']))
+        meta = [m for m in self.all_issues if m['issue_id'] == issue_id]
+        if meta: self.active_cb.setChecked(bool(meta[0]['active']))
         
-        # Populate Templates
         templates = issue.get('templates', {})
         self.brief_facts_editor.setHtml(templates.get('brief_facts', ''))
+        self.scn_editor.setHtml(templates.get('scn', ''))
         self.grounds_editor.setHtml(templates.get('grounds', ''))
         self.legal_editor.setHtml(templates.get('legal', ''))
         self.conclusion_editor.setHtml(templates.get('conclusion', ''))
         
-        # Populate Tables
-        # Populate Tables
         self.table_builder.set_data(issue.get('tables', {}))
         
-        # Populate Logic (Removed)
-        # self.logic_editor.setPlainText(issue.get('calc_logic', ''))
-        
-        # Populate Placeholders
         self.placeholders_table.setRowCount(0)
         for p in issue.get('placeholders', []):
             self.add_placeholder_row(p)
@@ -373,7 +449,6 @@ class IssueManager(QWidget):
     def add_placeholder_row(self, data=None):
         row = self.placeholders_table.rowCount()
         self.placeholders_table.insertRow(row)
-        
         if not data: data = {}
         
         self.placeholders_table.setItem(row, 0, QTableWidgetItem(data.get('name', '')))
@@ -389,9 +464,8 @@ class IssueManager(QWidget):
 
     def detect_placeholders(self):
         import re
-        text = (self.brief_facts_editor.toHtml() + self.grounds_editor.toHtml() + 
-                self.legal_editor.toHtml() + self.conclusion_editor.toHtml())
-        
+        text = (self.brief_facts_editor.toHtml() + self.scn_editor.toHtml() + 
+                self.grounds_editor.toHtml() + self.legal_editor.toHtml() + self.conclusion_editor.toHtml())
         matches = set(re.findall(r'\{\{([^}]+)\}\}', text))
         
         current_names = []
@@ -399,33 +473,16 @@ class IssueManager(QWidget):
             item = self.placeholders_table.item(row, 0)
             if item: current_names.append(item.text())
             
+        count = 0
         for match in matches:
             if match not in current_names:
                 self.add_placeholder_row({'name': match, 'type': 'string'})
-                
-        QMessageBox.information(self, "Detection Complete", f"Found {len(matches)} placeholders.")
-
-    def test_logic(self):
-        code = self.logic_editor.toPlainText()
-        try:
-            inputs = json.loads(self.test_input_editor.toPlainText() or "{}")
-        except:
-            self.test_output_lbl.setText("Error: Invalid JSON Input")
-            return
-            
-        valid, result = LogicValidator.validate_logic(code, inputs)
-        if valid:
-            self.test_output_lbl.setText(f"Success:\n{json.dumps(result, indent=2)}")
-            self.test_output_lbl.setStyleSheet("border: 1px solid green; padding: 5px;")
-        else:
-            self.test_output_lbl.setText(f"Failed:\n{result}")
-            self.test_output_lbl.setStyleSheet("border: 1px solid red; padding: 5px;")
+                count += 1
+        QMessageBox.information(self, "Detection Complete", f"Found {count} new placeholders.")
 
     def save_issue(self):
-        if not self.current_issue_id:
-            return
+        if not self.current_issue_id: return
             
-        # Collect Data
         data = {
             "issue_id": self.current_issue_id,
             "issue_name": self.issue_name_input.text(),
@@ -433,55 +490,42 @@ class IssueManager(QWidget):
             "severity": self.severity_input.currentText(),
             "version": self.version_input.text(),
             "tags": [t.strip() for t in self.tags_input.text().split(',') if t.strip()],
-            
             "templates": {
                 "brief_facts": self.brief_facts_editor.toHtml(),
+                "scn": self.scn_editor.toHtml(),
                 "grounds": self.grounds_editor.toHtml(),
                 "legal": self.legal_editor.toHtml(),
                 "conclusion": self.conclusion_editor.toHtml()
             },
-            
-            # "calc_logic": self.logic_editor.toPlainText(), # Removed
-            "active": self.active_cb.isChecked()
+            "active": self.active_cb.isChecked(),
+            "tables": self.table_builder.get_data()
         }
         
-        # Tables
-        # Tables
-        data["tables"] = self.table_builder.get_data()
-            
-        # Placeholders
         placeholders = []
         for row in range(self.placeholders_table.rowCount()):
             name = self.placeholders_table.item(row, 0).text()
             if not name: continue
-            
-            p_type = self.placeholders_table.item(row, 1).text()
-            req = self.placeholders_table.cellWidget(row, 2).isChecked()
-            comp = self.placeholders_table.cellWidget(row, 3).isChecked()
-            
             placeholders.append({
-                "name": name, "type": p_type, "required": req, "computed": comp
+                "name": name, 
+                "type": self.placeholders_table.item(row, 1).text(),
+                "required": self.placeholders_table.cellWidget(row, 2).isChecked(),
+                "computed": self.placeholders_table.cellWidget(row, 3).isChecked()
             })
         data["placeholders"] = placeholders
         
-        # Save
         success, msg = self.db.save_issue(data)
         if success:
-            # Update active status
             self.db.publish_issue(self.current_issue_id, self.active_cb.isChecked())
-            
-            QMessageBox.information(self, "Success", "Issue saved successfully!")
+            QMessageBox.information(self, "Success", "Issue saved successfully")
             self.load_issue_list()
         else:
             QMessageBox.critical(self, "Error", f"Failed to save: {msg}")
 
     def delete_issue(self):
         if not self.current_issue_id: return
-        
-        confirm = QMessageBox.question(self, "Confirm Delete", "Are you sure you want to delete this issue?",
+        confirm = QMessageBox.question(self, "Confirm", "Delete this issue?", 
                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-                                     
         if confirm == QMessageBox.StandardButton.Yes:
             self.db.delete_issue(self.current_issue_id)
             self.load_issue_list()
-            self.create_new_issue() # Reset
+            self.create_new_issue()
