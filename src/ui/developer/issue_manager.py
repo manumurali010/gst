@@ -33,12 +33,8 @@ class IssueListItemWidget(QWidget):
         row1.addWidget(status_lbl)
         layout.addLayout(row1)
         
-        # Row 2: ID and Category
+        # Row 2: Category
         row2 = QHBoxLayout()
-        id_lbl = QLabel(issue_id)
-        id_lbl.setStyleSheet("color: #7f8c8d; font-size: 11px; font-family: Consolas;")
-        row2.addWidget(id_lbl)
-        
         row2.addStretch()
         
         cat_lbl = QLabel(category)
@@ -214,23 +210,51 @@ class IssueManager(QWidget):
 
     def init_templates_tab(self):
         layout = QVBoxLayout(self.templates_tab)
+        layout.setContentsMargins(10, 10, 10, 10)
         
         # Sub-tabs for each template section
         self.template_subtabs = QTabWidget()
+        self.template_subtabs.setStyleSheet("QTabBar::tab { min-width: 120px; }")
         
-        self.brief_facts_editor = RichTextEditor("Brief Facts...")
-        self.template_subtabs.addTab(self.brief_facts_editor, "Brief Facts")
+        # --- 1. Brief Facts (Sub-tabbed) ---
+        brief_facts_container = QWidget()
+        brief_facts_layout = QVBoxLayout(brief_facts_container)
+        brief_facts_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.brief_facts_subtabs = QTabWidget()
+        self.brief_facts_subtabs.setTabPosition(QTabWidget.TabPosition.North)
+        
+        self.brief_facts_drc_editor = RichTextEditor("Brief Facts for DRC-01A / ASMT-10...")
+        self.brief_facts_subtabs.addTab(self.brief_facts_drc_editor, "DRC-01A / ASMT-10")
+        
+        self.brief_facts_scn_editor = RichTextEditor("Brief Facts / Specific Facts for SCN...")
+        self.brief_facts_subtabs.addTab(self.brief_facts_scn_editor, "SCN")
+        
+        brief_facts_layout.addWidget(self.brief_facts_subtabs)
+        self.template_subtabs.addTab(brief_facts_container, "Brief Facts")
+        
+        # --- 2. Grounds (Optional) ---
+        grounds_container = QWidget()
+        grounds_layout = QVBoxLayout(grounds_container)
+        grounds_layout.setContentsMargins(0, 0, 0, 0)
+        
+        grounds_header = QFrame()
+        grounds_header.setStyleSheet("background: #f8f9fa; border-bottom: 1px solid #ddd;")
+        gh_layout = QHBoxLayout(grounds_header)
+        self.include_grounds_cb = QCheckBox("Include Grounds in document")
+        self.include_grounds_cb.setChecked(True)
+        gh_layout.addWidget(self.include_grounds_cb)
+        gh_layout.addStretch()
+        grounds_layout.addWidget(grounds_header)
         
         self.grounds_editor = RichTextEditor("Grounds...")
-        self.template_subtabs.addTab(self.grounds_editor, "Grounds")
+        grounds_layout.addWidget(self.grounds_editor)
+        self.template_subtabs.addTab(grounds_container, "Grounds")
         
-        self.scn_editor = RichTextEditor("SCN Specific Facts...")
-        self.template_subtabs.addTab(self.scn_editor, "SCN Only")
-        
-        # Legal Tab with Insert Button
+        # --- 3. Legal Tab (Always included if content exists) ---
         legal_widget = QWidget()
         legal_layout = QVBoxLayout(legal_widget)
-        legal_layout.setContentsMargins(0,0,0,0)
+        legal_layout.setContentsMargins(0, 0, 0, 0)
         
         legal_toolbar = QHBoxLayout()
         legal_toolbar.addStretch()
@@ -242,11 +266,25 @@ class IssueManager(QWidget):
         
         self.legal_editor = RichTextEditor("Legal Provisions...")
         legal_layout.addWidget(self.legal_editor)
-        
         self.template_subtabs.addTab(legal_widget, "Legal")
         
+        # --- 4. Conclusion (Optional) ---
+        conclusion_container = QWidget()
+        conclusion_layout = QVBoxLayout(conclusion_container)
+        conclusion_layout.setContentsMargins(0, 0, 0, 0)
+        
+        conclusion_header = QFrame()
+        conclusion_header.setStyleSheet("background: #f8f9fa; border-bottom: 1px solid #ddd;")
+        ch_layout = QHBoxLayout(conclusion_header)
+        self.include_conclusion_cb = QCheckBox("Include Conclusion in document")
+        self.include_conclusion_cb.setChecked(True)
+        ch_layout.addWidget(self.include_conclusion_cb)
+        ch_layout.addStretch()
+        conclusion_layout.addWidget(conclusion_header)
+        
         self.conclusion_editor = RichTextEditor("Conclusion...")
-        self.template_subtabs.addTab(self.conclusion_editor, "Conclusion")
+        conclusion_layout.addWidget(self.conclusion_editor)
+        self.template_subtabs.addTab(conclusion_container, "Conclusion")
         
         layout.addWidget(self.template_subtabs)
         
@@ -322,9 +360,12 @@ class IssueManager(QWidget):
             "issue_id": self.current_issue_id or "preview",
             "issue_name": self.issue_name_input.text() or "Preview Issue",
             "templates": {
-                "brief_facts": self.brief_facts_editor.toHtml(),
+                "brief_facts": self.brief_facts_drc_editor.toHtml(),
+                "brief_facts_scn": self.brief_facts_scn_editor.toHtml(),
+                "include_grounds": self.include_grounds_cb.isChecked(),
                 "grounds": self.grounds_editor.toHtml(),
                 "legal": self.legal_editor.toHtml(),
+                "include_conclusion": self.include_conclusion_cb.isChecked(),
                 "conclusion": self.conclusion_editor.toHtml()
             },
             "tables": self.table_builder.get_data(),
@@ -398,11 +439,13 @@ class IssueManager(QWidget):
         self.tags_input.clear()
         self.active_cb.setChecked(False)
         
-        self.brief_facts_editor.setHtml("")
-        self.scn_editor.setHtml("")
+        self.brief_facts_drc_editor.setHtml("")
+        self.brief_facts_scn_editor.setHtml("")
         self.grounds_editor.setHtml("")
+        self.include_grounds_cb.setChecked(True)
         self.legal_editor.setHtml("")
         self.conclusion_editor.setHtml("")
+        self.include_conclusion_cb.setChecked(True)
         self.table_builder.set_data({})
         self.placeholders_table.setRowCount(0)
         
@@ -434,11 +477,21 @@ class IssueManager(QWidget):
         if meta: self.active_cb.setChecked(bool(meta[0]['active']))
         
         templates = issue.get('templates', {})
-        self.brief_facts_editor.setHtml(templates.get('brief_facts', ''))
-        self.scn_editor.setHtml(templates.get('scn', ''))
+        self.brief_facts_drc_editor.setHtml(templates.get('brief_facts', ''))
+        
+        # Load SCN facts - handle migration from old 'scn' key to new 'brief_facts_scn'
+        scn_facts = templates.get('brief_facts_scn')
+        if not scn_facts:
+            scn_facts = templates.get('scn', '')
+        self.brief_facts_scn_editor.setHtml(scn_facts)
+        
         self.grounds_editor.setHtml(templates.get('grounds', ''))
+        self.include_grounds_cb.setChecked(templates.get('include_grounds', True))
+        
         self.legal_editor.setHtml(templates.get('legal', ''))
+        
         self.conclusion_editor.setHtml(templates.get('conclusion', ''))
+        self.include_conclusion_cb.setChecked(templates.get('include_conclusion', True))
         
         self.table_builder.set_data(issue.get('tables', {}))
         
@@ -464,7 +517,7 @@ class IssueManager(QWidget):
 
     def detect_placeholders(self):
         import re
-        text = (self.brief_facts_editor.toHtml() + self.scn_editor.toHtml() + 
+        text = (self.brief_facts_drc_editor.toHtml() + self.brief_facts_scn_editor.toHtml() + 
                 self.grounds_editor.toHtml() + self.legal_editor.toHtml() + self.conclusion_editor.toHtml())
         matches = set(re.findall(r'\{\{([^}]+)\}\}', text))
         
@@ -491,10 +544,12 @@ class IssueManager(QWidget):
             "version": self.version_input.text(),
             "tags": [t.strip() for t in self.tags_input.text().split(',') if t.strip()],
             "templates": {
-                "brief_facts": self.brief_facts_editor.toHtml(),
-                "scn": self.scn_editor.toHtml(),
+                "brief_facts": self.brief_facts_drc_editor.toHtml(),
+                "brief_facts_scn": self.brief_facts_scn_editor.toHtml(),
+                "include_grounds": self.include_grounds_cb.isChecked(),
                 "grounds": self.grounds_editor.toHtml(),
                 "legal": self.legal_editor.toHtml(),
+                "include_conclusion": self.include_conclusion_cb.isChecked(),
                 "conclusion": self.conclusion_editor.toHtml()
             },
             "active": self.active_cb.isChecked(),

@@ -32,8 +32,39 @@ class ASMT10Generator:
             return ASMT10Generator._generate_liability_table(rows, issue.get('labels'))
         elif template_type == 'itc_yearly_summary' and rows:
             return ASMT10Generator._generate_itc_yearly_table(rows)
+        elif template_type == 'ineligible_itc' and rows:
+            return ASMT10Generator._generate_generic_list_table(rows, ["GSTIN", "Supplier Name", "ITC Availed"])
             
         return "<p><em>No detailed table available for this issue type.</em></p>"
+
+    @staticmethod
+    def _generate_generic_list_table(rows, headers):
+        """Generates a simple table for list-based data (e.g., Cancelled Suppliers)."""
+        html = """
+        <table class="data-table">
+            <thead>
+                <tr>
+        """
+        for h in headers:
+            html += f"<th>{h}</th>"
+        html += """
+                </tr>
+            </thead>
+            <tbody>
+        """
+        for row in rows:
+            html += "<tr>"
+            # Flexible row handling
+            if isinstance(row, dict):
+                for key in ["gstin", "name", "itc_availed", "status"]: # Priority order
+                    if key in row: html += f"<td>{row[key]}</td>"
+            html += "</tr>"
+            
+        html += """
+            </tbody>
+        </table>
+        """
+        return html
 
     @staticmethod
     def _generate_liability_table(rows, labels=None):
@@ -154,7 +185,10 @@ class ASMT10Generator:
         return html
 
     @staticmethod
-    def generate_html(data, issues, for_preview=False):
+    def generate_html(data, issues, for_preview=True):
+        """Generates the HTML content for ASMT-10 with specific layout and formatting."""
+        # Note: for_preview arg is kept for compatibility but logic is unified for WYSIWYG
+        from src.utils.config_manager import ConfigManager
         """Generates the HTML content for ASMT-10 with specific layout and formatting."""
         from src.utils.config_manager import ConfigManager
         import re
@@ -206,7 +240,7 @@ class ASMT10Generator:
             section_html = f"""
             <div class="issue-block">
                 <p><strong>{idx}. {issue.get('category')}</strong></p>
-                <p class="justify-text">{issue.get('description')}</p>
+                <p class="justify-text">{issue.get('brief_facts') or issue.get('description')}</p>
             """
             section_html += ASMT10Generator.generate_issue_table_html(issue)
             section_html += "</div>"
@@ -230,6 +264,33 @@ class ASMT10Generator:
         <html>
         <head>
             <style>
+                /* Print-Ready CSS */
+                @media print {{
+                    @page {{ size: A4 portrait; margin: 15mm; }}
+                    body {{ 
+                        background-color: white !important; 
+                        -webkit-print-color-adjust: exact; 
+                        width: 100%;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                    }}
+                    .page-container {{
+                        width: 100%;
+                        margin: 0 !important;
+                        padding: 0 !important;
+                        border: none !important;
+                        box-shadow: none !important;
+                        min-height: auto !important;
+                        background-color: white !important;
+                    }}
+                    .footer-sign {{ page-break-inside: avoid; }}
+                    .issue-block {{ page-break-inside: avoid; }}
+                    tr {{ page-break-inside: avoid; }}
+                    thead {{ display: table-header-group; }}
+                    tfoot {{ display: table-footer-group; }}
+                    .letterhead-area {{ margin-top: 0 !important; }} 
+                }}
+
                 @page {{ size: A4; margin: 15mm; }}
                 body {{ 
                     font-family: 'Bookman Old Style', serif; 
@@ -237,15 +298,20 @@ class ASMT10Generator:
                     padding: 0;
                     color: black; 
                     font-size: 11pt; 
-                    background-color: {"#f4f7f9" if for_preview else "white"};
+                    background-color: #525659; /* Acrobat gray background for preview */
                 }}
                 .page-container {{
-                    {"width: 210mm; min-height: 297mm; padding: 15mm 20mm; margin: 20px auto; background: white; box-shadow: 0 0 10px rgba(0,0,0,0.1); border-radius: 2px;" if for_preview else "padding: 0mm;"}
+                    width: 210mm; 
+                    min-height: 297mm; 
+                    padding: 15mm 20mm; 
+                    margin: 20px auto; 
+                    background: white; 
+                    box-shadow: 0 0 10px rgba(0,0,0,0.5); 
                     box-sizing: border-box;
                     display: flex;
                     flex-direction: column;
                 }}
-                .letterhead-area {{ {"margin-top: -15mm;" if not for_preview else ""} margin-bottom: 5px; }}
+                .letterhead-area {{ margin-bottom: 5px; }}
                 .oc-header {{ width: 100%; margin-bottom: 15px; font-weight: bold; font-size: 11pt; border-collapse: collapse; }}
                 .oc-header td {{ border: none; padding: 0; }}
                 .form-title-area {{ text-align: center; margin-bottom: 20px; }}

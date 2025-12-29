@@ -44,6 +44,20 @@ class DatabaseManager:
             print(f"Error fetching all GSTINs: {e}")
             return []
 
+    def get_all_taxpayers(self):
+        """Get all taxpayer records from the CSV"""
+        try:
+            if not os.path.exists(TAXPAYERS_FILE):
+                return []
+            
+            df = pd.read_csv(TAXPAYERS_FILE)
+            df.columns = df.columns.str.strip()
+            df = df.fillna("") # Handle NaNs for UI safety
+            return df.to_dict('records')
+        except Exception as e:
+            print(f"Error fetching all taxpayers: {e}")
+            return []
+
     def search_taxpayers(self, query):
         try:
             df = pd.read_csv(TAXPAYERS_FILE)
@@ -395,6 +409,42 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error getting cases by GSTIN: {e}")
             return []
+    
+    def get_next_oc_number(self, year_suffix):
+        """
+        Get the next available OC number for a given year suffix (e.g., '2025' or '25').
+        Expected DB Format: 'SEQUENCE/YEAR' (e.g. '123/2025')
+        Returns: Integer (next sequence number)
+        """
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # Filter entries ending with /year_suffix
+            # Use LIKE '%/2025'
+            query = f"%/{year_suffix}"
+            cursor.execute("SELECT oc_number FROM oc_register WHERE oc_number LIKE ?", (query,))
+            rows = cursor.fetchall()
+            conn.close()
+            
+            max_seq = 0
+            for row in rows:
+                oc_str = str(row[0]).strip()
+                if '/' in oc_str:
+                    try:
+                        # Split '123/2025' -> takes '123'
+                        seq_part = oc_str.split('/')[0]
+                        seq = int(seq_part)
+                        if seq > max_seq:
+                            max_seq = seq
+                    except ValueError:
+                        pass
+            
+            return max_seq + 1
+            
+        except Exception as e:
+            print(f"Error getting next OC number: {e}")
+            return 1
     
     def get_oc_register_entries(self):
         """Get all OC register entries from SQLite"""
@@ -877,7 +927,7 @@ class DatabaseManager:
             values = []
             
             for k, v in data.items():
-                if k in ['demand_details', 'selected_issues']:
+                if k in ['demand_details', 'selected_issues', 'taxpayer_details', 'additional_details']:
                     v = json.dumps(v)
                 fields.append(f"{k} = ?")
                 values.append(v)
@@ -1266,6 +1316,30 @@ class DatabaseManager:
             return None
         except Exception as e:
             print(f"Error getting issue {issue_id}: {e}")
+            return None
+
+    def get_issue_by_name(self, name):
+        """Fetch an issue by its name from issues_master/data tables"""
+        import json
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT d.issue_json 
+                FROM issues_master m
+                JOIN issues_data d ON m.issue_id = d.issue_id
+                WHERE m.issue_name = ?
+            """
+            cursor.execute(query, (name,))
+            row = cursor.fetchone()
+            conn.close()
+            
+            if row:
+                return [None, row[0]] # Returning tuple (None, json_str) to match usage in scrutiny_tab.py line 1559
+            return None
+        except Exception as e:
+            print(f"Error getting issue by name {name}: {e}")
             return None
 
     def delete_proceeding(self, pid):

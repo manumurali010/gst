@@ -1,0 +1,28 @@
+0,1,2,3,4,5,6,7,8,9,10,11,12,13,14
+Goods and Services Tax  - Tax liabilities and ITC Comparison,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,
+,,,,,,,,,,,,,,
+GSTIN:   32AABCL1984A1Z0,,,Legal name:   KNAUF INDIA PRIVATE LIMITED,,,,Report generated at:   20/04/2023 08:04 PM,,,,,,,
+Trade name:   KNAUF INDIA PRIVATE LIMITED,,,Financial Year:   2022-23,,,,,,,,,,,
+,,,,,,,,,,,,,,
+Tax liability and ITC summary,,,,,,,,,,,,,,
+Tax Period,Tax liability as per GSTR-1/IFF and as per GSTR-3B [As per report no. 1 & 3] [GSTR-3B - GSTR-1/IFF],,,,,ITC claimed in GSTR-3B and accrued as per GSTR-2B [As per report number 4 & 5] [GSTR-3B - GSTR-2B] [Valid for April to July]*,,,,,ITC claimed in GSTR-3B (Considering ITC Reversal) and accrued as per GSTR-2B [As per report number 4 & 5] [GSTR-3B - GSTR-2B],,,
+,,,,,,ITC claimed in GSTR-3B(excluding ITC Reversal) and accrued as per GSTR-2B [As per report number 4 & 5] [GSTR-3B - GSTR-2B] [Valid from August onwards]**,,,,,,,,
+,As per GSTR-1/IFF,As per GSTR-3B,Shortfall (-)/ Excess (+) in liability,Cumulative Shortfall (-)/ Excess (+) in liability,Cumulative Shortfall (-)/ Excess (+) in liability as percentage (%),As per GSTR-3B,As per GSTR-2B,Shortfall (-)/ Excess (+) in ITC,Cumulative Shortfall (-)/ Excess (+) in ITC,Cumulative Shortfall (-)/ Excess (+) in ITC as percentage (%),As per GSTR-3B,Shortfall (-)/ Excess (+) in ITC,Cumulative Shortfall (-)/ Excess (+) in ITC,Cumulative Shortfall (-)/ Excess (+) in ITC as percentage (%)
+Apr-22,861668.98,861668.98,0,0,0,1329859.32,1478614.93,-148755.61,-148755.61,-10.06, , , , 
+May-22,2520152.6,2520152.6,0,0,0,1463590.53,1796929.7,-333339.17,-482094.78,-14.72, , , , 
+Jun-22,1887637.8,1887637.8,0,0,0,2183213.64,2183798.8,-585.16,-482679.94,-8.84, , , , 
+Jul-22,1712525.68,1712525.68,0,0,0,894179.97,682164.38,212015.59,-270664.35,-4.41, , , , 
+Aug-22,2434709.32,2434709.32,0,0,0,2180007.07,2040508.51,139498.56,-131165.79,-1.6,1985450.85,-55057.66,-55057.66,-2.7
+Sep-22,1556766.21,1556766.21,0,0,0,1292483.77,1203078.07,89405.7,-41760.09,-0.44,846287.59,-356790.48,-411848.14,-12.7
+Oct-22,1689011.2,1689011.2,0,0,0,1198086.8,1178391.76,19695.04,-22065.05,-0.21,1047060.81,-131330.95,-543179.09,-12.28
+Nov-22,1556608.44,1556608.44,0,0,0,1328136.46,1327689.52,446.94,-21618.11,-0.18,1221566.72,-106122.8,-649301.89,-11.29
+Dec-22,1783271.6,1783271.6,0,0,0,1129341.37,1129341.37,0,-21618.11,-0.17,1029147.76,-100193.61,-749495.5,-10.9
+Jan-23,1777135.91,1777135.91,0,0,0,1372133.39,1372133.39,0,-21618.11,-0.15,1276502.79,-95630.6,-845126.1,-10.24
+Feb-23,1415230.39,1415230.39,0,0,0,843477.75,843477.75,0,-21618.11,-0.14,760014.47,-83463.28,-928589.38,-10.21
+Mar-23,2637704.08,2637704.08,0,0,0,1500096.13,1500096.13,0,-21618.11,-0.13,1441380.81,-58715.32,-987304.7,-9.32
+Total,21832422.21,21832422.21,0,0,0,16714606.2,16736224.31,-21618.11,-21618.11,-0.13,9607411.8,-987304.7,-987304.7,-9.32
+,,,,,,,,,,,,,,
+"* 1. Note : ITC claimed in GSTR-3B is net of reversal of ITC and includes reversal made on account of reverse charge. Therefore, ITC reflected in GSTR-3B might be lesser than that is auto-populated in GSTR-2B.",,,,,,,,,,,,,,
+"   2. Represents the report generation tables/logic that will be used until July 2022 i.e., the return period up to which the previous version of GSTR-3B Table 4 was applicable.",,,,,,,,,,,,,,
+"** Represents the report generation tables/logic that will be effective from August 2022 onwards i.e., the return period from which the new version of GSTR-3B Table 4 is applicable.",,,,,,,,,,,,,,

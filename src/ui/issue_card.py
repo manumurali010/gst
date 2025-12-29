@@ -467,76 +467,64 @@ class IssueCard(QFrame):
     def update_editor_content(self):
         """Populate editor with template text"""
         import re
-        # We construct the initial text from the template
         t = self.template.get('templates', {})
         
-        # Helper to safely get content
         def get_content(key):
             raw = t.get(key, '')
             return self.extract_html_body(raw)
         
+        # 1. Determine Brief Facts content based on mode
         if self.mode == "SCN":
-            # SCN Mode
-            scn_raw = t.get('scn', '')
-            scn_body = self.extract_html_body(scn_raw)
-            
-            # Check if effectively empty (ignore empty tags)
-            # We strip all tags and check if any text remains
-            text_content = re.sub(r'<[^>]+>', '', scn_body).strip()
-            
-            # Fallback: If no specific SCN content, use the standard DRC-01A structure
-            if not text_content:
-                html = f"""
-                <div style="margin-bottom: 15px;">
-                    <b>Brief Facts:</b><br>
-                    {get_content('brief_facts')}
-                </div>
-                
-                <div style="margin-bottom: 15px;">
-                    <b>Grounds:</b><br>
-                    {get_content('grounds')}
-                </div>
-                
-                <div style="margin-bottom: 15px;">
-                    <b>Legal Provisions:</b><br>
-                    {get_content('legal')}
-                </div>
-                
-                <div style="margin-bottom: 15px;">
-                    <b>Conclusion:</b><br>
-                    {get_content('conclusion')}
-                </div>
-                """
-            else:
-                # Use specific SCN template (cleaned body)
-                html = f"""
-                <div style="margin-bottom: 15px;">
-                    {scn_body}
-                </div>
-                """
+            brief_facts = get_content('brief_facts_scn')
+            if not brief_facts:
+                brief_facts = get_content('scn') # Legacy fallback
+            if not brief_facts:
+                brief_facts = get_content('brief_facts') # Absolute fallback
         else:
-            # Default DRC-01A Mode
-            html = f"""
-            <div style="margin-bottom: 15px;">
-                <b>Brief Facts:</b><br>
-                {get_content('brief_facts')}
-            </div>
-            
+            brief_facts = get_content('brief_facts')
+
+        # 2. Check optional sections
+        include_grounds = t.get('include_grounds', True)
+        include_conclusion = t.get('include_conclusion', True)
+
+        # 3. Build structured HTML
+        html_sections = []
+        
+        # Brief Facts
+        html_sections.append(f"""
+        <div style="margin-bottom: 15px;">
+            <b>Brief Facts:</b><br>
+            {brief_facts}
+        </div>
+        """)
+        
+        # Grounds (Optional)
+        if include_grounds:
+            html_sections.append(f"""
             <div style="margin-bottom: 15px;">
                 <b>Grounds:</b><br>
                 {get_content('grounds')}
             </div>
+            """)
             
-            <div style="margin-bottom: 15px;">
-                <b>Legal Provisions:</b><br>
-                {get_content('legal')}
-            </div>
-            
+        # Legal (Always)
+        html_sections.append(f"""
+        <div style="margin-bottom: 15px;">
+            <b>Legal Provisions:</b><br>
+            {get_content('legal')}
+        </div>
+        """)
+        
+        # Conclusion (Optional)
+        if include_conclusion:
+            html_sections.append(f"""
             <div style="margin-bottom: 15px;">
                 <b>Conclusion:</b><br>
                 {get_content('conclusion')}
             </div>
-            """
+            """)
+            
+        html = "".join(html_sections)
         
         # Replace placeholders in the text
         for var_name, var_val in self.variables.items():

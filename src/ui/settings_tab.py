@@ -1,14 +1,66 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QComboBox, QTextBrowser, QFileDialog, QMessageBox, QTabWidget, QLineEdit,
                              QProgressBar, QFrame, QListWidget, QListWidgetItem, QSplitter, QApplication,
-                             QSlider, QFormLayout)
+                             QSlider, QFormLayout, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtCore import Qt, QSize, QUrl
+from PyQt6.QtGui import QColor
 from src.utils.config_manager import ConfigManager
 from src.database.db_manager import DatabaseManager
 import os
 import shutil
 import base64
+
+import base64
+
+class FileUploaderWidget(QFrame):
+    def __init__(self, label_text, parent=None):
+        super().__init__(parent)
+        self.file_path = ""
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        
+        lbl = QLabel(label_text)
+        lbl.setFixedWidth(140)
+        lbl.setStyleSheet("font-weight: bold; color: #34495e;")
+        layout.addWidget(lbl)
+        
+        self.path_lbl = QLabel("No file selected")
+        self.path_lbl.setStyleSheet("color: #7f8c8d; font-style: italic;")
+        layout.addWidget(self.path_lbl)
+        
+        layout.addStretch()
+        
+        self.browse_btn = QPushButton("Select File")
+        self.browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.browse_btn.setStyleSheet("""
+            QPushButton { background-color: #ecf0f1; color: #2c3e50; border: 1px solid #bdc3c7; padding: 5px 10px; border-radius: 4px; }
+            QPushButton:hover { background-color: #bdc3c7; }
+        """)
+        self.browse_btn.clicked.connect(self.browse_file)
+        layout.addWidget(self.browse_btn)
+        
+        self.setFixedHeight(40)
+        
+    def browse_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Excel File", "", "Excel Files (*.xlsx *.xls)"
+        )
+        if file_path:
+            self.file_path = file_path
+            self.path_lbl.setText(os.path.basename(file_path))
+            self.path_lbl.setStyleSheet("color: #2c3e50; font-weight: bold;")
+            
+    def text(self):
+        """Compatibility with QLineEdit for existing logic"""
+        return self.file_path
+        
+    def clear(self):
+        self.file_path = ""
+        self.path_lbl.setText("No file selected")
+        self.path_lbl.setStyleSheet("color: #7f8c8d; font-style: italic;")
 
 class LetterheadListItem(QWidget):
     def __init__(self, filename, is_default, set_default_cb, delete_cb):
@@ -541,109 +593,155 @@ class SettingsTab(QWidget):
         return widget
         
     def create_data_management_tab(self):
-        """Create the data management tab"""
+        """Create the data management tab with Split View"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         
-        # Title
-        title = QLabel("Data Management")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; margin-bottom: 20px;")
-        layout.addWidget(title)
+        # === TOP SECTION: Upload Controls (Fixed Height) ===
+        top_container = QFrame()
+        top_container.setStyleSheet("background-color: #f8f9fa; border-bottom: 1px solid #ddd;")
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(20, 20, 20, 20)
         
-        # --- Update Taxpayers Section ---
-        taxpayer_section = QLabel("Update Taxpayer Database")
-        taxpayer_section.setStyleSheet("font-size: 14px; font-weight: bold; color: #2c3e50;")
-        layout.addWidget(taxpayer_section)
+        # Header Row
+        header_layout = QHBoxLayout()
+        title = QLabel("📦 Data Import")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;")
+        header_layout.addWidget(title)
         
-        desc = QLabel("Upload Excel files for each category to update the database. Existing records will be updated.")
-        desc.setStyleSheet("color: #7f8c8d; margin-bottom: 20px;")
-        desc.setWordWrap(True)
-        layout.addWidget(desc)
+        header_layout.addStretch()
         
-        # Helper to create file input row
-        def create_file_row(label_text, attr_name):
-            row_layout = QHBoxLayout()
-            lbl = QLabel(label_text)
-            lbl.setFixedWidth(120)
-            row_layout.addWidget(lbl)
-            
-            line_edit = QLineEdit()
-            line_edit.setPlaceholderText(f"Select {label_text} file...")
-            line_edit.setReadOnly(True)
-            setattr(self, attr_name, line_edit)
-            row_layout.addWidget(line_edit)
-            
-            btn = QPushButton("Browse")
-            btn.clicked.connect(lambda: self.browse_file(attr_name))
-            btn.setStyleSheet("padding: 5px 10px;")
-            row_layout.addWidget(btn)
-            
-            layout.addLayout(row_layout)
-
-        # 1. Active Taxpayers
-        create_file_row("Active Taxpayers:", "active_file_input")
-        
-        # 2. Suspended Taxpayers
-        create_file_row("Suspended Taxpayers:", "suspended_file_input")
-        
-        # 3. Cancelled Taxpayers
-        create_file_row("Cancelled Taxpayers:", "cancelled_file_input")
-        
-        layout.addSpacing(20)
-        
-        # Actions
-        btn_layout = QHBoxLayout()
-        
-        # Reset Button
-        reset_btn = QPushButton("Reset Database")
+        # Reset Button (Compact)
+        reset_btn = QPushButton("Reset DB")
         reset_btn.clicked.connect(self.reset_database)
+        reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         reset_btn.setStyleSheet("""
-            QPushButton { background-color: #e74c3c; color: white; padding: 10px 20px; font-weight: bold; border-radius: 4px; }
-            QPushButton:hover { background-color: #c0392b; }
+            QPushButton { background-color: transparent; color: #e74c3c; padding: 5px 10px; font-weight: bold; border: 1px solid #e74c3c; border-radius: 4px; }
+            QPushButton:hover { background-color: #fae5e3; }
         """)
-        btn_layout.addWidget(reset_btn)
+        header_layout.addWidget(reset_btn)
         
-        btn_layout.addStretch()
-        
-        # Import Button
-        import_btn = QPushButton("Import All")
+        # Import Button (Compact)
+        import_btn = QPushButton("Run Import")
         import_btn.clicked.connect(self.import_taxpayers_bulk)
+        import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         import_btn.setStyleSheet("""
-            QPushButton { background-color: #27ae60; color: white; padding: 10px 30px; font-weight: bold; border-radius: 4px; }
+            QPushButton { background-color: #27ae60; color: white; padding: 6px 15px; font-weight: bold; border-radius: 4px; border: none; }
             QPushButton:hover { background-color: #2ecc71; }
         """)
-        btn_layout.addWidget(import_btn)
+        header_layout.addWidget(import_btn)
         
-        layout.addLayout(btn_layout)
+        top_layout.addLayout(header_layout)
         
-        # Progress bar
+        # Inputs Row
+        inputs_layout = QHBoxLayout()
+        inputs_layout.setSpacing(20)
+        
+        # 1. Active
+        self.active_file_input = FileUploaderWidget("Active Taxpayers")
+        inputs_layout.addWidget(self.active_file_input)
+        
+        # 2. Suspended
+        self.suspended_file_input = FileUploaderWidget("Suspended Taxpayers")
+        inputs_layout.addWidget(self.suspended_file_input)
+        
+        # 3. Cancelled
+        self.cancelled_file_input = FileUploaderWidget("Cancelled Taxpayers")
+        inputs_layout.addWidget(self.cancelled_file_input)
+        
+        top_layout.addLayout(inputs_layout)
+        
+        # Progress & Status
         self.import_progress = QProgressBar()
         self.import_progress.setVisible(False)
-        self.import_progress.setStyleSheet("margin-top: 20px;")
-        layout.addWidget(self.import_progress)
+        self.import_progress.setFixedHeight(4)
+        self.import_progress.setStyleSheet("QProgressBar { border: none; background: #e0e0e0; } QProgressBar::chunk { background-color: #27ae60; }")
+        top_layout.addWidget(self.import_progress)
         
-        # Status label
         self.import_status = QLabel("")
-        self.import_status.setStyleSheet("margin-top: 10px; font-weight: bold;")
+        self.import_status.setStyleSheet("font-size: 11px; margin-top: 5px;")
         self.import_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.import_status)
+        top_layout.addWidget(self.import_status)
         
-        layout.addStretch()
+        layout.addWidget(top_container)
+        
+        # === BOTTOM SECTION: Taxpayer Table ===
+        bottom_container = QFrame()
+        bottom_container.setStyleSheet("background-color: white;")
+        bottom_layout = QVBoxLayout(bottom_container)
+        bottom_layout.setContentsMargins(20, 10, 20, 10)
+        
+        lbl_table = QLabel("Taxpayer Database")
+        lbl_table.setStyleSheet("font-size: 14px; font-weight: bold; color: #7f8c8d; margin-bottom: 5px;")
+        bottom_layout.addWidget(lbl_table)
+        
+        self.taxpayer_table = QTableWidget()
+        self.taxpayer_table.setAlternatingRowColors(True)
+        self.taxpayer_table.setShowGrid(False)
+        self.taxpayer_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.taxpayer_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.taxpayer_table.verticalHeader().setVisible(False)
+        self.taxpayer_table.setStyleSheet("""
+            QTableWidget { border: 1px solid #e0e0e0; border-radius: 4px; background-color: white; }
+            QHeaderView::section { background-color: #f1f5f9; padding: 6px; border: none; font-weight: bold; color: #555; }
+            QTableWidget::item { padding: 4px; }
+            QTableWidget::item:selected { background-color: #e3f2fd; color: black; }
+        """)
+        
+        columns = ["GSTIN", "Trade Name", "Legal Name", "Status", "Address", "Constitution"]
+        self.taxpayer_table.setColumnCount(len(columns))
+        self.taxpayer_table.setHorizontalHeaderLabels(columns)
+        self.taxpayer_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.taxpayer_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # GSTIN
+        
+        bottom_layout.addWidget(self.taxpayer_table)
+        
+        layout.addWidget(bottom_container)
+        
+        # Initial Load
+        self.refresh_taxpayer_table()
         
         return widget
-    
-    def browse_file(self, attr_name):
-        """Generic file browser"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Excel File",
-            "",
-            "Excel Files (*.xlsx *.xls)"
-        )
+
+    def refresh_taxpayer_table(self):
+        """Reload taxpayer data into the table"""
+        taxpayers = self.db.get_all_taxpayers()
+        self.taxpayer_table.setRowCount(0)
         
-        if file_path:
-            input_widget = getattr(self, attr_name)
-            input_widget.setText(file_path)
+        # Status Colors
+        status_colors = {
+            'Active': '#d4edda',
+            'Suspended': '#fff3cd',
+            'Cancelled': '#f8d7da'
+        }
+        
+        for row_idx, tp in enumerate(taxpayers):
+            self.taxpayer_table.insertRow(row_idx)
+            
+            # Helper to create item
+            def create_item(text):
+                item = QTableWidgetItem(str(text))
+                return item
+                
+            self.taxpayer_table.setItem(row_idx, 0, create_item(tp.get('GSTIN', '')))
+            self.taxpayer_table.setItem(row_idx, 1, create_item(tp.get('Trade Name', '')))
+            self.taxpayer_table.setItem(row_idx, 2, create_item(tp.get('Legal Name', '')))
+            
+            # Status badge-like item
+            status = tp.get('Status', '')
+            status_item = create_item(status)
+            if status in status_colors:
+                status_item.setBackground(QColor(status_colors[status])) # Need QColor import?
+                # Actually, simple background is easier with setBackground or just let it be text for now
+            self.taxpayer_table.setItem(row_idx, 3, status_item)
+            
+            self.taxpayer_table.setItem(row_idx, 4, create_item(tp.get('Address', '')))
+            self.taxpayer_table.setItem(row_idx, 5, create_item(tp.get('Constitution', '')))
+
+    # Removed browse_file as it is handled by FileUploaderWidget now (or used by other tabs? No, only Data Tab uses it)
+    
     
     def reset_database(self):
         """Clear the taxpayer database"""
@@ -659,6 +757,7 @@ class SettingsTab(QWidget):
             if success:
                 QMessageBox.information(self, "Success", msg)
                 self.import_status.setText("Database cleared.")
+                self.refresh_taxpayer_table() # REFRESH TABLE
             else:
                 QMessageBox.critical(self, "Error", msg)
 
@@ -708,6 +807,8 @@ class SettingsTab(QWidget):
                 self.active_file_input.clear()
                 self.suspended_file_input.clear()
                 self.cancelled_file_input.clear()
+                
+                self.refresh_taxpayer_table() # REFRESH TABLE
             else:
                 self.import_status.setText("Import Failed.")
                 self.import_status.setStyleSheet("color: #e74c3c; font-weight: bold;")

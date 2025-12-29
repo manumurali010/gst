@@ -14,6 +14,78 @@ import os
 import json
 from jinja2 import Template, Environment, FileSystemLoader
 import datetime
+# Import SideNavCard from scrutiny_tab (or define it here if import causes circular dependency issues)
+# For now, assuming it's safe to import. If not, we will get an ImportError and fix it.
+try:
+    from src.ui.scrutiny_tab import SideNavCard
+except ImportError:
+    # Fallback definition if import fails due to circular dependency or other reasons
+    class SideNavCard(QFrame):
+        clicked = QtCore.pyqtSignal(int)
+        def __init__(self, index, icon, title, parent=None):
+            super().__init__(parent)
+            self.index = index
+            self.is_active = False
+            self.setObjectName("NavCard")
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.setFixedHeight(50)
+            
+            layout = QHBoxLayout(self)
+            layout.setContentsMargins(15, 0, 15, 0)
+            layout.setSpacing(15)
+            
+            # Icon/Bullet
+            self.icon_lbl = QLabel(icon)
+            self.icon_lbl.setFixedSize(24, 24)
+            self.icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.icon_lbl.setStyleSheet("background-color: #e8f0fe; color: #1a73e8; border-radius: 12px; font-weight: bold;")
+            layout.addWidget(self.icon_lbl)
+            
+            # Title
+            self.title_lbl = QLabel(title)
+            self.title_lbl.setStyleSheet("font-size: 14px; font-weight: 500; color: #444;")
+            layout.addWidget(self.title_lbl)
+            
+            # Checkmark (hidden by default)
+            self.check_lbl = QLabel("✓")
+            self.check_lbl.setStyleSheet("color: #27ae60; font-weight: bold; font-size: 14px;")
+            self.check_lbl.hide()
+            layout.addWidget(self.check_lbl)
+            
+            layout.addStretch()
+            self.set_style()
+
+        def set_active(self, active):
+            self.is_active = active
+            self.set_style()
+            
+        def set_style(self):
+            if self.is_active:
+                self.setStyleSheet("""
+                    #NavCard { 
+                        background-color: #e3f2fd; 
+                        border-right: 3px solid #1a73e8;
+                        border-radius: 0px;
+                    }
+                """)
+                self.title_lbl.setStyleSheet("font-size: 14px; font-weight: 600; color: #1a73e8;")
+                self.icon_lbl.setStyleSheet("background-color: #1a73e8; color: white; border-radius: 12px; font-weight: bold;")
+            else:
+                self.setStyleSheet("""
+                    #NavCard { 
+                        background-color: transparent; 
+                        border-right: 3px solid transparent;
+                    }
+                    #NavCard:hover {
+                        background-color: #f8f9fa;
+                    }
+                """)
+                self.title_lbl.setStyleSheet("font-size: 14px; font-weight: 500; color: #444;")
+                self.icon_lbl.setStyleSheet("background-color: #e8f0fe; color: #1a73e8; border-radius: 12px; font-weight: bold;")
+
+        def mousePressEvent(self, event):
+            self.clicked.emit(self.index)
+            super().mousePressEvent(event)
 
 class ProceedingsWorkspace(QWidget):
     def __init__(self, navigate_callback, proceeding_id=None):
@@ -173,6 +245,76 @@ class ProceedingsWorkspace(QWidget):
         
         self.preview_container = preview_widget # Assign widget to variable expected by splitter
 
+    def create_side_nav_layout(self, items):
+        """
+        Creates a side navigation layout (Accordion/Master-Detail).
+        items: list of tuples (title, icon_char, widget)
+        Returns: main_widget containing the layout
+        """
+        main_widget = QWidget()
+        main_layout = QHBoxLayout(main_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # 1. Left Sidebar
+        sidebar = QFrame()
+        sidebar.setFixedWidth(250)
+        sidebar.setStyleSheet("background-color: white; border-right: 1px solid #e0e0e0;")
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(0, 20, 0, 20)
+        sidebar_layout.setSpacing(5)
+        
+        nav_cards = []
+        content_stack = QStackedWidget()
+        
+        def switch_page(index):
+            # Update Active State
+            for i, card in enumerate(nav_cards):
+                card.set_active(i == index)
+            content_stack.setCurrentIndex(index)
+            
+        for i, (title, icon, page_widget) in enumerate(items):
+            # Create Nav Card
+            card = SideNavCard(i, icon, title)
+            card.clicked.connect(switch_page)
+            sidebar_layout.addWidget(card)
+            nav_cards.append(card)
+            
+            # Add Page to Stack
+            # Wrap page in scroll area if needed, but usually the page itself handles it
+            # Let's ensure uniform styling for pages
+            page_container = QWidget()
+            page_layout = QVBoxLayout(page_container)
+            page_layout.setContentsMargins(20, 20, 20, 20)
+            
+            # Header for the page
+            header = QLabel(title)
+            header.setStyleSheet("font-size: 20px; font-weight: bold; color: #2c3e50; margin-bottom: 15px;")
+            page_layout.addWidget(header)
+            
+            page_layout.addWidget(page_widget)
+            page_layout.addStretch() # Push content up
+            
+            # Scroll Area for the page content
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(page_container)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setStyleSheet("background-color: #f8f9fa;")
+            
+            content_stack.addWidget(scroll)
+            
+        sidebar_layout.addStretch()
+        
+        # Set first item active
+        if nav_cards:
+            switch_page(0)
+            
+        main_layout.addWidget(sidebar)
+        main_layout.addWidget(content_stack)
+        
+        return main_widget
+
 
     def create_summary_tab(self):
         widget = QWidget()
@@ -236,33 +378,35 @@ class ProceedingsWorkspace(QWidget):
         # Initialize list of issue cards
         self.issue_cards = []
         
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(15)
-        layout.setContentsMargins(10, 10, 10, 10)
-        
         # --- DRAFT CONTAINER ---
         self.drc01a_draft_container = QWidget()
         draft_layout = QVBoxLayout(self.drc01a_draft_container)
         draft_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Title
-        title = QLabel("<b>Drafting DRC-01A</b>")
-        title.setStyleSheet("font-size: 18px; margin-bottom: 10px; color: #2c3e50;")
-        draft_layout.addWidget(title)
+        # Prepare Pages for Side Nav
         
-        # 0. Reference Details (OC No)
-        print("ProceedingsWorkspace: creating ref_card")
-        ref_card = ModernCard("Reference Details", collapsible=True)
-        ref_layout = QHBoxLayout()
+        # 1. Reference Details
+        ref_widget = QWidget()
+        ref_layout = QVBoxLayout(ref_widget)
+        ref_layout.setContentsMargins(0,0,0,0)
+        
+        ref_card = QWidget() # Was ModernCard
+        ref_inner_layout = QHBoxLayout(ref_card)
         
         oc_label = QLabel("OC No:")
         self.oc_number_input = QLineEdit()
-        self.oc_number_input.setPlaceholderText("Enter OC Number (Optional)")
+        self.oc_number_input.setPlaceholderText("Format: No./Year (e.g. 123/2025)")
         self.oc_number_input.textChanged.connect(self.trigger_preview)
         
-        ref_layout.addWidget(oc_label)
-        ref_layout.addWidget(self.oc_number_input)
+        # Suggest Button
+        suggest_btn = QPushButton("Get Next")
+        suggest_btn.setToolTip("Get next available OC Number")
+        suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 10px;")
+        suggest_btn.clicked.connect(lambda: self.suggest_next_oc(self.oc_number_input))
+        
+        ref_inner_layout.addWidget(oc_label)
+        ref_inner_layout.addWidget(self.oc_number_input)
+        ref_inner_layout.addWidget(suggest_btn)
         
         oc_date_label = QLabel("OC Date:")
         self.oc_date_input = QDateEdit()
@@ -270,30 +414,24 @@ class ProceedingsWorkspace(QWidget):
         self.oc_date_input.setDate(QDate.currentDate())
         self.oc_date_input.setMinimumDate(QDate.currentDate())
         self.oc_date_input.dateChanged.connect(self.trigger_preview)
-        ref_layout.addWidget(oc_date_label)
-        ref_layout.addWidget(self.oc_date_input)
+        ref_inner_layout.addWidget(oc_date_label)
+        ref_inner_layout.addWidget(self.oc_date_input)
+        ref_inner_layout.addStretch()
         
-        self.oc_date_input.dateChanged.connect(self.trigger_preview)
-        ref_layout.addWidget(oc_date_label)
-        ref_layout.addWidget(self.oc_date_input)
-
-        
+        ref_layout.addWidget(ref_card)
         ref_layout.addStretch()
-        ref_card.addLayout(ref_layout)
-        draft_layout.addWidget(ref_card)
         
-        # 1. Issues Involved (Collapsible)
-        print("ProceedingsWorkspace: creating issues_card")
-        issues_card = ModernCard("Issues Involved", collapsible=True)
+        # 2. Issues Involved
+        issues_widget = QWidget()
+        issues_layout = QVBoxLayout(issues_widget)
+        issues_layout.setContentsMargins(0,0,0,0)
         
-        # Issue Selection
+        # Issue Selection Toolbar
         issue_selection_layout = QHBoxLayout()
         issue_label = QLabel("Select Issue:")
         self.issue_combo = QComboBox()
         self.issue_combo.addItem("Select an issue...", None)
-        print("ProceedingsWorkspace: loading issue templates")
         self.load_issue_templates()
-        print("ProceedingsWorkspace: issue templates loaded")
         
         refresh_issues_btn = QPushButton("🔄")
         refresh_issues_btn.setToolTip("Refresh issue list")
@@ -308,32 +446,27 @@ class ProceedingsWorkspace(QWidget):
         issue_selection_layout.addWidget(refresh_issues_btn)
         issue_selection_layout.addWidget(insert_issue_btn)
         issue_selection_layout.addStretch()
-        issues_card.addLayout(issue_selection_layout)
+        issues_layout.addLayout(issue_selection_layout)
         
         self.issues_container = QWidget()
         self.issues_layout = QVBoxLayout(self.issues_container)
         self.issues_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.issues_layout.setSpacing(15)
         
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self.issues_container)
-        scroll.setMinimumHeight(300)
-        
-        issues_card.addWidget(scroll)
-        draft_layout.addWidget(issues_card)
+        # Use existing issue cards logic (they are ModernCards, so they fit well)
+        issues_layout.addWidget(self.issues_container)
+        issues_layout.addStretch()
 
-        # 2. Sections Violated (Collapsible)
-        print("ProceedingsWorkspace: creating sections_card")
-        sections_card = ModernCard("Sections Violated", collapsible=True)
+        # 3. Sections Violated
+        sections_widget = QWidget()
+        sec_layout = QVBoxLayout(sections_widget)
+        sec_layout.setContentsMargins(0,0,0,0)
         
-        # Section Selection
         section_selection_layout = QHBoxLayout()
         section_label = QLabel("Select Section:")
         self.section_combo = QComboBox()
         self.section_combo.addItem("Select a section...", None)
-        print("ProceedingsWorkspace: loading sections")
         self.load_sections()
-        print("ProceedingsWorkspace: sections loaded")
         
         add_section_btn = QPushButton("Add Section")
         add_section_btn.setProperty("class", "primary")
@@ -343,28 +476,23 @@ class ProceedingsWorkspace(QWidget):
         section_selection_layout.addWidget(self.section_combo)
         section_selection_layout.addWidget(add_section_btn)
         section_selection_layout.addStretch()
-        sections_card.addLayout(section_selection_layout)
+        sec_layout.addLayout(section_selection_layout)
         
-        print("ProceedingsWorkspace: creating sections_editor")
         self.sections_editor = RichTextEditor("Enter the sections of law that were violated...")
-        print("ProceedingsWorkspace: sections_editor created")
-        self.sections_editor.setMinimumHeight(100)
+        self.sections_editor.setMinimumHeight(400)
         self.sections_editor.textChanged.connect(self.trigger_preview)
-        sections_card.addWidget(self.sections_editor)
+        sec_layout.addWidget(self.sections_editor)
         
-        draft_layout.addWidget(sections_card)
-        print("ProceedingsWorkspace: sections_card added")
-        
-        # 3. Tax Demand Details (Collapsible)
-        print("ProceedingsWorkspace: creating tax_card")
-        tax_card = ModernCard("Tax Demand Details", collapsible=True)
-        
-        # Act Selection
-        act_label = QLabel("Select Acts:")
-        act_label.setStyleSheet("font-weight: bold; margin-top: 5px;")
-        tax_card.addWidget(act_label)
+        # 4. Tax Demand Details
+        tax_widget = QWidget()
+        tax_layout = QVBoxLayout(tax_widget)
+        tax_layout.setContentsMargins(0,0,0,0)
         
         act_selection_layout = QHBoxLayout()
+        act_label = QLabel("Select Acts:")
+        act_label.setStyleSheet("font-weight: bold;")
+        act_selection_layout.addWidget(act_label)
+        
         self.act_checkboxes = {}
         for act in ["CGST", "SGST", "IGST", "Cess"]:
             cb = QCheckBox(act)
@@ -372,96 +500,93 @@ class ProceedingsWorkspace(QWidget):
             self.act_checkboxes[act] = cb
             act_selection_layout.addWidget(cb)
         act_selection_layout.addStretch()
-        tax_card.addLayout(act_selection_layout)
+        tax_layout.addLayout(act_selection_layout)
         
-        # Tax Demand Table
-        print("ProceedingsWorkspace: creating tax table")
         self.tax_table = QTableWidget()
         self.tax_table.setColumnCount(7)
         self.tax_table.setHorizontalHeaderLabels([
             "Act", "Tax Period From", "Tax Period To", "Tax (₹)", "Interest (₹)", "Penalty (₹)", "Total (₹)"
         ])
         self.tax_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.tax_table.setMinimumHeight(200)
-        tax_card.addWidget(self.tax_table)
-        
-        # Add Total Row initially
-        print("ProceedingsWorkspace: adding total row")
+        self.tax_table.setMinimumHeight(300)
+        tax_layout.addWidget(self.tax_table)
         self.add_total_row()
         
-        draft_layout.addWidget(tax_card)
-        print("ProceedingsWorkspace: tax_card added")
-
-        # 4. Dates (Collapsible)
-        print("ProceedingsWorkspace: creating dates_card")
-        dates_card = ModernCard("Dates", collapsible=True)
-        dates_layout = QHBoxLayout()
+        # 5. Dates & Compliance
+        dates_widget = QWidget()
+        dates_layout = QVBoxLayout(dates_widget)
+        dates_layout.setContentsMargins(0,0,0,0)
         
         # Last Date for Reply
-        reply_layout = QVBoxLayout()
         reply_label = QLabel("Last Date for Reply")
         self.reply_date = QDateEdit()
         self.reply_date.setCalendarPopup(True)
         self.reply_date.setDate(QDate.currentDate().addDays(30))
-        self.reply_date.setMinimumDate(QDate.currentDate()) # Prevent past dates
+        self.reply_date.setMinimumDate(QDate.currentDate())
         self.reply_date.dateChanged.connect(self.trigger_preview)
-        reply_layout.addWidget(reply_label)
-        reply_layout.addWidget(self.reply_date)
-        dates_layout.addLayout(reply_layout)
+        dates_layout.addWidget(reply_label)
+        dates_layout.addWidget(self.reply_date)
         
         # Last Date for Payment
-        payment_layout = QVBoxLayout()
         payment_label = QLabel("Last Date for Payment")
         self.payment_date = QDateEdit()
         self.payment_date.setCalendarPopup(True)
         self.payment_date.setDate(QDate.currentDate().addDays(30))
-        self.payment_date.setMinimumDate(QDate.currentDate()) # Prevent past dates
+        self.payment_date.setMinimumDate(QDate.currentDate())
         self.payment_date.dateChanged.connect(self.trigger_preview)
-        payment_layout.addWidget(payment_label)
-        payment_layout.addWidget(self.payment_date)
-        
-        print("ProceedingsWorkspace: create_drc01a_tab done")
-        dates_layout.addLayout(payment_layout)
-        
+        dates_layout.addWidget(payment_label)
+        dates_layout.addWidget(self.payment_date)
         dates_layout.addStretch()
         
-        dates_layout.addStretch()
-        dates_card.addLayout(dates_layout)
-        draft_layout.addWidget(dates_card)
+        # 6. Actions
+        actions_widget = QWidget()
+        actions_layout = QVBoxLayout(actions_widget)
         
-        # Action Buttons
-        buttons_layout = QHBoxLayout()
+        actions_desc = QLabel("Review the generated document in the right panel and proceed.")
+        actions_layout.addWidget(actions_desc)
         
+        # Letterhead Checkbox
+        self.show_letterhead_cb = QCheckBox("Include Letterhead in Generation")
+        self.show_letterhead_cb.setChecked(True)
+        self.show_letterhead_cb.stateChanged.connect(self.trigger_preview)
+        actions_layout.addWidget(self.show_letterhead_cb)
+        
+        action_btns_layout = QHBoxLayout()
         save_btn = QPushButton("Save Draft")
         save_btn.clicked.connect(self.save_drc01a)
-        buttons_layout.addWidget(save_btn)
+        action_btns_layout.addWidget(save_btn)
         
         pdf_btn = QPushButton("Generate PDF")
         pdf_btn.setProperty("class", "danger")
         pdf_btn.clicked.connect(self.generate_pdf)
-        buttons_layout.addWidget(pdf_btn)
+        action_btns_layout.addWidget(pdf_btn)
         
         docx_btn = QPushButton("Generate DOCX")
         docx_btn.setProperty("class", "primary")
         docx_btn.clicked.connect(self.generate_docx)
-        buttons_layout.addWidget(docx_btn)
+        action_btns_layout.addWidget(docx_btn)
         
-        finalize_btn = QPushButton("Finalize")
-        finalize_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
+        finalize_btn = QPushButton("Finalize & Issue")
+        finalize_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 10px; font-weight: bold;")
         finalize_btn.clicked.connect(self.show_drc01a_finalization_panel)
-        buttons_layout.addWidget(finalize_btn)
+        action_btns_layout.addWidget(finalize_btn)
         
-        buttons_layout.addStretch()
+        action_btns_layout.addStretch()
+        actions_layout.addLayout(action_btns_layout)
+        actions_layout.addStretch()
         
-        # Letterhead Checkbox
-        self.show_letterhead_cb = QCheckBox("Include Letterhead")
-        self.show_letterhead_cb.setChecked(True)
-        self.show_letterhead_cb.stateChanged.connect(self.trigger_preview)
-        buttons_layout.addWidget(self.show_letterhead_cb)
+        # Build Side Nav Items
+        nav_items = [
+            ("Reference Details", "1", ref_widget),
+            ("Issues Involved", "2", issues_widget),
+            ("Sections Violated", "3", sections_widget),
+            ("Tax Demand Details", "4", tax_widget),
+            ("Dates & Compliance", "5", dates_widget),
+            ("Actions & Finalize", "✓", actions_widget)
+        ]
         
-        draft_layout.addLayout(buttons_layout)
-        
-        draft_layout.addStretch()
+        side_nav = self.create_side_nav_layout(nav_items)
+        draft_layout.addWidget(side_nav)
         
         # --- FINALIZATION CONTAINER (Initially Hidden) ---
         self.drc01a_finalization_container = self.create_drc01a_finalization_panel()
@@ -481,13 +606,6 @@ class ProceedingsWorkspace(QWidget):
         view_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         view_layout.addWidget(view_msg)
         
-        # Placeholder for Preview Image (Removed as per user request)
-        # self.drc01a_view_preview = QLabel()
-        # self.drc01a_view_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # self.drc01a_view_preview.setStyleSheet("border: 1px solid #ccc; background: white; min-height: 400px;")
-        # view_layout.addWidget(self.drc01a_view_preview)
-        
-        # Add a simple summary placeholder instead
         summary_lbl = QLabel("Document Generated Successfully.\nClick 'Edit / Revise Draft' to make changes.")
         summary_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         summary_lbl.setStyleSheet("color: #7f8c8d; font-size: 14px; margin: 20px;")
@@ -501,26 +619,17 @@ class ProceedingsWorkspace(QWidget):
         
         view_layout.addStretch()
 
-        # Add both containers to main layout
-        layout.addWidget(self.drc01a_draft_container)
-        layout.addWidget(self.drc01a_finalization_container)
-        layout.addWidget(self.drc01a_view_container)
+        # Add containers to a main widget switching wrapper
+        # Since we refactored, we can just return a container that holds all three
         
-        # Wrap in a centered container to constrain width
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        container_layout.addWidget(widget)
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0,0,0,0)
+        wrapper_layout.addWidget(self.drc01a_draft_container)
+        wrapper_layout.addWidget(self.drc01a_finalization_container)
+        wrapper_layout.addWidget(self.drc01a_view_container)
         
-        # Set max width for the form content
-        widget.setMaximumWidth(850) 
-        
-        # Wrap in Scroll Area
-        main_scroll = QScrollArea()
-        main_scroll.setWidgetResizable(True)
-        main_scroll.setWidget(container)
-        
-        return main_scroll
+        return wrapper
 
     def create_drc01a_finalization_panel(self):
         """Create the DRC-01A Finalization Summary Panel using reusable component"""
@@ -576,10 +685,11 @@ class ProceedingsWorkspace(QWidget):
             oc_data = {
                 'OC_Number': self.oc_number_input.text(),
                 'OC_Date': self.oc_date_input.date().toString("yyyy-MM-dd"),
-                'OC_Content': f"DRC-01A Issued. {self.drc_fin_panel.fin_scn_remarks.toPlainText()}",
+                'OC_Content': f"DRC-01A Issued for GSTIN {self.proceeding_data.get('gstin','')}. {self.drc_fin_panel.fin_scn_remarks.toPlainText()}",
                 'OC_To': self.proceeding_data.get('legal_name', '')
             }
-            self.db.add_oc_entry(self.proceeding_data['case_id'], oc_data)
+            # Use proceeding_id (case_id used in SQLite)
+            self.db.add_oc_entry(self.proceeding_id, oc_data)
             
             QMessageBox.information(self, "Success", "DRC-01A Finalized Successfully.")
             
@@ -742,23 +852,21 @@ class ProceedingsWorkspace(QWidget):
     def create_scn_tab(self):
         print("ProceedingsWorkspace: create_scn_tab start")
         """Create Show Cause Notice tab"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(10)
         
         # --- DRAFT CONTAINER ---
         self.scn_draft_container = QWidget()
         draft_layout = QVBoxLayout(self.scn_draft_container)
         draft_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Title
-        title = QLabel("<b>Drafting Show Cause Notice (SCN)</b>")
-        title.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
-        draft_layout.addWidget(title)
+        # Preparing Pages
         
-        # 0. Reference Details (SCN Specific)
-        ref_card = ModernCard("Reference Details (SCN)", collapsible=True)
-        ref_layout = QHBoxLayout()
+        # 1. Reference Details
+        ref_widget = QWidget()
+        ref_layout = QVBoxLayout(ref_widget)
+        ref_layout.setContentsMargins(0,0,0,0)
+        
+        ref_card = QWidget()
+        ref_inner_layout = QHBoxLayout(ref_card)
         
         # SCN No
         scn_no_label = QLabel("SCN No:")
@@ -780,24 +888,35 @@ class ProceedingsWorkspace(QWidget):
         self.scn_date_input.setMinimumDate(QDate.currentDate())
         self.scn_date_input.dateChanged.connect(self.trigger_preview)
         
-        ref_layout.addWidget(scn_no_label)
-        ref_layout.addWidget(self.scn_no_input)
-        ref_layout.addSpacing(20)
-        ref_layout.addWidget(oc_label)
-        ref_layout.addWidget(self.scn_oc_input)
-        ref_layout.addSpacing(20)
-        ref_layout.addWidget(date_label)
-        ref_layout.addWidget(self.scn_date_input)
+        ref_inner_layout.addWidget(scn_no_label)
+        ref_inner_layout.addWidget(self.scn_no_input)
+        ref_inner_layout.addSpacing(10)
+        
+        ref_inner_layout.addWidget(oc_label)
+        ref_inner_layout.addWidget(self.scn_oc_input)
+        
+        # Suggest Button for SCN OC
+        scn_oc_suggest_btn = QPushButton("Get Next")
+        scn_oc_suggest_btn.setToolTip("Get next available OC Number")
+        scn_oc_suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 10px;")
+        scn_oc_suggest_btn.clicked.connect(lambda: self.suggest_next_oc(self.scn_oc_input))
+        ref_inner_layout.addWidget(scn_oc_suggest_btn)
+        
+        ref_inner_layout.addSpacing(10)
+        ref_inner_layout.addWidget(date_label)
+        ref_inner_layout.addWidget(self.scn_date_input)
+        ref_inner_layout.addStretch()
+        
+        ref_layout.addWidget(ref_card)
         ref_layout.addStretch()
-        ref_card.addLayout(ref_layout)
 
-        draft_layout.addWidget(ref_card)
+        # 2. Issues Involved
+        issues_widget = QWidget()
+        issues_layout = QVBoxLayout(issues_widget)
+        issues_layout.setContentsMargins(0,0,0,0)
         
-        # 1. Issues Involved (Collapsible) - SCN Specific
         self.scn_issue_cards = []
-        scn_issues_card = ModernCard("Issues Involved", collapsible=True)
         
-        # Issue Selection
         scn_issue_selection_layout = QHBoxLayout()
         scn_issue_label = QLabel("Select Issue:")
         self.scn_issue_combo = QComboBox()
@@ -819,26 +938,22 @@ class ProceedingsWorkspace(QWidget):
         scn_issue_selection_layout.addWidget(scn_refresh_issues_btn)
         scn_issue_selection_layout.addWidget(scn_insert_issue_btn)
         scn_issue_selection_layout.addStretch()
-        scn_issues_card.addLayout(scn_issue_selection_layout)
+        issues_layout.addLayout(scn_issue_selection_layout)
         
+        # Proper SCN container
         self.scn_issues_container = QWidget()
         self.scn_issues_layout = QVBoxLayout(self.scn_issues_container)
         self.scn_issues_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scn_issues_layout.setSpacing(15)
         
-        scn_scroll = QScrollArea()
-        scn_scroll.setWidgetResizable(True)
-        scn_scroll.setWidget(self.scn_issues_container)
-        scn_scroll.setMinimumHeight(300)
-        
-        scn_issues_card.addWidget(scn_scroll)
-        draft_layout.addWidget(scn_issues_card)
-        print("ProceedingsWorkspace: scn_issues_card added")
+        issues_layout.addWidget(self.scn_issues_container)
+        issues_layout.addStretch()
 
-        # Demand & Contraventions Card
-        print("ProceedingsWorkspace: creating demand_card")
-        self.demand_container_card = ModernCard("Demand & Contraventions", collapsible=True)
+        # 3. Demand & Contraventions
+        demand_widget = QWidget()
+        demand_layout = QVBoxLayout(demand_widget)
+        demand_layout.setContentsMargins(0,0,0,0)
         
-        # Regenerate Button
         demand_header_layout = QHBoxLayout()
         demand_header_layout.addStretch()
         regenerate_btn = QPushButton("Sync with Issues")
@@ -846,73 +961,88 @@ class ProceedingsWorkspace(QWidget):
         regenerate_btn.setStyleSheet("padding: 5px; font-size: 11px; background-color: #3498db; color: white; border-radius: 4px;")
         regenerate_btn.clicked.connect(self.sync_demand_tiles)
         demand_header_layout.addWidget(regenerate_btn)
+        demand_layout.addLayout(demand_header_layout)
         
-        self.demand_container_card.addLayout(demand_header_layout)
-
-        # Container for Demand Tiles
         self.demand_tiles_widget = QWidget()
         self.demand_tiles_layout = QVBoxLayout(self.demand_tiles_widget)
         self.demand_tiles_layout.setSpacing(10)
         self.demand_tiles_layout.setContentsMargins(0, 0, 0, 0)
         
-        self.demand_tiles = [] # List of tuples: (issue_id, modern_card, editor)
+        self.demand_tiles = []
         
-        self.demand_container_card.addWidget(self.demand_tiles_widget)
-        draft_layout.addWidget(self.demand_container_card)
-        print("ProceedingsWorkspace: demand_card added")
-
-        print("ProceedingsWorkspace: creating reliance_card")
-        rel_card = ModernCard("Reliance Placed on Documents", collapsible=True)
+        demand_layout.addWidget(self.demand_tiles_widget)
+        demand_layout.addStretch()
+        
+        # 4. Reliance Placed
+        reliance_widget = QWidget()
+        rel_layout = QVBoxLayout(reliance_widget)
+        rel_layout.setContentsMargins(0,0,0,0)
+        
         self.reliance_editor = RichTextEditor("List documents here (e.g., 1. INS-01 dated...)")
-        self.reliance_editor.setMinimumHeight(150)
+        self.reliance_editor.setMinimumHeight(300)
         self.reliance_editor.textChanged.connect(self.trigger_preview)
-        rel_card.addWidget(self.reliance_editor)
-        draft_layout.addWidget(rel_card)
-        print("ProceedingsWorkspace: reliance_card added")
-
-        # 2. Copy Submitted To
-        print("ProceedingsWorkspace: creating copy_card")
-        copy_card = ModernCard("Copy Submitted To", collapsible=True)
+        rel_layout.addWidget(self.reliance_editor)
+        
+        # 5. Copy Submitted To
+        copy_widget = QWidget()
+        copy_layout = QVBoxLayout(copy_widget)
+        copy_layout.setContentsMargins(0,0,0,0)
+        
         self.copy_to_editor = RichTextEditor("List authorities here...")
-        self.copy_to_editor.setMinimumHeight(100)
+        self.copy_to_editor.setMinimumHeight(300)
         self.copy_to_editor.textChanged.connect(self.trigger_preview)
-        copy_card.addWidget(self.copy_to_editor)
-        draft_layout.addWidget(copy_card)
-        print("ProceedingsWorkspace: copy_card added")
+        copy_layout.addWidget(self.copy_to_editor)
         
-        # Action Buttons
-        buttons_layout = QHBoxLayout()
+        # 6. Actions
+        actions_widget = QWidget()
+        actions_layout = QVBoxLayout(actions_widget)
         
+        actions_desc = QLabel("Review and Finalize SCN")
+        actions_layout.addWidget(actions_desc)
+        
+        action_btns_layout = QHBoxLayout()
         save_btn = QPushButton("Save Draft")
         save_btn.setStyleSheet("background-color: #95a5a6; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
         save_btn.clicked.connect(lambda: self.save_document("SCN"))
-        buttons_layout.addWidget(save_btn)
+        action_btns_layout.addWidget(save_btn)
         
         pdf_btn = QPushButton("Generate PDF")
         pdf_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
         pdf_btn.clicked.connect(self.generate_pdf)
-        buttons_layout.addWidget(pdf_btn)
+        action_btns_layout.addWidget(pdf_btn)
         
         docx_btn = QPushButton("Generate DOCX")
         docx_btn.setStyleSheet("background-color: #3498db; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
         docx_btn.clicked.connect(self.generate_docx)
-        buttons_layout.addWidget(docx_btn)
+        action_btns_layout.addWidget(docx_btn)
         
         finalize_btn = QPushButton("Finalize SCN")
         finalize_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
         finalize_btn.clicked.connect(self.show_scn_finalization_panel)
-        buttons_layout.addWidget(finalize_btn)
+        action_btns_layout.addWidget(finalize_btn)
         
-        buttons_layout.addStretch()
-        draft_layout.addLayout(buttons_layout)
+        action_btns_layout.addStretch()
+        actions_layout.addLayout(action_btns_layout)
+        actions_layout.addStretch()
         
-        draft_layout.addStretch()
+        # Build Side Nav
+        nav_items = [
+            ("Reference Details", "1", ref_widget),
+            ("Issues Involved", "2", issues_widget),
+            ("Demand & Contraventions", "3", demand_widget),
+            ("Reliance Placed", "4", reliance_widget),
+            ("Copy Submitted To", "5", copy_widget),
+            ("Actions & Finalize", "✓", actions_widget)
+        ]
         
-        # --- FINALIZATION CONTAINER (Initially Hidden) ---
+        side_nav = self.create_side_nav_layout(nav_items)
+        draft_layout.addWidget(side_nav)
+        
+        # --- FINALIZATION CONTAINER ---
         self.scn_finalization_container = self.create_scn_finalization_panel()
         self.scn_finalization_container.hide()
         
-        # --- VIEW CONTAINER (Initially Hidden) ---
+        # --- VIEW CONTAINER ---
         self.scn_view_container = QWidget()
         self.scn_view_container.hide()
         view_layout = QVBoxLayout(self.scn_view_container)
@@ -926,13 +1056,11 @@ class ProceedingsWorkspace(QWidget):
         view_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         view_layout.addWidget(view_msg)
         
-        # Placeholder for Preview Image
-        self.scn_view_preview = QLabel()
-        self.scn_view_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scn_view_preview.setStyleSheet("border: 1px solid #ccc; background: white; min-height: 400px;")
-        view_layout.addWidget(self.scn_view_preview)
+        summary_lbl = QLabel("Document Generated Successfully.\nClick 'Edit / Revise Draft' to make changes.")
+        summary_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        summary_lbl.setStyleSheet("color: #7f8c8d; font-size: 14px; margin: 20px;")
+        view_layout.addWidget(summary_lbl)
         
-        # Edit Button
         edit_btn = QPushButton("Edit / Revise Draft")
         edit_btn.setStyleSheet("background-color: #f39c12; color: white; padding: 10px; font-weight: bold;")
         edit_btn.clicked.connect(lambda: self.toggle_view_mode("scn", False))
@@ -940,27 +1068,16 @@ class ProceedingsWorkspace(QWidget):
         
         view_layout.addStretch()
 
-        # Add all containers to main layout
-        layout.addWidget(self.scn_draft_container)
-        layout.addWidget(self.scn_finalization_container)
-        layout.addWidget(self.scn_view_container)
-        
-        # Wrap in a centered container to constrain width
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        container_layout.addWidget(widget)
-        
-        # Set max width for the form content
-        widget.setMaximumWidth(850) 
-        
-        # Wrap in Scroll Area
-        main_scroll = QScrollArea()
-        main_scroll.setWidgetResizable(True)
-        main_scroll.setWidget(container)
+        # Wrapper
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0,0,0,0)
+        wrapper_layout.addWidget(self.scn_draft_container)
+        wrapper_layout.addWidget(self.scn_finalization_container)
+        wrapper_layout.addWidget(self.scn_view_container)
         
         print("ProceedingsWorkspace: create_scn_tab done")
-        return main_scroll
+        return wrapper
 
     def create_ph_intimation_tab(self):
         print("ProceedingsWorkspace: create_ph_intimation_tab start")
@@ -973,6 +1090,32 @@ class ProceedingsWorkspace(QWidget):
         title = QLabel("<b>Drafting Personal Hearing Intimation</b>")
         title.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
         layout.addWidget(title)
+        
+        # Reference Details (OC)
+        ref_layout = QHBoxLayout()
+        oc_label = QLabel("OC No:")
+        self.ph_oc_input = QLineEdit()
+        self.ph_oc_input.setPlaceholderText("Format: No./Year")
+        self.ph_oc_input.textChanged.connect(self.trigger_preview)
+        
+        ph_oc_suggest_btn = QPushButton("Get Next")
+        ph_oc_suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 10px;")
+        ph_oc_suggest_btn.clicked.connect(lambda: self.suggest_next_oc(self.ph_oc_input))
+        
+        oc_date_label = QLabel("OC Date:")
+        self.ph_oc_date = QDateEdit()
+        self.ph_oc_date.setCalendarPopup(True)
+        self.ph_oc_date.setDate(QDate.currentDate())
+        self.ph_oc_date.dateChanged.connect(self.trigger_preview)
+        
+        ref_layout.addWidget(oc_label)
+        ref_layout.addWidget(self.ph_oc_input)
+        ref_layout.addWidget(ph_oc_suggest_btn)
+        ref_layout.addSpacing(10)
+        ref_layout.addWidget(oc_date_label)
+        ref_layout.addWidget(self.ph_oc_date)
+        ref_layout.addStretch()
+        layout.addLayout(ref_layout)
         
         # Rich Text Editor
         print("ProceedingsWorkspace: creating ph_editor")
@@ -1000,6 +1143,11 @@ class ProceedingsWorkspace(QWidget):
         docx_btn.setStyleSheet("background-color: #3498db; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
         docx_btn.clicked.connect(self.generate_docx)
         buttons_layout.addWidget(docx_btn)
+        
+        finalize_btn = QPushButton("Finalize & Register")
+        finalize_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
+        finalize_btn.clicked.connect(self.confirm_ph_finalization)
+        buttons_layout.addWidget(finalize_btn)
         
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
@@ -1033,6 +1181,32 @@ class ProceedingsWorkspace(QWidget):
         title.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
         layout.addWidget(title)
         
+        # Reference Details (OC)
+        ref_layout = QHBoxLayout()
+        oc_label = QLabel("OC No:")
+        self.order_oc_input = QLineEdit()
+        self.order_oc_input.setPlaceholderText("Format: No./Year")
+        self.order_oc_input.textChanged.connect(self.trigger_preview)
+        
+        order_oc_suggest_btn = QPushButton("Get Next")
+        order_oc_suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 10px;")
+        order_oc_suggest_btn.clicked.connect(lambda: self.suggest_next_oc(self.order_oc_input))
+        
+        oc_date_label = QLabel("OC Date:")
+        self.order_oc_date = QDateEdit()
+        self.order_oc_date.setCalendarPopup(True)
+        self.order_oc_date.setDate(QDate.currentDate())
+        self.order_oc_date.dateChanged.connect(self.trigger_preview)
+        
+        ref_layout.addWidget(oc_label)
+        ref_layout.addWidget(self.order_oc_input)
+        ref_layout.addWidget(order_oc_suggest_btn)
+        ref_layout.addSpacing(10)
+        ref_layout.addWidget(oc_date_label)
+        ref_layout.addWidget(self.order_oc_date)
+        ref_layout.addStretch()
+        layout.addLayout(ref_layout)
+        
         # Rich Text Editor
         print("ProceedingsWorkspace: creating order_editor")
         self.order_editor = RichTextEditor("Enter the Order content here...")
@@ -1049,6 +1223,21 @@ class ProceedingsWorkspace(QWidget):
         save_btn.setStyleSheet("background-color: #95a5a6; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
         save_btn.clicked.connect(lambda: self.save_document("Order"))
         buttons_layout.addWidget(save_btn)
+        
+        pdf_btn = QPushButton("Generate PDF")
+        pdf_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
+        pdf_btn.clicked.connect(self.generate_pdf)
+        buttons_layout.addWidget(pdf_btn)
+        
+        docx_btn = QPushButton("Generate DOCX")
+        docx_btn.setStyleSheet("background-color: #3498db; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
+        docx_btn.clicked.connect(self.generate_docx)
+        buttons_layout.addWidget(docx_btn)
+        
+        finalize_btn = QPushButton("Finalize & Register")
+        finalize_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
+        finalize_btn.clicked.connect(self.confirm_order_finalization)
+        buttons_layout.addWidget(finalize_btn)
         
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
@@ -1130,9 +1319,14 @@ class ProceedingsWorkspace(QWidget):
             })
             
             # 3. Update Register (SCN Register entry - implicitly done via status or explicit call?)
-            # Assuming we need to add to SCN register explicitly like OC
-            # Need to check DB manager for add_scn_entry or similar field
-            # For now, relying on Status Update which is key. 
+            # Also Add OC Entry for SCN
+            oc_data = {
+                'OC_Number': self.scn_oc_input.text(),
+                'OC_Date': self.scn_date_input.date().toString("yyyy-MM-dd"),
+                'OC_Content': f"Show Cause Notice Issued. SCN No: {self.scn_no_input.text()}. {self.scn_fin_panel.fin_scn_remarks.toPlainText()}",
+                'OC_To': self.proceeding_data.get('legal_name', '')
+            }
+            self.db.add_oc_entry(self.proceeding_id, oc_data)
             
             QMessageBox.information(self, "Success", "Show Cause Notice Finalized Successfully.")
             
@@ -1187,6 +1381,8 @@ class ProceedingsWorkspace(QWidget):
         def update_header_summary(values):
             # Update Preview
             self.trigger_preview()
+            # Update Demand Tiles
+            self.sync_demand_tiles()
             
             # Update Header Badge
             total_tax = 0
@@ -1224,6 +1420,7 @@ class ProceedingsWorkspace(QWidget):
             return
             
         self.add_scn_issue_card(template)
+        self.sync_demand_tiles()
         self.trigger_preview()
 
     def remove_scn_issue_card(self, modern_card, card):
@@ -1231,6 +1428,7 @@ class ProceedingsWorkspace(QWidget):
         modern_card.deleteLater()
         if card in self.scn_issue_cards:
             self.scn_issue_cards.remove(card)
+        self.sync_demand_tiles()
         self.trigger_preview()
 
     def load_scn_issues(self):
@@ -1269,6 +1467,7 @@ class ProceedingsWorkspace(QWidget):
                         
                     self.add_scn_issue_card(template, data)
             
+            self.sync_demand_tiles()
             self.trigger_preview()
         except Exception as e:
             print(f"Error loading SCN issues: {e}")
@@ -2580,3 +2779,63 @@ class ProceedingsWorkspace(QWidget):
             print(f"Error restoring draft state: {e}")
             import traceback
             traceback.print_exc()
+
+    def confirm_ph_finalization(self):
+        """Finalize PH and Register OC"""
+        if not self.ph_oc_input.text().strip():
+            QMessageBox.warning(self, "Validation Error", "OC Number is mandatory for registration.")
+            return
+            
+        try:
+            oc_data = {
+                'OC_Number': self.ph_oc_input.text(),
+                'OC_Date': self.ph_oc_date.date().toString("yyyy-MM-dd"),
+                'OC_Content': f"Personal Hearing Intimation issued for GSTIN {self.proceeding_data.get('gstin','')}.",
+                'OC_To': self.proceeding_data.get('legal_name', '')
+            }
+            self.db.add_oc_entry(self.proceeding_id, oc_data)
+            
+            # Update status
+            self.db.update_proceeding(self.proceeding_id, {"status": "PH Intimated"})
+            
+            QMessageBox.information(self, "Success", "PH Intimation Finalized and OC Registered.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to finalize PH: {e}")
+
+    def confirm_order_finalization(self):
+        """Finalize Order and Register OC"""
+        if not self.order_oc_input.text().strip():
+            QMessageBox.warning(self, "Validation Error", "OC Number is mandatory for registration.")
+            return
+            
+        try:
+            oc_data = {
+                'OC_Number': self.order_oc_input.text(),
+                'OC_Date': self.order_oc_date.date().toString("yyyy-MM-dd"),
+                'OC_Content': f"Final Order (DRC-07) issued for GSTIN {self.proceeding_data.get('gstin','')}.",
+                'OC_To': self.proceeding_data.get('legal_name', '')
+            }
+            self.db.add_oc_entry(self.proceeding_id, oc_data)
+            
+            # Update status
+            self.db.update_proceeding(self.proceeding_id, {"status": "Order Issued"})
+            
+            QMessageBox.information(self, "Success", "Order Finalized and OC Registered.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to finalize Order: {e}")
+
+    def suggest_next_oc(self, input_field: QLineEdit):
+        """Fetch next available OC number and set it to input"""
+        try:
+            import datetime
+            current_year = datetime.date.today().year
+            
+            # Fetch next number from DB
+            # We assume format XXX/YEAR
+            next_num = self.db.get_next_oc_number(str(current_year))
+            
+            formatted_oc = f"{next_num}/{current_year}"
+            input_field.setText(formatted_oc)
+            
+        except Exception as e:
+            print(f"Error suggesting OC: {e}")
