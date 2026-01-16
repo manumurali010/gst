@@ -601,7 +601,7 @@ class ScrutinyParser:
             # PHASE-2: SOP 10 (Import) Override
             # DEBUG LOGGING
             try:
-                with open("c:/Users/manum/.gemini/antigravity/scratch/gst/parser_debug.log", "a") as f:
+                with open("parser_debug.log", "a") as f:
                     f.write(f"Parsing Group B: {issue_id}\n")
             except: pass
 

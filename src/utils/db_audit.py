@@ -1,7 +1,9 @@
 import sqlite3
 import json
 
-db_path = 'C:/Users/manum/.gemini/antigravity/scratch/gst/src/database/gst_scrutiny.db'
+import os
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+db_path = os.path.join(BASE_DIR, 'src', 'database', 'gst_scrutiny.db')
 conn = sqlite3.connect(db_path)
 c = conn.cursor()
 

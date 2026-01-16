@@ -2,7 +2,9 @@ import sqlite3
 import json
 import os
 
-db_path = 'C:/Users/manum/.gemini/antigravity/scratch/gst/data/adjudication.db'
+import os
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+db_path = os.path.join(BASE_DIR, 'data', 'adjudication.db')
 
 def get_strict_table_def_point_1():
     return {
