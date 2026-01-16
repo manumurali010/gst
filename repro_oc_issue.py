@@ -33,7 +33,7 @@ def test_backend_persistence():
     current_proc = db.get_proceeding(pid)
     
     metadata = {
-        "oc_number": "OC-12345-TEST",
+        "oc_number": "12345/2026",
         "oc_date": "2024-01-01"
     }
     
@@ -78,7 +78,7 @@ def test_backend_persistence():
     # })
     
     success = db.update_proceeding(pid, {
-        "additional_details": json.dumps(current_details)
+        "additional_details": current_details
     })
     
     if success:
@@ -96,7 +96,7 @@ def test_backend_persistence():
     print(f"   additional_details type: {type(add_details)}")
     print(f"   additional_details content: {add_details}")
     
-    if isinstance(add_details, dict) and add_details.get('oc_number') == "OC-12345-TEST":
+    if isinstance(add_details, dict) and add_details.get('oc_number') == "12345/2026":
         print("\nSUCCESS: Backend is working correctly. OC Number preserved as Dict.")
         return True
     else:

@@ -1,0 +1,821 @@
+
+--- PAGE 1 ---
+Form GSTR-9
+[See rule 80]
+Annual Return
+1. Financial Year
+2022-23
+2. GSTIN
+32AAALC0844J1ZJ
+3(a). Legal name of the registered person
+COCHIN UNIVERSITY OF SCIENCE AND 
+TECHNOLOGY
+3(b). Trade name, if any
+THE REGISTRAR
+3(c). ARN
+AA320323872073K
+3(d). Date of Filing
+31-12-2023
+Pt. II
+Details of Outward and inward supplies made during the financial year
+Sr.No
+Nature of Supplies
+Taxable 
+Value(₹)
+(Amount in ₹ in all tables)
+Central 
+Tax(₹)
+State Tax / UT 
+Tax(₹)
+Integrated 
+Tax(₹)
+Cess(₹)
+1
+2
+3
+4
+5
+6
+4
+Details of advances, inward and outward supplies made during the financial year on which tax is payable
+A
+Supplies made to un-registered persons (B2C)
+80,34,533.99
+7,19,000.58
+7,19,000.58
+0.00
+0.00
+B
+Supplies made to registered persons (B2B)
+85,12,892.26
+6,05,041.59
+6,05,041.59
+3,05,379.75
+0.00
+C
+Zero rated supply (Export) on payment of tax (Except 
+supplies to SEZs)
+0.00
+0.00
+0.00
+D
+Supplies to SEZs on payment of tax
+2,26,989.75
+40,858.16
+0.00
+E
+Deemed Exports
+0.00
+0.00
+0.00
+0.00
+0.00
+F
+Advances on which tax has been paid but invoice has not 
+been issued (not covered under (A) to (E) above)
+0.00
+0.00
+0.00
+0.00
+0.00
+FINAL
+
+--- PAGE 2 ---
+G
+Inward supplies on which tax is to be paid on the reverse 
+charge basis
+1,512.00
+19.55
+19.55
+36.50
+0.00
+H
+Sub-total (A to G above)
+1,67,75,928.00
+13,24,061.72
+13,24,061.72
+3,46,274.41
+0.00
+I
+Credit notes issued in respect of transactions specified in 
+(B) to (E) above (-)
+0.00
+0.00
+0.00
+0.00
+0.00
+J
+Debit notes issued in respect of transactions specified in 
+(B)  to (E) above (+)
+0.00
+0.00
+0.00
+0.00
+0.00
+K
+Supplies / tax declared through Amendments (+)
+0.00
+0.00
+0.00
+0.00
+0.00
+L
+Supplies / tax reduced through Amendments (-)
+0.00
+0.00
+0.00
+0.00
+0.00
+M
+Sub total (I to L above)
+0.00
+0.00
+0.00
+0.00
+0.00
+N
+Supplies and advances on which tax is to be paid (H + M) 
+above
+1,67,75,928.00
+13,24,061.72
+13,24,061.72
+3,46,274.41
+0.00
+Pt. II
+Details of Outward and inward supplies made during the financial year
+Sr.No
+Nature of Supplies
+Taxable 
+Value(₹)
+(Amount in ₹ in all tables)
+Central 
+Tax(₹)
+State Tax / UT 
+Tax(₹)
+Integrated 
+Tax(₹)
+Cess(₹)
+1
+2
+3
+4
+5
+6
+5
+Details of Outward supplies made during the financial year on which tax is not payable
+A
+Zero rated supply (Export) without payment of tax
+0.00
+B
+Supply to SEZs without payment of tax
+0.00
+C
+Supplies on which tax is to be paid by the recipient on 
+reverse charge
+0.00
+D
+Exempted
+73,45,52,386.26
+E
+Nil Rated
+0.00
+F
+Non-GST supply (includes ‘no supply’)
+67,19,040.00
+G
+Sub total (A to F above)
+74,12,71,426.26
+H
+Credit Notes issued in respect of transactions 
+0.00
+FINAL
+
+--- PAGE 3 ---
+specified in A to F above (-)
+I
+Debit Notes issued in respect of transactions specified 
+in A to F above (+)
+0.00
+J
+Supplies declared through Amendments (+)
+0.00
+K
+Supplies reduced through Amendments (-)
+0.00
+L
+Sub-Total (H to K above)
+0.00
+M
+Turnover on which tax is not to be paid (G + L above)
+74,12,71,426.26
+N
+Total Turnover (including advances) (4N + 5M - 4G 
+above)
+75,80,45,842.26
+13,24,042.17
+13,24,042.17
+3,46,237.91
+0.00
+Pt. III
+Details of ITC for the financial year
+Sr.No
+Description
+Type
+Central 
+Tax(₹)
+State Tax / UT 
+Tax(₹)
+Integrated 
+Tax(₹)
+Cess(₹)
+1
+2
+3
+4
+5
+6
+6
+Details of ITC availed during the financial year
+A
+Total amount of input tax credit availed through FORM GSTR-3B (sum total 
+of Table 4A of FORM GSTR-3B)
+2,64,64,178.25
+2,64,64,178.25
+3,13,88,204.53
+0.00
+B
+Inward supplies (other than imports and inward supplies 
+liable to reverse charge but includes services received from 
+SEZs)
+Inputs
+2,63,87,207.44
+2,63,87,207.44
+3,13,52,666.04
+0
+Capital 
+Goods
+0
+0
+0
+0
+Input 
+Services
+76,970.81
+76,970.81
+14,863.49
+0
+C
+Inward supplies received from unregistered persons liable to 
+reverse charge (other than B above) on which tax is paid & 
+ITC availed
+Inputs
+0
+0
+0
+0
+Capital 
+Goods
+0
+0
+0
+0
+Input 
+Services
+0
+0
+0
+0
+FINAL
+
+--- PAGE 4 ---
+D
+Inward supplies received from registered persons liable to reverse charge 
+(other than B above) on which tax is paid and ITC availed
+Inputs
+0
+0
+0
+0
+Capital 
+Goods
+0
+0
+0
+0
+Input 
+Services
+0
+0
+0
+0
+E
+Import of goods (including supplies from SEZs)
+Inputs
+20,675.00
+0
+Capital 
+Goods
+0
+0
+F
+Import of services (excluding inward supplies from SEZs)
+0.00
+0.00
+G
+Input Tax credit received from ISD
+0.00
+0.00
+0.00
+0.00
+H
+Amount of ITC reclaimed (other than B above) under the provisions of the Act
+0.00
+0.00
+0.00
+0.00
+I
+Sub-total (B to H above)
+2,64,64,178.25
+2,64,64,178.25
+3,13,88,204.53
+0.00
+J
+Difference (I - A above)
+0.00
+0.00
+0.00
+0.00
+K
+Transition Credit through TRAN-1 (including revisions if any)
+0.00
+0.00
+L
+Transition Credit through TRAN-2
+0.00
+0.00
+M Any other ITC availed but not specified above
+0.00
+0.00
+0.00
+0.00
+N
+Sub-total (K to M  above)
+0.00
+0.00
+0.00
+0.00
+O
+Total ITC availed (I + N above)
+2,64,64,178.25
+2,64,64,178.25
+3,13,88,204.53
+0.00
+Pt. III
+Details of ITC for the financial year
+Sr.No
+Description
+Central Tax(₹) State Tax / UT Tax(₹) Integrated Tax(₹) Cess(₹)
+1
+2
+3
+4
+5
+7
+Details of ITC Reversed and  Ineligible ITC for the financial year
+A
+As per Rule 37
+0.00
+0.00
+0.00
+0.00
+B
+As per Rule 39
+0.00
+0.00
+0.00
+0.00
+C
+As per Rule 42
+1,54,68,400.69
+1,54,68,400.69
+1,49,68,744.30
+0.00
+FINAL
+
+--- PAGE 5 ---
+D
+As per Rule 43
+0.00
+0.00
+0.00
+0.00
+E
+As per section 17(5)
+0.00
+0.00
+0.00
+0.00
+F
+Reversal of TRAN-1 credit
+0.00
+0.00
+G
+Reversal of TRAN-2 credit
+0.00
+0.00
+H1
+Others
+55,93,534.73
+55,93,534.73
+1,07,14,688.70
+0.00
+I
+Total ITC Reversed (Sum of A to H above)
+2,10,61,935.42
+2,10,61,935.42
+2,56,83,433.00
+0.00
+J
+Net ITC Available for Utilization (6O - 7I)
+54,02,242.83
+54,02,242.83
+57,04,771.53
+0.00
+Pt. III
+Details of ITC for the financial year
+Sr.No
+Details
+Central 
+Tax(₹)
+State Tax / UT 
+Tax(₹)
+Integrated 
+Tax(₹)
+Cess(₹)
+1
+2
+3
+4
+5
+8
+Other ITC related information
+A
+ITC as per GSTR-2A (Table 3 & 5 thereof)
+2,23,34,755.57
+2,23,34,755.57
+2,86,29,565.32
+228.86
+B
+ITC as per sum total of 6(B) and 6(H) above
+2,64,64,178.25
+2,64,64,178.25
+3,13,67,529.53
+0.00
+C
+ITC on inward supplies (other than imports and inward supplies liable to 
+reverse charge but includes services received from SEZs) received during 
+the financial year but availed in the next financial year upto specified period
+0.00
+0.00
+0.00
+0.00
+D
+Difference [A-(B+C)]
+-41,29,422.68
+-41,29,422.68
+-27,37,964.21
+228.86
+E
+ITC available but not availed
+0.00
+0.00
+0.00
+0.00
+F
+ITC available but ineligible
+0.00
+0.00
+0.00
+0.00
+G
+IGST paid on import of goods (including supplies from SEZ)
+0.00
+0.00
+0.00
+0.00
+H
+IGST credit availed on import of goods (as per 6(E) above)
+0.00
+0.00
+20,675.00
+0.00
+I
+Difference (G-H)
+0.00
+0.00
+-20,675.00
+0.00
+J
+ITC available but not availed on import of goods (Equal to I)
+0.00
+0.00
+-20,675.00
+0.00
+K
+Total ITC to be lapsed in current financial year (E + F + J)
+0.00
+0.00
+-20,675.00
+0.00
+FINAL
+
+--- PAGE 6 ---
+Pt. IV
+Details of tax paid as declared in returns filed during the financial year
+9
+Description
+Tax Payable (₹) Paid Through Cash  (₹)
+Paid Through ITC (₹)
+Central Tax State Tax / UT Tax Integrated Tax Cess
+1
+2
+3
+4
+5
+6
+7
+A
+Integrated Tax
+3,46,274.41
+1,49,401.00
+0.00
+0.00
+1,96,874.00
+B
+Central Tax
+13,24,061.72
+4,69,293.00
+0.00
+8,54,768.00
+C
+State/UT Tax
+13,24,061.72
+4,69,293.00
+0.00
+8,54,768.00
+D
+Cess
+0.00
+0.00
+0.00
+E
+Interest
+475.00
+475.00
+F
+Late Fees
+250.00
+250.00
+G
+Penalty
+0.00
+0.00
+H
+Other
+0.00
+0.00
+Pt. V
+Particulars of the transactions for the financial year declared in returns of the next financial year till the specified period
+Sr.No.
+Description
+Taxable 
+Value(₹)
+Central 
+Tax(₹)
+State Tax / UT 
+Tax(₹)
+Integrated 
+Tax(₹)
+Cess(₹)
+1
+2
+3
+4
+5
+6
+10
+Supplies / tax declared through Amendments (+) (net 
+of debit notes)
+0.00
+0.00
+0.00
+0.00
+0.00
+11
+Supplies / tax reduced through Amendments (-) (net 
+of credit notes)
+0.00
+0.00
+0.00
+0.00
+0.00
+12
+Reversal of ITC availed during previous financial year
+0.00
+0.00
+0.00
+0.00
+13
+ITC availed for the previous financial year
+0.00
+0.00
+0.00
+0.00
+Total turnover(5N + 10 - 11)
+75,80,45,842.26
+13,24,042.17
+13,24,042.17
+3,46,237.91
+0.00
+Pt. V
+Particulars of the transactions for the financial year declared in returns of the next financial year till the specified period
+FINAL
+
+--- PAGE 7 ---
+14
+Differential tax paid on account of declaration in 10 & 11 above
+Sr.No.
+Description
+Payable (₹)
+Paid (₹)
+1
+2
+3
+A
+Integrated Tax
+0.00
+0.00
+B
+Central Tax
+0.00
+0.00
+C
+State/UT Tax
+0.00
+0.00
+D
+Cess
+0.00
+0.00
+E
+Interest
+0.00
+0.00
+Pt. VI
+Other Information
+15
+Particulars of Demands and Refunds
+Sr.No.
+Details
+Central Tax 
+(₹)
+State Tax / UT 
+Tax (₹)
+Integrated 
+Tax(₹)
+Cess(₹) Interest(₹)
+Penalty 
+(₹)
+Late Fee /  
+Others(₹)
+1
+2
+3
+4
+5
+6
+7
+8
+A
+Total Refund claimed
+0.00
+0.00
+0.00
+0.00
+B
+Total Refund sanctioned
+0.00
+0.00
+0.00
+0.00
+C
+Total Refund Rejected
+0.00
+0.00
+0.00
+0.00
+D
+Total Refund Pending
+0.00
+0.00
+0.00
+0.00
+E
+Total demand of taxes
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+F
+Total taxes paid in respect of E 
+above
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+G
+Total demands pending out of 
+E above
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+16
+Information on supplies received from composition taxpayers, deemed supply under section 143 and goods sent on approval basis
+Sr.No.
+Details
+Taxable Value 
+(₹)
+Central Tax 
+(₹)
+State Tax / UT Tax 
+(₹)
+Integrated 
+Tax(₹)
+Cess(₹)
+FINAL
+
+--- PAGE 8 ---
+1
+2
+3
+4
+5
+6
+A
+Supplies received from Composition 
+taxpayers
+0.00
+B
+Deemed supply under section 143
+0.00
+0.00
+0.00
+0.00
+0.00
+C
+Goods sent on approval basis but not returned
+0.00
+0.00
+0.00
+0.00
+0.00
+17. HSN Wise Summary of outward supplies.
+18. HSN Wise Summary of inward supplies.
+To view the details uploaded for Table 17 & 18, download GSTR 9 in Excel/Json format.
+19
+Late fee payable and paid 
+Sr.No.
+Description
+Payable(₹)
+Paid(₹)
+1
+2
+3
+A
+Central tax
+0.00
+0.00
+B
+State Tax
+0.00
+0.00
+Verification:
+I hereby solemnly affirm and declare that the information given herein above is true and correct to the best of my knowledge and belief and 
+nothing has been concealed there from and in case of any reduction in output tax liability the benefit thereof has been/will be passed on to 
+the recipient of supply.
+Date: 31-12-2023
+Name of Authorized Signatory
+SUDHEER 
+Designation / Status
+FINANCE OFFICER
+FINAL

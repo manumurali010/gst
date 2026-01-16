@@ -2,6 +2,7 @@ import sqlite3
 import pandas as pd
 import os
 import json
+import uuid
 from datetime import datetime
 from src.utils.constants import TAXPAYERS_FILE, CASES_FILE, CASE_FILES_FILE
 
@@ -462,6 +463,7 @@ class DatabaseManager:
                 d = dict(row)
                 # Map SQLite columns to UI expected keys (CamelCase/Underscore mix in UI)
                 results.append({
+                    'id': d['id'], # Critical for deletion
                     'OC_Number': d['oc_number'],
                     'OC_Content': d['oc_content'],
                     'OC_Date': d['oc_date'],
@@ -560,49 +562,76 @@ class DatabaseManager:
             print(f"Error getting DRC-01A register cases: {e}")
             return []
 
-    def add_oc_entry(self, case_id, oc_data):
+    def _insert_oc_entry(self, cursor, case_id, oc_data, is_issuance=False):
+        """
+        Internal: Write to OC Register using an existing cursor.
+        """
+        # 1. Enforce Issuance Flag
+        if not is_issuance:
+             print(f"Blocked Ghost OC Write: {oc_data.get('OC_Number')}")
+             raise ValueError("Illegal OC Register Write: Called without is_issuance=True")
+
+        # 2. Validate OC Number Format (Anti-Ghost)
+        oc_number = str(oc_data.get('OC_Number', '')).strip()
+        
+        # Valid: "1/2026", "123/2025" - MUST have '/'
+        if oc_number.upper().startswith("OC-") or len(oc_number) > 20: 
+             # Logic: Block "OC-" prefix (randoms) OR too long
+             if "OC-" in oc_number.upper(): 
+                 raise ValueError(f"Invalid OC Number Format: {oc_number}.")
+        
+        # Check if OC Number already exists
+        cursor.execute("SELECT id FROM oc_register WHERE oc_number = ?", (oc_number,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # Update existing entry
+            cursor.execute("""
+                UPDATE oc_register 
+                SET oc_content = ?, oc_date = ?, oc_to = ?
+                WHERE id = ?
+            """, (
+                oc_data.get('OC_Content'),
+                oc_data.get('OC_Date'),
+                oc_data.get('OC_To'),
+                existing[0]
+            ))
+        else:
+            # Insert new entry
+            cursor.execute("""
+                INSERT INTO oc_register (case_id, oc_number, oc_content, oc_date, oc_to)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                case_id,
+                oc_number,
+                oc_data.get('OC_Content'),
+                oc_data.get('OC_Date'),
+                oc_data.get('OC_To')
+            ))
+        return oc_number
+
+    def add_oc_entry(self, case_id, oc_data, is_issuance=False):
         """
         Add an entry to the OC Register (SQLite).
-        oc_data: dict with keys 'OC_Number', 'OC_Content', 'OC_Date', 'OC_To'
         """
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
             
-            # Check if OC Number already exists
-            cursor.execute("SELECT id FROM oc_register WHERE oc_number = ?", (oc_data.get('OC_Number'),))
-            existing = cursor.fetchone()
-            
-            if existing:
-                # Update existing entry
-                cursor.execute("""
-                    UPDATE oc_register 
-                    SET oc_content = ?, oc_date = ?, oc_to = ?
-                    WHERE id = ?
-                """, (
-                    oc_data.get('OC_Content'),
-                    oc_data.get('OC_Date'),
-                    oc_data.get('OC_To'),
-                    existing[0]
-                ))
-            else:
-                # Insert new entry
-                cursor.execute("""
-                    INSERT INTO oc_register (case_id, oc_number, oc_content, oc_date, oc_to)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    case_id,
-                    oc_data.get('OC_Number'),
-                    oc_data.get('OC_Content'),
-                    oc_data.get('OC_Date'),
-                    oc_data.get('OC_To')
-                ))
+            self._insert_oc_entry(cursor, case_id, oc_data, is_issuance)
             
             conn.commit()
             conn.close()
             return True
         except Exception as e:
             print(f"Error adding OC entry: {e}")
+            if "Illegal OC Register Write" in str(e) or "Invalid OC Number" in str(e):
+                raise e # Propagate crucial validation errors
+            return False
+        except Exception as e:
+            print(f"Error adding OC entry: {e}")
+            if "Illegal OC Register Write" in str(e) or "Invalid OC Number" in str(e):
+                raise e # Propagate crucial validation errors
             return False
 
     def save_case_issues(self, proceeding_id, issues_list, stage='DRC-01A'):
@@ -622,12 +651,18 @@ class DatabaseManager:
             # 2. Insert new issues
             for issue in issues_list:
                 issue_id = issue.get('issue_id')
-                data_json = json.dumps(issue.get('data', {}))
+                data = issue.get('data', {})
+                data_json = json.dumps(data)
+                
+                # Extract metadata if available
+                category = data.get('category')
+                description = data.get('issue') or data.get('description')
+                amount = data.get('amount') or data.get('total_shortfall', 0)
                 
                 cursor.execute("""
-                    INSERT INTO case_issues (proceeding_id, issue_id, stage, data_json)
-                    VALUES (?, ?, ?, ?)
-                """, (proceeding_id, issue_id, stage, data_json))
+                    INSERT INTO case_issues (proceeding_id, issue_id, stage, data_json, category, description, amount)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (proceeding_id, issue_id, stage, data_json, category, description, amount))
                 
             conn.commit()
             conn.close()
@@ -641,14 +676,15 @@ class DatabaseManager:
     def get_case_issues(self, proceeding_id, stage='DRC-01A'):
         """
         Retrieve all issues for a proceeding.
-        Returns a list of dicts with 'issue_id' and 'data' (parsed JSON).
+        Returns a list of dicts with 'issue_id', 'data' (parsed JSON), and SCN metadata.
         """
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
             
+            # Updated to fetch SCN metadata columns
             cursor.execute("""
-                SELECT issue_id, data_json 
+                SELECT issue_id, data_json, origin, source_proceeding_id, added_by, id
                 FROM case_issues 
                 WHERE proceeding_id = ? AND stage = ?
                 ORDER BY id ASC
@@ -665,7 +701,11 @@ class DatabaseManager:
                     
                 issues.append({
                     'issue_id': row[0],
-                    'data': data
+                    'data': data,
+                    'origin': row[2] or 'SCRUTINY', # Default for legacy records
+                    'source_proceeding_id': row[3],
+                    'added_by': row[4],
+                    'id': row[5] # Primary Key (Needed for updates)
                 })
             
             conn.close()
@@ -673,6 +713,63 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error getting case issues: {e}")
             return []
+
+    def save_scn_issue_snapshot(self, proceeding_id, issue_list):
+        """
+        Save the full SCN issue list (Snapshot).
+        This replaces the previous SCN state for this proceeding (Full Sync).
+        
+        issue_list: List of dicts containing:
+            - issue_id
+            - data (dict)
+            - origin (SCRUTINY | MANUAL_SOP)
+            - source_proceeding_id (optional)
+            - added_by (optional)
+        """
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # 1. Clear existing SCN draft issues for this proceeding
+            cursor.execute("DELETE FROM case_issues WHERE proceeding_id = ? AND stage = 'SCN'", (proceeding_id,))
+            
+            # 2. Bulk Insert
+            for issue in issue_list:
+                data_json = json.dumps(issue.get('data', {}))
+                
+                cursor.execute("""
+                    INSERT INTO case_issues (
+                        proceeding_id, issue_id, stage, data_json, 
+                        origin, source_proceeding_id, added_by
+                    ) VALUES (?, ?, 'SCN', ?, ?, ?, ?)
+                """, (
+                    proceeding_id, 
+                    issue['issue_id'], 
+                    data_json,
+                    issue.get('origin', 'SCRUTINY'),
+                    issue.get('source_proceeding_id'),
+                    issue.get('added_by', 'System')
+                ))
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error saving SCN snapshots: {e}")
+            return False
+
+    def update_case_issue_origin(self, row_id, new_origin):
+        """Update the origin of a specific issue record (used for legacy data repair)"""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE case_issues SET origin = ? WHERE id = ?", (new_origin, row_id))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error updating case issue origin: {e}")
+            return False
 
     def clone_issues_for_scn(self, proceeding_id):
         """
@@ -850,12 +947,19 @@ class DatabaseManager:
                 try: tp_details = json.loads(tp_details)
                 except: tp_details = {}
 
+            # Explicitly initialize ASMT-10 status to Clean Draft
+            asmt_status = 'Draft'
+            asmt_final_on = None
+            asmt_final_by = None
+            adj_case_id = None
+
             cursor.execute("""
                 INSERT INTO proceedings (
                     id, case_id, gstin, legal_name, trade_name, address, financial_year, 
                     initiating_section, form_type, status, demand_details, selected_issues, 
-                    taxpayer_details, additional_details, last_date_to_reply, created_by
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    taxpayer_details, additional_details, last_date_to_reply, created_by,
+                    asmt10_status, asmt10_finalised_on, asmt10_finalised_by, adjudication_case_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 pid,
                 case_id,
@@ -872,7 +976,11 @@ class DatabaseManager:
                 json.dumps(tp_details),
                 json.dumps(data.get('additional_details', {})),
                 data.get('last_date_to_reply'),
-                data.get('created_by', 'System')
+                data.get('created_by', 'System'),
+                asmt_status,
+                asmt_final_on,
+                asmt_final_by,
+                adj_case_id
             ))
             
             # Log creation event
@@ -886,35 +994,90 @@ class DatabaseManager:
             return None
 
     def get_proceeding(self, pid):
-        """Get proceeding details"""
+        """Get proceeding details (scans both proceedings and adjudication_cases)"""
         import json
         try:
             conn = self._get_conn()
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
+            # 1. Try Proceedings Table (Scrutiny)
             cursor.execute("SELECT * FROM proceedings WHERE id = ?", (pid,))
             row = cursor.fetchone()
-            conn.close()
             
             if row:
                 d = dict(row)
-                # Parse JSON fields
-                for field in ['demand_details', 'selected_issues', 'taxpayer_details', 'additional_details']:
-                    val = d.get(field)
-                    if val and isinstance(val, str):
-                        try:
-                            d[field] = json.loads(val)
-                        except:
-                            d[field] = {} if field in ['taxpayer_details', 'additional_details'] else []
-                    elif val is None:
-                        d[field] = {} if field in ['taxpayer_details', 'additional_details'] else []
-                        
+                self._parse_proceeding_json_fields(d)
+                conn.close()
                 return d
+                
+            # 2. Try Adjudication Cases Table
+            cursor.execute("SELECT * FROM adjudication_cases WHERE id = ?", (pid,))
+            adj_row = cursor.fetchone()
+            
+            if adj_row:
+                adj_data = dict(adj_row)
+                source_id = adj_data.get('source_scrutiny_id')
+                
+                # Fetch Source Scrutiny Data for context
+                if source_id:
+                    cursor.execute("SELECT * FROM proceedings WHERE id = ?", (source_id,))
+                    source_row = cursor.fetchone()
+                    if source_row:
+                        source_data = dict(source_row)
+                        self._parse_proceeding_json_fields(source_data)
+                        
+                        # Merge Data: Adjudication overrides Scrutiny
+                        # We want the ID to be the Adjudication ID for workspace context
+                        final_data = source_data.copy()
+                        final_data.update(adj_data)
+                        final_data['id'] = pid # Ensure ID is Adjudication ID
+                        final_data['scrutiny_id'] = source_id # Keep ref
+                        final_data['is_adjudication'] = True
+                        
+                        # Explicitly ensure adjudication_section is present if in adj_data
+                        if 'adjudication_section' in adj_data and adj_data['adjudication_section']:
+                            final_data['adjudication_section'] = adj_data['adjudication_section']
+                        
+                        conn.close()
+                        return final_data
+            
+            # If Adjudication case found but no source scrutiny (Direct Adjudication)
+            if adj_row and not adj_data.get('source_scrutiny_id'):
+                conn.close()
+                d = dict(adj_row)
+                d['is_adjudication'] = True
+                d['source_scrutiny_id'] = None
+                return d
+
+            conn.close()
             return None
         except Exception as e:
             print(f"Error getting proceeding: {e}")
             return None
+
+    def get_scrutiny_case_data(self, source_scrutiny_id):
+        """
+        Explicitly fetch structured Scrutiny data (ASMT-10).
+        Used to ensure we are reading from the canonical source.
+        """
+        try:
+            return self.get_proceeding(source_scrutiny_id)
+        except Exception:
+            return None
+
+    def _parse_proceeding_json_fields(self, d):
+        """Helper to parse JSON fields in proceeding dict"""
+        import json
+        for field in ['demand_details', 'selected_issues', 'taxpayer_details', 'additional_details']:
+            val = d.get(field)
+            if val and isinstance(val, str):
+                try:
+                    d[field] = json.loads(val)
+                except:
+                    d[field] = {} if field in ['taxpayer_details', 'additional_details'] else []
+            elif val is None:
+                d[field] = {} if field in ['taxpayer_details', 'additional_details'] else []
 
     def update_proceeding(self, pid, data):
         """Update proceeding details"""
@@ -945,18 +1108,38 @@ class DatabaseManager:
             return False
 
     def delete_proceeding(self, pid):
-        """Delete a proceeding and all related data"""
+        """Delete a proceeding and all related data, including orphan adjudication cases."""
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
             
-            # Delete related documents
+            # 1. Check for linked adjudication case
+            cursor.execute("SELECT adjudication_case_id FROM proceedings WHERE id = ?", (pid,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                adj_id = row[0]
+                # Delete the linked adjudication case to prevent orphans
+                cursor.execute("DELETE FROM adjudication_cases WHERE id = ?", (adj_id,))
+            
+            # 2. Delete related documents
             cursor.execute("DELETE FROM documents WHERE proceeding_id = ?", (pid,))
             
-            # Delete related events
+            # 3. Delete related events
             cursor.execute("DELETE FROM events WHERE proceeding_id = ?", (pid,))
             
-            # Delete the proceeding itself
+            # 4. Delete case issues
+            cursor.execute("DELETE FROM case_issues WHERE proceeding_id = ?", (pid,))
+            
+            # 5. Delete from Registers (explicit cleanup required as FK is SET NULL or missing)
+            # Find associated case_id
+            cursor.execute("SELECT case_id FROM proceedings WHERE id = ?", (pid,))
+            c_row = cursor.fetchone()
+            if c_row and c_row[0]:
+                cid = c_row[0]
+                cursor.execute("DELETE FROM oc_register WHERE case_id = ?", (cid,))
+                cursor.execute("DELETE FROM asmt10_register WHERE case_id = ?", (cid,))
+            
+            # 6. Delete the proceeding itself
             cursor.execute("DELETE FROM proceedings WHERE id = ?", (pid,))
             
             conn.commit()
@@ -964,6 +1147,49 @@ class DatabaseManager:
             return True
         except Exception as e:
             print(f"Error deleting proceeding: {e}")
+            return False
+
+    def update_adjudication_case(self, adj_id, data):
+        """Update fields in adjudication_cases table with full JSON support"""
+        import json
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # Expanded allowed fields to support full SCN drafting
+            json_fields = ['additional_details', 'taxpayer_details', 'demand_details', 'selected_issues']
+            
+            updates = []
+            values = []
+            
+            for k, v in data.items():
+                # Allow status, section, and all JSON fields
+                # Security: We implicitly allow columns that exist. 
+                # Ideally check against schema, but for now we trust caller logic + DB error if col missing
+                
+                if k in json_fields and isinstance(v, (dict, list)):
+                    v = json.dumps(v)
+                    
+                updates.append(f"{k} = ?")
+                values.append(v)
+            
+            if not updates:
+                return False
+                
+            values.append(adj_id)
+            query = f"UPDATE adjudication_cases SET {', '.join(updates)} WHERE id = ?"
+            
+            cursor.execute(query, tuple(values))
+            
+            # Check if any row was actually updated
+            if cursor.rowcount == 0:
+                print(f"Warning: update_adjudication_case touched 0 rows for ID {adj_id}")
+            
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error updating adjudication case: {e}")
             return False
 
     def save_document(self, data):
@@ -1197,63 +1423,112 @@ class DatabaseManager:
         issue_json: dict containing the full issue object
         """
         import json
-        import datetime
+        from datetime import datetime
         
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
             
+            # Extract Core Fields
             issue_id = issue_json.get('issue_id')
-            if not issue_id:
-                return False, "Issue ID is required"
-                
-            # Extract metadata
             issue_name = issue_json.get('issue_name')
             category = issue_json.get('category')
-            severity = issue_json.get('severity')
-            tags = json.dumps(issue_json.get('tags', []))
-            version = issue_json.get('version')
+            sop_point = issue_json.get('sop_point')
             
-            # Check if exists
-            cursor.execute("SELECT issue_id FROM issues_master WHERE issue_id = ?", (issue_id,))
-            exists = cursor.fetchone()
+            if not issue_id:
+                return False, "Issue ID is required"
             
-            if exists:
-                # Update Master
-                cursor.execute("""
-                    UPDATE issues_master 
-                    SET issue_name=?, category=?, severity=?, tags=?, version=?, updated_at=CURRENT_TIMESTAMP
-                    WHERE issue_id=?
-                """, (issue_name, category, severity, tags, version, issue_id))
-                
-                # Update Data (Delete old data entry and insert new, or update)
-                # We'll update the latest entry or just overwrite the single entry per issue_id
-                # The schema allows multiple data entries per issue_id if we wanted history, 
-                # but for now let's keep 1:1 for simplicity or 1:Many if we want versioning.
-                # The user requirement implies "save issues to DB", doesn't explicitly ask for full history.
-                # Let's update the existing data row.
-                
-                cursor.execute("UPDATE issues_data SET issue_json=? WHERE issue_id=?", (json.dumps(issue_json), issue_id))
-                
-            else:
-                # Insert Master
-                cursor.execute("""
-                    INSERT INTO issues_master (issue_id, issue_name, category, severity, tags, version, active)
-                    VALUES (?, ?, ?, ?, ?, ?, 0)
-                """, (issue_id, issue_name, category, severity, tags, version))
-                
-                # Insert Data
-                cursor.execute("""
-                    INSERT INTO issues_data (issue_id, issue_json)
-                    VALUES (?, ?)
-                """, (issue_id, json.dumps(issue_json)))
+            # Serialize complex fields
+            templates_json = json.dumps(issue_json.get('templates', {}))
+            grid_data_json = json.dumps(issue_json.get('grid_data', {}))
+            table_def_json = json.dumps(issue_json.get('table_definition', {}))
+            
+            analysis_type = issue_json.get('analysis_type', 'auto')
+            sop_version = issue_json.get('sop_version')
+            app_fy = issue_json.get('applicable_from_fy')
+            
+            # Upsert into issues_master
+            # Note: We are now driving everything from issues_master. 
+            # We don't need issues_data table anymore for the strict binding, 
+            # but legacy code might expect it? 
+            # Safe bet: Update issues_master.
+            
+            cursor.execute("""
+                INSERT INTO issues_master (
+                    issue_id, issue_name, category, sop_point, templates, grid_data, 
+                    table_definition, analysis_type, sop_version, applicable_from_fy,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(issue_id) DO UPDATE SET
+                    issue_name=excluded.issue_name,
+                    category=excluded.category,
+                    sop_point=excluded.sop_point,
+                    templates=excluded.templates,
+                    grid_data=excluded.grid_data,
+                    table_definition=excluded.table_definition,
+                    analysis_type=excluded.analysis_type,
+                    sop_version=excluded.sop_version,
+                    applicable_from_fy=excluded.applicable_from_fy,
+                    updated_at=excluded.updated_at
+            """, (
+                issue_id, issue_name, category, sop_point, templates_json, grid_data_json, 
+                table_def_json, analysis_type, sop_version, app_fy,
+                datetime.now()
+            ))
+            
+            # Legacy compatibility (optional, but good for safety)
+            # cursor.execute("INSERT OR REPLACE INTO issues_data (issue_id, issue_json) VALUES (?, ?)", (issue_id, json.dumps(issue_json)))
             
             conn.commit()
             conn.close()
-            return True, "Issue saved successfully"
+            return True, "Issue Saved Successfully"
             
         except Exception as e:
-            print(f"Error saving issue: {e}")
+            print(f"Error saving issue {issue_json.get('issue_id')}: {e}")
+            return False, str(e)
+
+    def update_master_template_description(self, issue_id, new_brief_facts):
+        """
+        Updates the 'brief_facts' template for a specific master issue.
+        This allows users to customize legal text globally.
+        """
+        import json
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # 1. Fetch current JSON
+            cursor.execute("SELECT issue_json FROM issues_data WHERE issue_id = ?", (issue_id,))
+            row = cursor.fetchone()
+            if not row:
+                conn.close()
+                return False, "Issue template not found in master database."
+            
+            issue_json = json.loads(row[0])
+            
+            # 2. Update the template
+            if 'templates' not in issue_json:
+                issue_json['templates'] = {}
+            
+            issue_json['templates']['brief_facts'] = new_brief_facts
+            
+            # Also update the main description if it matches the legacy structure
+            if 'description' in issue_json:
+                issue_json['description'] = new_brief_facts
+                
+            # 3. Save back
+            cursor.execute("UPDATE issues_data SET issue_json = ? WHERE issue_id = ?", (json.dumps(issue_json), issue_id))
+            
+            # Optional: Update master table updated_at
+            cursor.execute("UPDATE issues_master SET updated_at = CURRENT_TIMESTAMP WHERE issue_id = ?", (issue_id,))
+            
+            conn.commit()
+            conn.close()
+            return True, "Master template updated successfully."
+            
+        except Exception as e:
+            print(f"Error updating master template: {e}")
             return False, str(e)
 
     def get_active_issues(self):
@@ -1301,18 +1576,45 @@ class DatabaseManager:
             return []
 
     def get_issue(self, issue_id):
-        """Get a single issue's full JSON"""
+        """
+        Retrieve a single Master Issue record by Semantic ID.
+        Returns a dict including 'sop_point', 'templates', etc.
+        """
         import json
+        import sqlite3
         try:
             conn = self._get_conn()
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            cursor.execute("SELECT issue_json FROM issues_data WHERE issue_id = ?", (issue_id,))
+            # EXPLICIT SELECTION to force cached schema refresh/bypass
+            cursor.execute("""
+                SELECT issue_id, issue_name, category, sop_point, templates, grid_data, 
+                       table_definition, analysis_type, sop_version, applicable_from_fy
+                FROM issues_master 
+                WHERE issue_id = ?
+            """, (issue_id,))
+            
             row = cursor.fetchone()
             conn.close()
             
             if row:
-                return json.loads(row[0])
+                d = dict(row)
+                
+                # Helper to parse JSON safely
+                def parse_json_field(key):
+                    if d.get(key):
+                        if isinstance(d[key], str):
+                            try: d[key] = json.loads(d[key])
+                            except: d[key] = {} if key != 'grid_data' else []
+                    else:
+                         d[key] = {} if key != 'grid_data' else []
+
+                parse_json_field('templates')
+                parse_json_field('grid_data')
+                parse_json_field('table_definition')
+                
+                return d
             return None
         except Exception as e:
             print(f"Error getting issue {issue_id}: {e}")
@@ -1336,7 +1638,7 @@ class DatabaseManager:
             conn.close()
             
             if row:
-                return [None, row[0]] # Returning tuple (None, json_str) to match usage in scrutiny_tab.py line 1559
+                return json.loads(row[0])
             return None
         except Exception as e:
             print(f"Error getting issue by name {name}: {e}")
@@ -1350,6 +1652,9 @@ class DatabaseManager:
             
             # Delete related issues first
             cursor.execute("DELETE FROM case_issues WHERE proceeding_id = ?", (pid,))
+            
+            # Delete linked adjudication case (CRITICAL FIX for Orphans)
+            cursor.execute("DELETE FROM adjudication_cases WHERE source_scrutiny_id = ?", (pid,))
             
             # Delete proceeding
             cursor.execute("DELETE FROM proceedings WHERE id = ?", (pid,))
@@ -1392,6 +1697,229 @@ class DatabaseManager:
             print(f"Error deleting issue: {e}")
             return False
 
+    def add_asmt10_entry(self, data):
+        """
+        DEPRECATED: Add an entry to the ASMT-10 Register.
+        Use finalize_proceeding_transaction instead.
+        """
+        print("ERROR: add_asmt10_entry is disabled.")
+        return False
+        
+        # Legacy code below disabled
+        # try:
+        #     conn = self._get_conn()
+        #     ...
+        #     return True
+        # except Exception as e:
+        #     print(f"Error adding ASMT-10 entry: {e}")
+        #     return False
+
+    def finalize_proceeding_transaction(self, pid, oc_data, asmt_data, adj_data, user_id='System'):
+        """
+        Atomically finalize a proceeding (ASMT-10).
+        1. Lock proceeding (status=finalised)
+        2. Create OC Register Entry
+        3. Create ASMT-10 Register Entry
+        4. Create Linked Adjudication Case
+        """
+        import uuid
+        import datetime
+        
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # 1. Generate Adjudication ID
+            adj_id = str(uuid.uuid4())
+            
+            # 2. Update Proceeding Status
+            cursor.execute("""
+                UPDATE proceedings 
+                SET asmt10_status = 'finalised', 
+                    asmt10_finalised_on = CURRENT_TIMESTAMP, 
+                    asmt10_finalised_by = ?,
+                    adjudication_case_id = ?
+                WHERE id = ?
+            """, (user_id, adj_id, pid))
+            
+            if cursor.rowcount == 0:
+                raise Exception(f"Proceeding {pid} not found or update failed.")
+            
+            # 3. OC Register
+            # Use shared logic with STRICT issuance
+            valid_oc_num = self._insert_oc_entry(cursor, asmt_data.get('case_id'), oc_data, is_issuance=True)
+            
+            # 4. ASMT-10 Register
+            cursor.execute("""
+                INSERT INTO asmt10_register (gstin, financial_year, issue_date, case_id, oc_number)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                asmt_data.get('gstin'),
+                asmt_data.get('financial_year'),
+                asmt_data.get('issue_date'),
+                asmt_data.get('case_id'),
+                valid_oc_num # Use the validated OC Num
+            ))
+            
+            # 5. Adjudication Case
+            cursor.execute("""
+                INSERT INTO adjudication_cases (id, source_scrutiny_id, gstin, legal_name, financial_year, status)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                adj_id,
+                adj_data.get('source_scrutiny_id'), # This is the pid
+                adj_data.get('gstin'),
+                adj_data.get('legal_name'),
+                adj_data.get('financial_year'),
+                'Pending'
+            ))
+            
+            conn.commit()
+            conn.close()
+            return True, adj_id
+            
+        except Exception as e:
+            print(f"Transaction Error: {e}")
+    def delete_oc_entry(self, entry_id):
+        """Delete specific entry from OC register."""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM oc_register WHERE id = ?", (entry_id,))
+            rows_deleted = cursor.rowcount
+            conn.commit()
+            conn.close()
+            
+            if rows_deleted == 0:
+                print(f"Warning: delete_oc_entry failed. ID {entry_id} not found.")
+                return False
+                
+            return True
+        except Exception as e:
+            print(f"Error deleting OC entry: {e}")
+            return False
+
+    def delete_asmt10_entry(self, entry_id):
+        """Delete specific entry from ASMT-10 register."""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM asmt10_register WHERE id = ?", (entry_id,))
+            rows_deleted = cursor.rowcount
+            conn.commit()
+            conn.close()
+            
+            if rows_deleted == 0:
+                print(f"Warning: delete_asmt10_entry failed. ID {entry_id} not found.")
+                return False
+                
+            return True
+        except Exception as e:
+            print(f"Error deleting ASMT-10 entry: {e}")
+            return False
+        
+    def reset_registers_for_dev(self):
+        """
+        DEV ONLY: Clear OC, ASMT-10 Registers, and reset associated proceedings/adjudication.
+        1. Deletes all rows from oc_register.
+        2. Deletes all rows from asmt10_register.
+        3. Deletes all rows from adjudication_cases.
+        4. Resets ASMT-10 status fields in proceedings table.
+        """
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # 1. Clear Registers
+            cursor.execute("DELETE FROM oc_register")
+            cursor.execute("DELETE FROM asmt10_register")
+            
+            # 2. Clear Adjudication Cases
+            cursor.execute("DELETE FROM adjudication_cases")
+            
+            # 3. Reset Proceedings Status
+            # Reset all ASMT-10 related fields and unlink adjudication cases
+            cursor.execute("""
+                UPDATE proceedings 
+                SET asmt10_status = NULL, 
+                    asmt10_finalised_on = NULL, 
+                    asmt10_finalised_by = NULL,
+                    adjudication_case_id = NULL
+            """)
+            
+            conn.commit()
+            conn.close()
+            return True, "Registers reset successfully."
+        except Exception as e:
+            print(f"Dev Reset Error: {e}")
+            if conn: conn.rollback()
+            return False, str(e)
+            return False, str(e)
+
+    def create_adjudication_case(self, data):
+        """Create a linked Adjudication Case from Scrutiny."""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            adj_id = str(uuid.uuid4())
+            
+            cursor.execute("""
+                INSERT INTO adjudication_cases (id, source_scrutiny_id, gstin, legal_name, financial_year, status)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                adj_id,
+                data.get('source_scrutiny_id'),
+                data.get('gstin'),
+                data.get('legal_name'),
+                data.get('financial_year'),
+                'Pending'
+            ))
+            
+            conn.commit()
+            conn.close()
+            return adj_id
+        except Exception as e:
+            print(f"Error creating adjudication case: {e}")
+            return None
+
+    def get_valid_adjudication_cases(self):
+        """
+        Fetch valid adjudication cases with strict filtering.
+        Rules:
+        1. Scrutiny Origin: source_scrutiny_id IS NOT NULL AND Linked Proceeding is Finalised.
+        2. Direct Origin: source_scrutiny_id IS NULL.
+        """
+        try:
+            conn = self._get_conn()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT 
+                    ac.*,
+                    p.asmt10_status as source_status,
+                    p.financial_year as source_fy,
+                    p.legal_name as source_legal_name,
+                    p.gstin as source_gstin
+                FROM adjudication_cases ac
+                LEFT JOIN proceedings p ON ac.source_scrutiny_id = p.id
+                WHERE 
+                    (ac.source_scrutiny_id IS NOT NULL AND LOWER(p.asmt10_status) = 'finalised')
+                    OR 
+                    (ac.source_scrutiny_id IS NULL)
+                ORDER BY ac.created_at DESC
+            """
+            
+            cursor.execute(query)
+            rows = cursor.fetchall()
+            conn.close()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Error getting valid adjudication cases: {e}")
+            return []
+
+
 
     def get_gst_acts(self):
         """Get all GST Acts from DB"""
@@ -1406,6 +1934,24 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error getting GST Acts: {e}")
             return []
+
+
+
+    def get_asmt10_register_entries(self):
+        """Get all entries from asmt10_register."""
+        try:
+            conn = self._get_conn()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT * FROM asmt10_register ORDER BY created_at DESC")
+            rows = cursor.fetchall()
+            conn.close()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Error getting ASMT-10 register: {e}")
+            return []
+
 
     def get_act_sections(self, act_id, chapter_id=None):
         """Get all sections for a specific Act from DB, optionally filtered by chapter"""

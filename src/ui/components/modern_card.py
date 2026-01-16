@@ -97,11 +97,11 @@ class ModernCard(QFrame):
         shadow.setColor(QColor(0, 0, 0, 20))
         self.setGraphicsEffect(shadow)
 
-    def addWidget(self, widget):
-        self.content_layout.addWidget(widget)
+    def addWidget(self, widget, *args, **kwargs):
+        self.content_layout.addWidget(widget, *args, **kwargs)
 
-    def addLayout(self, layout):
-        self.content_layout.addLayout(layout)
+    def addLayout(self, layout, *args, **kwargs):
+        self.content_layout.addLayout(layout, *args, **kwargs)
         
     def header_clicked(self, event):
         """Handle click on header frame"""

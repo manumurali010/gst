@@ -76,9 +76,9 @@ def test_extraction():
         print("[PASS] Parsing Successful")
         print(f"Total Shortfall: {res['total_shortfall']}")
         
-        if "summary_table" in res:
-            print("\n[PASS] Summary Table Found:")
-            st = res["summary_table"]
+        if "issue_table_data" in res:
+            print("\n[PASS] Summary Table Found (issue_table_data):")
+            st = res["issue_table_data"]
             print("Headers:", st["headers"])
             for row in st["rows"]:
                 print(row)
@@ -100,8 +100,11 @@ def test_extraction():
             assert rows[2]['col1'] == -20 # CGST Diff
             print("\n[PASS] Values Verified: Totals match inputs.")
             
+            print("\n[PASS] Values Verified: Totals match inputs.")
+            
         else:
-            print("[FAIL] Summary Table Missing from Result")
+            print("[FAIL] Summary Table (issue_table_data) Missing from Result")
+            print(f"Keys found: {list(res.keys())}")
             
     except Exception as e:
         print(f"[ERROR] Error: {e}")

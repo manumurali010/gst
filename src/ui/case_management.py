@@ -5,6 +5,7 @@ from PyQt6.QtCore import Qt, QStringListModel
 import os
 import json
 from src.database.db_manager import DatabaseManager
+from src.utils.formatting import format_indian_number
 
 class CaseManagement(QWidget):
     def __init__(self, wizard_callback):
@@ -233,6 +234,21 @@ class CaseManagement(QWidget):
             c['Legal Name'] = c.get('legal_name')
             
         all_cases.extend(sqlite_cases)
+
+        # 3. Get Adjudication Cases (Linked + Direct)
+        adj_cases = self.db.get_valid_adjudication_cases()
+        for c in adj_cases:
+            c['source'] = 'sqlite'
+            # Normalize keys
+            c['CaseID'] = c.get('id')
+            c['Section'] = c.get('adjudication_section') or "Not Set"
+            # Fallback for source fields if linked
+            c['Financial_Year'] = c.get('financial_year') or c.get('source_fy')
+            c['Status'] = c.get('status')
+            c['GSTIN'] = c.get('gstin') or c.get('source_gstin')
+            c['Legal Name'] = c.get('legal_name') or c.get('source_legal_name')
+            
+        all_cases.extend(adj_cases)
         
         # Filter if query exists
         if query:
@@ -373,7 +389,15 @@ class CaseManagement(QWidget):
                 
             # 3. Fetch Document Details (SCN, Order)
             docs = self.db.get_documents(pid)
+            if not isinstance(docs, list):
+                print(f"Warning: get_documents returned non-list: {type(docs)}")
+                docs = []
+
             for doc in docs:
+                if isinstance(doc, str):
+                    print(f"Warning: Unexpected string in docs list: {doc}")
+                    continue
+                    
                 doc_type = doc.get('doc_type')
                 path = doc.get('snapshot_path')
                 updated_at = doc.get('updated_at')
@@ -630,7 +654,7 @@ class CaseManagement(QWidget):
         issue_row.addWidget(bullet)
         issue_row.addWidget(lbl)
         
-        demand_lbl = QLabel(f"(Total Demand: ₹ {total:,.2f})")
+        demand_lbl = QLabel(f"(Total Demand: {format_indian_number(total, prefix_rs=True)})")
         demand_lbl.setStyleSheet("color: #7f8c8d; font-size: 11px;")
         issue_row.addWidget(demand_lbl)
         
@@ -658,10 +682,10 @@ class CaseManagement(QWidget):
             if amt > 0:
                 tax_table.insertRow(row_idx)
                 tax_table.setItem(row_idx, 0, QTableWidgetItem(act))
-                tax_table.setItem(row_idx, 1, QTableWidgetItem(f"{amt:,.2f}"))
-                tax_table.setItem(row_idx, 2, QTableWidgetItem("0.00")) 
-                tax_table.setItem(row_idx, 3, QTableWidgetItem("0.00")) 
-                tax_table.setItem(row_idx, 4, QTableWidgetItem(f"{amt:,.2f}"))
+                tax_table.setItem(row_idx, 1, QTableWidgetItem(format_indian_number(amt)))
+                tax_table.setItem(row_idx, 2, QTableWidgetItem(format_indian_number(0))) 
+                tax_table.setItem(row_idx, 3, QTableWidgetItem(format_indian_number(0))) 
+                tax_table.setItem(row_idx, 4, QTableWidgetItem(format_indian_number(amt)))
                 row_idx += 1
                 
         layout.addWidget(tax_table)

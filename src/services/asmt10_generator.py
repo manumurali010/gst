@@ -2,6 +2,7 @@ from PyQt6.QtGui import QTextDocument, QPageLayout, QPageSize
 from PyQt6.QtPrintSupport import QPrinter
 from PyQt6.QtCore import QSizeF, QMarginsF
 import os
+from src.utils.formatting import format_indian_number
 
 class ASMT10Generator:
     """Service to generate ASMT-10 Notices in various formats."""
@@ -25,17 +26,188 @@ class ASMT10Generator:
     @staticmethod
     def generate_issue_table_html(issue):
         """Generates the HTML table for a single issue based on its template type."""
+        # DEBUG LOG for SOP-5 UI
+        i_id = issue.get('issue_id', 'Unknown')
+        stat = issue.get('status', 'Unknown')
+        has_tbl = "YES" if "tables" in issue and issue["tables"] else "NO"
+        print(f"DEBUG UI: issue_id={i_id}, status={stat}, tables_present={has_tbl}")
+
         template_type = issue.get('template_type')
         rows = issue.get('rows', [])
+        grid_data = issue.get('grid_data') # New authoritative model
+        summary_table = issue.get('summary_table')
         
+        # Priority 0: Multi-Table Support (SOP-5 Dual Layout)
+        if "tables" in issue and isinstance(issue["tables"], list):
+            html = ""
+            for tbl in issue["tables"]:
+                title = tbl.get("title", "")
+                if title:
+                    html += f"<p><strong>{title}</strong></p>"
+                # Render using grid table generator
+                html += ASMT10Generator._generate_grid_table(tbl)
+            return html
+
+        # Priority 1: If grid_data is present (Master-aligned structure)
+        # Priority 1: If grid_data is valid (Master-aligned structure)
+        # SUPPORTS: Dict (Canonical) ONLY
+        if grid_data and isinstance(grid_data, dict) and "rows" in grid_data:
+            return ASMT10Generator._generate_grid_table(grid_data)
+        elif grid_data and isinstance(grid_data, list):
+             # Legacy List Support (Auto-wrap)
+             return ASMT10Generator._generate_grid_table({"columns": [], "rows": grid_data})
+
+        # Priority 2: Summary Table (Treated as Grid Data)
+        if summary_table and isinstance(summary_table, dict) and ("rows" in summary_table or "columns" in summary_table):
+            return ASMT10Generator._generate_grid_table(summary_table)
+
+        # Priority 3: Legacy List Support in grid_data (Auto-wrap)
+        # (This block is redundant if covered above, but ensuring flow)
+        
+        # Priority 4: Specific Templates (Legacy Fallback - Should be migrated eventually)
         if (template_type == 'liability_monthly' or template_type == 'liability_monthwise' or template_type == 'liability_mismatch') and rows:
             return ASMT10Generator._generate_liability_table(rows, issue.get('labels'))
         elif template_type == 'itc_yearly_summary' and rows:
             return ASMT10Generator._generate_itc_yearly_table(rows)
         elif template_type == 'ineligible_itc' and rows:
             return ASMT10Generator._generate_generic_list_table(rows, ["GSTIN", "Supplier Name", "ITC Availed"])
+
+        # Default Hard Guard: Data Unavailable
+        return """
+        <div style="border: 1px dashed #bdc3c7; padding: 10px; margin: 10px 0; background-color: #f8f9fa;">
+            <p style="margin: 0; color: #7f8c8d; font-style: italic; text-align: center;">
+                Detailed calculation data is not available for this issue.<br>
+                (Source: Legacy Data or Missing Analysis Payload)
+            </p>
+        </div>
+        """
+
+    @staticmethod
+    def _generate_grid_table(grid_data_dict):
+        """Generates HTML table from grid_data dict {'columns':..., 'rows':...}"""
+        if not grid_data_dict: return ""
+        
+        rows = grid_data_dict.get('rows', [])
+        columns = grid_data_dict.get('columns', []) # Header cells (dicts)
+        
+        # Guard: Empty table
+        if not rows and not columns: return ""
+        
+        html = '<table class="data-table">'
+        
+        # 1. Header Row
+        if columns:
+             html += "<tr>"
+             for col_cell in columns:
+                 # Support both dict and string headers (though dict is canonical)
+                 if isinstance(col_cell, dict):
+                     val = col_cell.get('label') or col_cell.get('value', '')
+                     width = col_cell.get('width', '')
+                     style_attr = f"width: {width};" if width else ""
+                 else:
+                     val = str(col_cell)
+                     style_attr = ""
+                     
+                 html += f'<th style="{style_attr}">{val}</th>'
+             html += "</tr>"
+        
+        # 2. Data Rows
+        for r_index, row in enumerate(rows):
+            html += "<tr>"
             
-        return "<p><em>No detailed table available for this issue type.</em></p>"
+            # Determine how to iterate (Dict vs List)
+            # Scenario A: Columns defined -> Iterate columns to get keys
+            if columns:
+                 for c_index, col_def in enumerate(columns):
+                     col_id = col_def.get('id') if isinstance(col_def, dict) else f"col{c_index}"
+                     if not col_id: col_id = f"col{c_index}"
+                     
+                     # Extract Cell
+                     if isinstance(row, dict):
+                         cell = row.get(col_id, {})
+                     elif isinstance(row, list) and c_index < len(row):
+                         cell = row[c_index]
+                     else:
+                         cell = {}
+                         
+                     # Unwrap Cell (Canonical Dict vs Scalar)
+                     if isinstance(cell, dict):
+                         val = cell.get('value', '')
+                         style = cell.get('style', 'normal')
+                         ctype = cell.get('type', 'text')
+                     else:
+                         val = cell
+                         style = 'normal'
+                         ctype = 'text'
+
+                     # Detect Type/Formatting
+                     is_numeric = isinstance(val, (int, float))
+                     val_str = str(val)
+                     
+                     if is_numeric:
+                         # Round floats, use Indian Format, No decimals if integer-ish
+                         val_str = format_indian_number(val, prefix_rs=False)
+                     
+                     # Alignment Logic
+                     align = "left"
+                     if is_numeric or val_str == "0" or val_str == "0.0":
+                         align = "right"
+                     
+                     # CSS Building
+                     css = f"text-align: {align}; padding: 4px;"
+                     if style == "bold" or style == "header": css += " font-weight: bold;"
+                     if style == "red_bold": css += " font-weight: bold; color: red;"
+                     if style == "red": css += " color: red;"
+                     
+                     html += f'<td style="{css}">{val_str}</td>'
+            
+            # Scenario B: No Columns defined (Legacy List of Lists)
+            else:
+                 iter_items = row.values() if isinstance(row, dict) else row
+                 for cell in iter_items:
+                     # Unwrap Cell
+                     if isinstance(cell, dict):
+                         val = cell.get('value', '')
+                         style = cell.get('style', 'normal')
+                     else:
+                         val = cell
+                         style = 'normal'
+                     
+                     is_numeric = isinstance(val, (int, float))
+                     val_str = str(val)
+                     if is_numeric:
+                          val_str = format_indian_number(val, prefix_rs=False)
+                     
+                     align = "right" if is_numeric else "left"
+                     css = f"text-align: {align}; padding: 4px;"
+                     if style == "bold": css += " font-weight: bold;"
+                     
+                     html += f'<td style="{css}">{val_str}</td>'
+
+            html += "</tr>"
+        html += "</table>"
+        
+        # 3. Source Metadata (Provenance)
+        if rows and len(rows) > 0 and columns:
+            first_col_id = columns[0].get('id') if isinstance(columns[0], dict) else "col0"
+            if isinstance(rows[0], dict):
+                first_cell = rows[0].get(first_col_id)
+                # If cell is dict and has source
+                if isinstance(first_cell, dict) and first_cell.get("source"):
+                    src = first_cell.get("source")
+                    origin = src.get("origin", "Unknown")
+                    asmt_id = src.get("asmt_id", "N/A")
+                    dt = src.get("converted_on", "")
+                    if dt and "T" in dt:
+                        dt = dt.split("T")[0] # Just the date
+                    
+                    html += f'<div style="font-size: 8pt; color: #7f8c8d; margin-top: 5px; font-style: italic;">'
+                    html += f'Source: {origin} (Case: {asmt_id}) | Converted on: {dt}'
+                    html += f'</div>'
+
+        return html
+
+
 
     @staticmethod
     def _generate_generic_list_table(rows, headers):
@@ -185,7 +357,7 @@ class ASMT10Generator:
         return html
 
     @staticmethod
-    def generate_html(data, issues, for_preview=True):
+    def generate_html(data, issues, for_preview=True, show_letterhead=True):
         """Generates the HTML content for ASMT-10 with specific layout and formatting."""
         # Note: for_preview arg is kept for compatibility but logic is unified for WYSIWYG
         from src.utils.config_manager import ConfigManager
@@ -194,7 +366,9 @@ class ASMT10Generator:
         import re
         
         config = ConfigManager()
-        total_tax = sum(float(i.get('total_shortfall', 0)) for i in issues)
+        # Filter issues to only show those with detected discrepancies in the draft AND included by user
+        active_issues = [i for i in issues if float(i.get('total_shortfall', 0)) > 0 and i.get('is_included', True)]
+        total_tax = sum(float(i.get('total_shortfall', 0)) for i in active_issues)
         
         # 1. Fetch Letterhead
         lh_content = ""
@@ -236,15 +410,23 @@ class ASMT10Generator:
         oc_number = data.get('oc_number', 'N/A')
 
         issue_sections = ""
-        for idx, issue in enumerate(issues, 1):
+        for idx, issue in enumerate(active_issues, 1):
+            # Semantic Correction: Issue <n> – <Issue Name>
+            import re
+            raw_name = issue.get('category') or issue.get('issue_name') or "Unknown Issue"
+            # Strip "Point X- " prefix if present
+            issue_name = re.sub(r'^Point \d+- ?', '', raw_name, flags=re.IGNORECASE)
+            
             section_html = f"""
+
             <div class="issue-block">
-                <p><strong>{idx}. {issue.get('category')}</strong></p>
+                <p><strong>Issue {idx} – {issue_name}</strong></p>
                 <p class="justify-text">{issue.get('brief_facts') or issue.get('description')}</p>
             """
             section_html += ASMT10Generator.generate_issue_table_html(issue)
             section_html += "</div>"
             issue_sections += section_html
+
 
         # 3. Recipient Details & Address Wrapping
         raw_address = (data.get('address') or data.get('Address of Principal Place of Business') or 
@@ -259,6 +441,9 @@ class ASMT10Generator:
         
         gstin = data.get('gstin') or data.get('taxpayer_details', {}).get('GSTIN') or 'N/A'
         legal_name = data.get('legal_name') or data.get('taxpayer_details', {}).get('Legal Name') or 'Unknown'
+
+        # Apply Letterhead suppression
+        display_lh = lh_content if show_letterhead else ""
 
         html = f"""
         <html>
@@ -333,7 +518,7 @@ class ASMT10Generator:
         <body>
             <div class="page-container">
                 <div class="letterhead-area">
-                {lh_content}
+                {display_lh}
             </div>
 
             <table class="oc-header" style="border: none;">

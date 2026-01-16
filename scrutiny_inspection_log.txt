@@ -1,0 +1,28 @@
+--- Issues Master (Current) ---
+LIABILITY_3B_R1: Outward Liability Mismatch (GSTR 3B vs GSTR 1)
+RCM_LIABILITY_ITC: RCM Liability mismatch (GSTR 3B vs GSTR 2B)
+ISD_CREDIT_MISMATCH: ISD Credit mismatch (GSTR 3B vs GSTR 2B)
+ITC_3B_2B_OTHER: All Other ITC Mismatch (GSTR 3B vs GSTR 2B)
+TDS_TCS_MISMATCH: TDS/TCS Credit Mismatch (GSTR 3B vs GSTR 2B)
+IMPORT_ITC_MISMATCH: Import ITC Mismatch (GSTR 3B vs ICEGATE)
+ITC_3B_2B_9X4: GSTR 3B vs 2B (discrepancy identified from GSTR 9)
+EWAY_BILL_MISMATCH: E-Waybill Comparison (GSTR 3B vs E-Waybill)
+CANCELLED_SUPPLIERS: ITC from Cancelled Suppliers
+NON_FILER_SUPPLIERS: ITC from Non-Filing Suppliers
+SEC_16_4_VIOLATION: Section 16(4) ITC Violation
+RULE_42_43_VIOLATION: Rule 42/43 Reversal Mismatch
+
+--- Scrutiny Results (Inspection) ---
+Table 'scrutiny_results' does not exist.
+Table 'proceedings' exists. Checking data structure...
+Columns: ['id', 'gstin', 'legal_name', 'trade_name', 'financial_year', 'initiating_section', 'status', 'demand_details', 'selected_issues', 'last_date_to_reply', 'created_at', 'updated_at', 'address', 'form_type', 'created_by', 'taxpayer_details', 'case_id', 'additional_details', 'oc_number', 'notice_date', 'asmt10_status', 'asmt10_finalised_on', 'asmt10_finalised_by', 'adjudication_case_id']
+Row ID: 6ee46674-f026-488c-80df-cb63a2192a10
+  additional_details: "{\"oc_number\": \"12345/2026\", \"oc_date\": \"2024-01-01\"}"...
+Row ID: e2cd5b1c-7b96-4c88-a475-a1aacdc0a5b0
+  additional_details: {"oc_number": "12345/2026", "oc_date": "2024-01-01"}...
+Row ID: 5e45c0fc-091d-43d5-81ca-026ec03df78a
+  additional_details: {}...
+Row ID: 2a273e0a-a512-4b6d-a4c8-822137593860
+  additional_details: {}...
+Row ID: 70f1013f-92b1-45f7-8795-ce028c65402a
+  additional_details: "{\"file_paths\": {\"tax_liability_yearly\": \"C:/Users/manum/Downloads/2021-22_32AAPFK0963M1ZZ_Tax liability and ITC comparison.xlsx\", \"gstr9_yearly\": \"C:/Users/manum/Downloads/GSTR9_32AAPFK0963M1ZZ_032022.pdf\"}, \"group_configs\": {\"gstr3b\": {\"frequency\": \"Yearly\"}, \"gstr1\": {\"frequency\": \"Yearly\"}, \"gstr2b\": {\"frequency\": \"Yearly\"}, \"gstr9\": {\"frequency\": \"Yearly\"}}}"...

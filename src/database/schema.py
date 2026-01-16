@@ -47,7 +47,11 @@ def init_db():
         "taxpayer_details TEXT",
         "additional_details TEXT",
         "oc_number TEXT",
-        "notice_date TEXT"
+        "notice_date TEXT",
+        "asmt10_status TEXT",
+        "asmt10_finalised_on TIMESTAMP",
+        "asmt10_finalised_by TEXT",
+        "adjudication_case_id TEXT"
     ]
     
     for col_def in migration_cols:
@@ -154,6 +158,8 @@ def init_db():
         FOREIGN KEY (case_id) REFERENCES proceedings(case_id) ON DELETE SET NULL
     );
     """)
+    try: cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_oc_number_unique ON oc_register(oc_number)")
+    except: pass
 
     # 9. Case Issues Table (Source of Truth for Issue Data)
     cursor.execute("""
@@ -169,9 +175,27 @@ def init_db():
     );
     """)
     
+    
     # Migration: Add stage column to case_issues if not exists
     try: cursor.execute("ALTER TABLE case_issues ADD COLUMN stage TEXT DEFAULT 'DRC-01A'")
     except: pass
+
+    # Migration: Add structured columns for ASMT-10/Adjudication
+    try: cursor.execute("ALTER TABLE case_issues ADD COLUMN category TEXT")
+    except: pass
+    try: cursor.execute("ALTER TABLE case_issues ADD COLUMN description TEXT")
+    except: pass
+    try: cursor.execute("ALTER TABLE case_issues ADD COLUMN amount DECIMAL(15,2) DEFAULT 0")
+    except: pass
+
+    # Migration: Add columns for SCN Manual Issue Insertion (Step 159)
+    try: cursor.execute("ALTER TABLE case_issues ADD COLUMN origin TEXT DEFAULT 'SCRUTINY'")
+    except: pass
+    try: cursor.execute("ALTER TABLE case_issues ADD COLUMN source_proceeding_id TEXT")
+    except: pass
+    try: cursor.execute("ALTER TABLE case_issues ADD COLUMN added_by TEXT")
+    except: pass
+
     
     # 10. GST Acts Table
     cursor.execute("""
@@ -196,6 +220,50 @@ def init_db():
         FOREIGN KEY (act_id) REFERENCES gst_acts(act_id) ON DELETE CASCADE
     );
     """)
+
+    # 12. ASMT-10 Register (Finalized Notices)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS asmt10_register (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, -- Sl. No.
+        gstin TEXT,
+        financial_year TEXT,
+        issue_date DATE,
+        case_id TEXT, -- Link back to scrutiny case
+        oc_number TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+    try: cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_asmt10_case_id ON asmt10_register(case_id)")
+    except: pass
+
+    # 13. Adjudication Cases (Downstream from Finalized Scrutiny)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS adjudication_cases (
+        id TEXT PRIMARY KEY, -- Unique Adjudication Case ID
+        source_scrutiny_id TEXT, -- Link to source ASMT-10 case
+        gstin TEXT,
+        legal_name TEXT,
+        financial_year TEXT,
+        adjudication_section TEXT, -- 73, 74, or 74A
+        status TEXT DEFAULT 'Pending', -- Pending, SCN Issued, Order Passed
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        additional_details TEXT, -- JSON: SCN Metadata (No, OC, Date)
+        taxpayer_details TEXT, -- JSON: Snapshot
+        demand_details TEXT,   -- JSON: Demand Table
+        selected_issues TEXT   -- JSON: Issue IDs
+    );
+    """)
+
+    # Migration: Add columns to adjudication_cases if not exists
+    adj_cols = [
+        "additional_details TEXT",
+        "taxpayer_details TEXT",
+        "demand_details TEXT",
+        "selected_issues TEXT"
+    ]
+    for col_def in adj_cols:
+        try: cursor.execute(f"ALTER TABLE adjudication_cases ADD COLUMN {col_def}")
+        except: pass
     
     conn.commit()
     conn.close()

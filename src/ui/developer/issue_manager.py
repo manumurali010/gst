@@ -13,35 +13,56 @@ from src.ui.developer.table_builder import TableBuilderWidget
 from src.ui.components.section_selector import SectionSelectorDialog
 from src.ui.developer.logic_validator import LogicValidator
 
-class IssueListItemWidget(QWidget):
-    """Rich List Item for Issues"""
+class IssueListItemWidget(QFrame):
+    """Rich List Item for Issues (Card Style)"""
     def __init__(self, name, issue_id, active, category):
         super().__init__()
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
-        layout.setSpacing(2)
+        self.active = active
         
-        # Row 1: Name and Status Dot
+        # styling for the card itself
+        self.setStyleSheet(f"""
+            IssueListItemWidget {{
+                background-color: white;
+                border-left: 4px solid {'#27ae60' if active else '#95a5a6'};
+                border-bottom: 1px solid #f1f2f6;
+            }}
+            IssueListItemWidget:hover {{
+                background-color: #f8f9fa;
+            }}
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(4)
+        
+        # Row 1: Name
         row1 = QHBoxLayout()
         name_lbl = QLabel(name)
-        name_lbl.setStyleSheet("font-weight: bold; font-size: 14px;")
+        name_lbl.setStyleSheet("font-weight: 600; font-size: 13px; color: #2c3e50;")
+        name_lbl.setWordWrap(False)
         row1.addWidget(name_lbl)
-        row1.addStretch()
-        
-        status_lbl = QLabel("●")
-        status_lbl.setStyleSheet(f"color: {'#27ae60' if active else '#95a5a6'}; font-size: 12px;")
-        row1.addWidget(status_lbl)
         layout.addLayout(row1)
         
-        # Row 2: Category
+        # Row 2: Category & ID
         row2 = QHBoxLayout()
-        row2.addStretch()
+        row2.setSpacing(8)
         
-        cat_lbl = QLabel(category)
-        cat_lbl.setStyleSheet("background-color: #ecf0f1; color: #2c3e50; border-radius: 3px; padding: 2px 4px; font-size: 10px;")
+        cat_lbl = QLabel((category or "OTHER").upper()) # Uppercase for pill style
+        cat_lbl.setStyleSheet("""
+            background-color: #eef2f7; 
+            color: #576574; 
+            border-radius: 4px; 
+            padding: 2px 6px; 
+            font-size: 9px; 
+            font-weight: bold;
+        """)
         row2.addWidget(cat_lbl)
         
+        row2.addStretch()
+        
         layout.addLayout(row2)
+
+
 
 class IssueManager(QWidget):
     def __init__(self):
@@ -55,37 +76,50 @@ class IssueManager(QWidget):
     def init_ui(self):
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
         
         # Splitter
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.setHandleWidth(1)
+        self.splitter.setStyleSheet("QSplitter::handle { background-color: #e0e0e0; }")
         self.layout.addWidget(self.splitter)
         
         # ---------------- Left Pane: Explorer ----------------
         left_widget = QWidget()
-        left_widget.setStyleSheet("background-color: #f8f9fa; border-right: 1px solid #dcdcdc;")
+        left_widget.setStyleSheet("background-color: #ffffff;")
         left_layout = QVBoxLayout(left_widget)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
         
-        # 1. Header & Module Switcher
+        # 1. Header Area
         header_container = QWidget()
-        header_container.setStyleSheet("background-color: #fff; border-bottom: 1px solid #eee; padding: 10px;")
+        header_container.setStyleSheet("background-color: #f8f9fa; border-bottom: 1px solid #e0e0e0;")
         header_layout = QVBoxLayout(header_container)
+        header_layout.setContentsMargins(15, 15, 15, 15)
+        header_layout.setSpacing(10)
         
+        top_row = QHBoxLayout()
         title = QLabel("Issue Explorer")
-        title.setStyleSheet("font-size: 14px; font-weight: bold; color: #2c3e50;")
-        header_layout.addWidget(title)
-        
-        # Module Toggle (Segmented Control style)
-        self.module_combo = QComboBox()
-        self.module_combo.addItems(["All Modules", "Scrutiny (ASMT-10)", "Adjudication (SCN/DRC)"])
-        self.module_combo.currentTextChanged.connect(self.filter_issues)
-        header_layout.addWidget(self.module_combo)
+        title.setStyleSheet("font-size: 12px; font-weight: 800; color: #5f6c7b; text-transform: uppercase; letter-spacing: 0.5px;")
+        top_row.addWidget(title)
+        top_row.addStretch()
+        # Counts could go here
+        header_layout.addLayout(top_row)
         
         # Search Bar
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Search issues...")
-        self.search_input.setStyleSheet("padding: 5px; border: 1px solid #ccc; border-radius: 4px;")
+        self.search_input.setPlaceholderText("Filter issues...")
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                padding: 6px; 
+                border: 1px solid #dcdde1; 
+                border-radius: 4px;
+                background: white;
+                font-size: 12px;
+            }
+            QLineEdit:focus { border-color: #3498db; }
+        """)
         self.search_input.textChanged.connect(self.filter_issues)
         header_layout.addWidget(self.search_input)
         
@@ -94,17 +128,49 @@ class IssueManager(QWidget):
         # 2. List Widget
         self.issue_list = QListWidget()
         self.issue_list.setFrameShape(QFrame.Shape.NoFrame)
-        self.issue_list.setStyleSheet("QListWidget::item { border-bottom: 1px solid #eee; padding: 5px; } QListWidget::item:selected { background-color: #e3f2fd; }")
+        # We rely on widget styling now, so list item styling is minimal
+        self.issue_list.setStyleSheet("""
+            QListWidget {
+                background-color: #ffffff;
+                outline: none;
+            }
+            QListWidget::item {
+                padding: 0px; 
+                border-bottom: 1px solid #f0f0f0;
+            }
+            QListWidget::item:selected {
+                background-color: white; /* Widget handles selection look if needed, or we assume transparent overlay */
+            }
+        """)
+        # Important: Remove focus rect
+        self.issue_list.setAttribute(Qt.WidgetAttribute.WA_MacShowFocusRect, False)
+        self.issue_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
         self.issue_list.currentRowChanged.connect(self.on_issue_selected)
         left_layout.addWidget(self.issue_list)
         
-        # 3. Valid/Draft Filter (Bottom Toolbar)
+        # 3. Bottom Toolbar
         bottom_bar = QWidget()
-        bottom_bar.setStyleSheet("background-color: #fff; border-top: 1px solid #eee; padding: 5px;")
+        bottom_bar.setStyleSheet("background-color: #f8f9fa; border-top: 1px solid #e0e0e0; padding: 10px;")
         bottom_layout = QHBoxLayout(bottom_bar)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
         
-        new_btn = QPushButton(" + New Issue")
-        new_btn.setStyleSheet("background-color: #27ae60; color: white; border: none; padding: 8px; border-radius: 4px; font-weight: bold;")
+        new_btn = QPushButton("Create Issue")
+        # new_btn.setIcon(QIcon("assets/icons/plus.png")) # Fallback if no icon system, text is fine
+        new_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ffffff; 
+                color: #27ae60; 
+                border: 1px solid #27ae60; 
+                padding: 6px 12px; 
+                border-radius: 4px; 
+                font-weight: 600;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #27ae60;
+                color: white;
+            }
+        """)
         new_btn.clicked.connect(self.create_new_issue)
         bottom_layout.addWidget(new_btn)
         
@@ -387,13 +453,13 @@ class IssueManager(QWidget):
 
     def filter_issues(self):
         query = self.search_input.text().lower()
-        module_idx = self.module_combo.currentIndex() # 0=All, 1=Scrutiny, 2=Adjudication
+        # module_idx = self.module_combo.currentIndex() # Removed based on feedback
         
         self.issue_list.clear()
         
         for issue in self.all_issues:
             # Module Filtering Logic
-            category = issue.get('category', '').lower()
+            category = (issue.get('category') or '').lower()
             tags = str(issue.get('tags', '')).lower()
             name = issue.get('issue_name', '').lower()
             
@@ -405,12 +471,12 @@ class IssueManager(QWidget):
                 # Assume scrutiny for now or check tags
                 pass
             
-            target_module = False
-            if module_idx == 0: target_module = True
-            elif module_idx == 1 and is_scrutiny: target_module = True
-            elif module_idx == 2 and is_adjudication: target_module = True
+            # target_module = False
+            # if module_idx == 0: target_module = True
+            # elif module_idx == 1 and is_scrutiny: target_module = True
+            # elif module_idx == 2 and is_adjudication: target_module = True
             
-            if not target_module: continue
+            # if not target_module: continue
             
             # Check Search Query
             if query and (query not in name and query not in category and query not in str(issue.get('issue_id', ''))):

@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                             QFrame, QCheckBox, QAbstractItemView, QHeaderView)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
+from src.utils.formatting import format_indian_number
 
 class FinalizationPanel(QWidget):
     """
@@ -140,7 +141,7 @@ class FinalizationPanel(QWidget):
         t_label = QLabel("Total Demand Liability")
         t_label.setStyleSheet("color: #bdc3c7; font-weight: bold;")
         
-        self.grand_total_lbl = QLabel("₹ 0.00")
+        self.grand_total_lbl = QLabel(format_indian_number(0, prefix_rs=True))
         self.grand_total_lbl.setStyleSheet("color: white; font-size: 18px; font-weight: bold;")
         self.grand_total_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
         
@@ -319,16 +320,33 @@ class FinalizationPanel(QWidget):
         # 4. Populate Table
         self.amounts_table.setRowCount(0)
         for act, totals in act_totals.items():
-             if totals['tax'] > 0 or totals['interest'] > 0 or totals['penalty'] > 0:
+            if totals['tax'] > 0 or totals['interest'] > 0 or totals['penalty'] > 0:
                 r = self.amounts_table.rowCount()
                 self.amounts_table.insertRow(r)
                 self.amounts_table.setItem(r, 0, QTableWidgetItem(act))
-                self.amounts_table.setItem(r, 1, QTableWidgetItem(f"{totals['tax']:,.2f}"))
-                self.amounts_table.setItem(r, 2, QTableWidgetItem(f"{totals['interest']:,.2f}"))
-                self.amounts_table.setItem(r, 3, QTableWidgetItem(f"{totals['penalty']:,.2f}"))
+                self.amounts_table.setItem(r, 1, QTableWidgetItem(format_indian_number(totals['tax'])))
+                self.amounts_table.setItem(r, 2, QTableWidgetItem(format_indian_number(totals['interest'])))
+                self.amounts_table.setItem(r, 3, QTableWidgetItem(format_indian_number(totals['penalty'])))
         
         # 5. Grand Total
-        self.grand_total_lbl.setText(f"₹ {grand_total:,.2f}")
+        self.grand_total_lbl.setText(format_indian_number(grand_total, prefix_rs=True))
+
+    def clear_data(self):
+        """Reset the panel to default state"""
+        self.tp_name_lbl.setText("Taxpayer Name")
+        self.tp_gstin_lbl.setText("GSTIN: -")
+        self.tp_trade_lbl.setText("Trade Name: -")
+        self.case_id_lbl.setText("Case ID: -")
+        self.fy_lbl.setText("F.Y.: -")
+        self.section_lbl.setText("Section: -")
+        self.doc_no_lbl.setText("No: -")
+        self.doc_date_lbl.setText("Date: -")
+        self.doc_ref_lbl.setText("Ref OC: -")
+        self.issue_list_widget.setText("-")
+        self.amounts_table.setRowCount(0)
+        self.grand_total_lbl.setText(format_indian_number(0, prefix_rs=True))
+        self.finalize_btn.setEnabled(False)
+        self.confirm_chk.setChecked(False)
 
     def set_read_only(self, read_only=True):
         """Toggle read-only mode (hide action footer)"""

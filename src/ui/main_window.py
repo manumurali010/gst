@@ -58,7 +58,7 @@ class MainWindow(QMainWindow):
         
         self.adjudication_landing = AdjudicationLanding(self.handle_adjudication_nav)
         self.new_case_flow = CaseInitiationWizard(self.handle_adjudication_nav)
-        self.proceedings_workspace = ProceedingsWorkspace(self.handle_adjudication_nav)
+        self.proceedings_workspace = ProceedingsWorkspace(self.handle_adjudication_nav, sidebar=self.sidebar)
         self.case_management = CaseManagement(self.launch_wizard_with_case)
         
         # Old Wizard (Keeping for reference or legacy, but hidden from main flow)
@@ -92,7 +92,7 @@ class MainWindow(QMainWindow):
         
         # Scrutiny Module
         from src.ui.scrutiny_tab import ScrutinyTab
-        self.scrutiny_tab = ScrutinyTab()
+        self.scrutiny_tab = ScrutinyTab(nav_adj_callback=self.open_adjudication_case)
         self.stack.addWidget(self.scrutiny_tab) # Index 10
         
         # Settings Tab
@@ -132,12 +132,18 @@ class MainWindow(QMainWindow):
             # data should be proceeding_id
             self.proceedings_workspace.load_proceeding(data)
             self.adjudication_stack.setCurrentIndex(2) # Workspace
-            # Switch Sidebar to Case Mode
-            self.sidebar.set_mode("case")
+            # Switch Sidebar to Case Mode with Context
+            is_scrutiny = self.proceedings_workspace.proceeding_data.get('source_scrutiny_id') is not None
+            self.sidebar.set_mode("case", is_scrutiny=is_scrutiny)
             self.sidebar.set_active_btn("summary") # Default to summary
         elif target == "landing":
             self.adjudication_stack.setCurrentIndex(0) # Landing
             self.sidebar.set_mode("global")
+
+    def open_adjudication_case(self, adj_id):
+        """Navigate to Adjudication Module and open specific case"""
+        self.navigate_to(2) # Switch main stack to Adjudication
+        self.handle_adjudication_nav("workspace", adj_id) # Load case
 
     def launch_wizard_with_case(self, mode, case_data):
         """Launch wizard pre-filled with case data"""

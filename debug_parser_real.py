@@ -26,13 +26,24 @@ def debug_run():
         for i, issue in enumerate(res['issues']):
             cat = issue.get('category', 'Unknown')
             shortfall = issue.get('total_shortfall', 0)
-            print(f"\nIssue #{i+1}: {cat} (Shortfall: {shortfall})")
+            tt = issue.get('template_type', 'none')
+            print(f"\nIssue #{i+1}: {cat} (Template: {tt})")
+            print(f"  [Value on Right Side of Card]: {shortfall:,.0f}")
             
             if 'summary_table' in issue:
                 print("  [Summary Table Found]")
-                print(json.dumps(issue['summary_table'], indent=2))
+                # print(json.dumps(issue['summary_table'], indent=2))
+                for r in issue['summary_table']['rows']:
+                    h_list = issue['summary_table']['headers']
+                    row_vals = ", ".join([f"{h_list[j+1]}={r.get(f'col{j+1}', 0)}" for j in range(len(h_list)-1)])
+                    print(f"    - {r['col0'][:40]}...: {row_vals}")
+            
+            if 'rows' in issue and issue['rows']:
+                print(f"  [Monthly Rows: {len(issue['rows'])}]")
+                r0 = issue['rows'][0]
+                print(f"    First row ({r0['period']}): 3B IGST={r0['3b']['igst']}, 2B IGST={r0['ref']['igst']}")
             else:
-                print("  [No Summary Table]")
+                print("  [No Monthly Rows]")
     else:
         print("No 'issues' key in result.")
 

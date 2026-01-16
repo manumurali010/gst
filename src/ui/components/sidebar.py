@@ -178,7 +178,7 @@ class Sidebar(QFrame):
             btn.deleteLater()
         self.buttons = []
 
-    def set_mode(self, mode):
+    def set_mode(self, mode, is_scrutiny=False):
         self.current_mode = mode
         self.clear_buttons()
         
@@ -207,13 +207,20 @@ class Sidebar(QFrame):
             
             items = [
                 ("Summary", "📋", "summary"),
-                ("DRC-01A", "📝", "drc01a"),
+            ]
+            
+            if is_scrutiny:
+                items.append(("ASMT-10", "📑", "asmt10"))
+            else:
+                items.append(("DRC-01A", "📝", "drc01a"))
+                
+            items.extend([
                 ("SCN", "📜", "scn"),
                 ("PH Intimation", "📅", "ph"),
                 ("Order", "⚖️", "order"),
                 ("Documents", "📂", "documents"),
                 ("Timeline", "⏱️", "timeline")
-            ]
+            ])
             for text, icon, action in items:
                 self.add_button(text, icon, action, self.handle_case_click)
         
@@ -245,3 +252,22 @@ class Sidebar(QFrame):
                 btn.setChecked(True)
             else:
                 btn.setChecked(False)
+
+    def set_button_visible(self, action_key, visible):
+        """Show or hide a specific button by its action key"""
+        for btn in self.buttons:
+            if btn.index == action_key:
+                btn.setVisible(visible)
+                if visible:
+                    # Restore layout margins if showing
+                    margin = 10 if self.is_expanded else 0
+                    btn.layout.setContentsMargins(margin, 0, 0, 0)
+                return
+
+    def set_button_label(self, action_key, new_text):
+        """Update the display text of a specific button by its action key"""
+        for btn in self.buttons:
+            if btn.index == action_key:
+                btn.text_label = new_text
+                btn.lbl.setText(new_text)
+                return

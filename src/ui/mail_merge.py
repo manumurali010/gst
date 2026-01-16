@@ -370,18 +370,31 @@ class MailMergeTab(QWidget):
             QMessageBox.warning(self, "No Selection", "Please select at least one taxpayer.")
             return
             
-        oc_no_base = self.oc_number_input.text()
+        oc_no_base = self.oc_number_input.text().strip()
         if not oc_no_base:
             QMessageBox.warning(self, "Missing OC No", "Please enter an OC Number.")
             return
             
         output_dir = self.folder_input.text()
         if not output_dir or not os.path.exists(output_dir):
-            if not os.path.exists(output_dir):
-                 os.makedirs(output_dir, exist_ok=True)
+            if not os.path.exists(output_dir) and output_dir:
+                 try:
+                    os.makedirs(output_dir, exist_ok=True)
+                 except:
+                    output_dir = os.path.join(os.getcwd(), "output", "mail_merge")
+                    os.makedirs(output_dir, exist_ok=True)
             else:
-                QMessageBox.warning(self, "Invalid Folder", "Please select a valid output folder.")
-                return
+                 output_dir = os.path.join(os.getcwd(), "output", "mail_merge")
+                 os.makedirs(output_dir, exist_ok=True)
+
+        # Explicit confirmation for OC Register write
+        reply = QMessageBox.question(
+            self, 
+            "Confirm Issuance", 
+            f"Generating {len(selected)} documents.\n\nDo you want to add these to the OFFICIAL OC Register (Issue)?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        should_register = (reply == QMessageBox.StandardButton.Yes)
 
         comm_type = self.comm_type_combo.currentText()
         content_template = self.editor.toHtml()
@@ -406,11 +419,7 @@ class MailMergeTab(QWidget):
 
         for i, recipient in enumerate(selected):
             try:
-                # 1. Generate OC No (If multiple, we might want to suffix or just use same)
                 current_oc_no = oc_no_base
-                if len(selected) > 1 and "/" in oc_no_base:
-                    # Optional: Could add automatic numbering here
-                    pass
 
                 # 2. Fill Placeholders
                 filled_content = self.fill_placeholders(content_template, recipient)
@@ -446,35 +455,33 @@ class MailMergeTab(QWidget):
                     errors.append(f"Failed for {recipient.get('GSTIN')}: {msg}")
                     continue
 
-                # 5. Save to OC Register
-                entry_data = {
-                    "OC_Number": current_oc_no,
-                    "OC_Content": comm_type,
-                    "OC_Date": self.oc_date_input.text(),
-                    "OC_To": f"{recipient.get('Legal Name')}, {recipient.get('GSTIN')}",
-                    "GSTIN": recipient.get('GSTIN', ''),
-                    "Legal Name": recipient.get('Legal Name', ''),
-                    "Trade Name": recipient.get('Trade Name', ''),
-                    "Status": "Generated (Mail Merge)",
-                    "Section": "General", 
-                    "Remarks": f"Generated PDF: {filename}"
-                }
+                # 5. Save to OC Register (Only if confirmed)
+                if should_register:
+                    entry_data = {
+                        "OC_Number": current_oc_no,
+                        "OC_Content": comm_type,
+                        "OC_Date": self.oc_date_input.text(),
+                        "OC_To": f"{recipient.get('Legal Name')}, {recipient.get('GSTIN')}",
+                        "GSTIN": recipient.get('GSTIN', ''),
+                        "Legal Name": recipient.get('Legal Name', ''),
+                        "Trade Name": recipient.get('Trade Name', ''),
+                        "Status": "Generated (Mail Merge)",
+                        "Section": "General", 
+                        "Remarks": f"Generated PDF: {filename}"
+                    }
+                    
+                    case = self.db.find_active_case(recipient.get('GSTIN'), "General")
+                    case_id = case.get('CaseID') if case else None
+                    
+                    # STRICT ISSUANCE CALL
+                    self.db.add_oc_entry(case_id, entry_data, is_issuance=True)
                 
-                # Use SQLite entry
-                # We need a case_id. For mail merge, we can either create a new proceeding 
-                # or just add to register without one (if the DB allows)
-                # Let's try to find an active case first
-                case = self.db.find_active_case(recipient.get('GSTIN'), "General")
-                case_id = case.get('CaseID') if case else None
-                
-                self.db.add_oc_entry(case_id, entry_data)
                 count += 1
                 
             except Exception as e:
                 errors.append(f"Error for {recipient.get('GSTIN')}: {str(e)}")
             
             self.progress_bar.setValue(i + 1)
-            # Process UI events to keep it responsive
             from PyQt6.QtWidgets import QApplication
             QApplication.processEvents()
 
