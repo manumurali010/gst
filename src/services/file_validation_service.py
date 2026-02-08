@@ -1,9 +1,10 @@
 import os
 import re
-import fitz  # PyMuPDF
+import fitz  # [RESTORED] PyMuPDF re-enabled
 import pandas as pd
 import warnings
 from datetime import datetime
+from src.utils.date_utils import normalize_financial_year, get_fy_end_year, validate_gstin_format, validate_fy_sanity
 
 # Suppress OpenPyXL warnings if any
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
@@ -245,91 +246,48 @@ class FileValidationService:
 
     @staticmethod
     def _extract_pdf_metadata(file_path, file_type="GSTR3B"):
-        """Extracts metadata from PDF headers using Regex (Robust)."""
-        meta = {}
+        """
+        Extracted PDF metadata with strict post-extraction validation.
+        """
         try:
-            doc = fitz.open(file_path)
-            # Scan first 3 pages
-            text = ""
-            for i in range(min(3, len(doc))):
-                text += doc[i].get_text() + "\n"
-            doc.close()
+            # We import here to avoid circular dependencies if any
+            from src.utils.pdf_parsers import parse_gstr3b_metadata, parse_gstr1_pdf_metadata, parse_gstr9_pdf_metadata
             
-            # RegEx Patterns
-            gstin_pat = r"\b\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]\b"
-            
-            # 1. GSTIN (Anchor agnostic scan first, then filter)
-            matches = re.findall(gstin_pat, text, re.IGNORECASE)
-            unique = list(set([m.upper() for m in matches]))
-            if len(unique) == 1:
-                meta['gstin'] = unique[0]
-            elif len(unique) > 1:
-                # If multiple, look for "GSTIN:" anchor to disambiguate
-                anchor_match = re.search(r"(?:GSTIN|GSTIN of the supplier|GSTIN of the Taxpayer)\s*[:\.]?\s*([0-9A-Z]{15})", text, re.IGNORECASE)
-                if anchor_match:
-                    meta['gstin'] = anchor_match.group(1).upper()
-            
-            # 2. FY / Tax Period
-            
-            # Helper to derive FY from Month/Year or Period Strings
-            def derive_fy_val(m_str, y_str):
-                try:
-                     # Parse Month
-                    if m_str.isdigit():
-                         m = int(m_str)
-                    else:
-                         # Full or Abbr Month
-                         try:
-                             m = datetime.strptime(m_str[:3], "%b").month
-                         except: return None
-                    
-                    y = int(y_str)
-                    
-                    # India FY: April (4) to March (3)
-                    # If Month >= 4 (Apr-Dec): FY is Year-(Year+1) e.g. Apr 2018 -> 2018-19
-                    if m >= 4:
-                        start_y = y
-                        end_y = y + 1
-                    else:
-                        start_y = y - 1
-                        end_y = y
-                    
-                    short_end = str(end_y)[-2:]
-                    return f"{start_y}-{short_end}"
-                except: return None
+            meta = {}
+            if file_type == "GSTR3B":
+                meta = parse_gstr3b_metadata(file_path)
+            elif file_type == "GSTR1":
+                meta = parse_gstr1_pdf_metadata(file_path)
+            elif file_type == "GSTR9":
+                meta = parse_gstr9_pdf_metadata(file_path)
+                
+            if not meta:
+                return {}
 
-            if file_type == "GSTR9":
-                # Strict FY Search for Annual Return
-                fy_match = re.search(r"(?:Financial Year|Year)\s*[:\.]?\s*(20\d{2}-[0-9]{2,4})", text, re.IGNORECASE)
-                if fy_match:
-                    meta['fy'] = fy_match.group(1)
+            # Mandatory Safeguards: Post-Extraction Validation
+            clean_gstin = str(meta.get("gstin", "")).strip().upper()
+            if clean_gstin and not validate_gstin_format(clean_gstin):
+                print(f"WARNING: Invalid GSTIN format extracted from {file_path}: {clean_gstin}")
+                meta["gstin_invalid"] = True
+                
+            raw_fy = meta.get("fy", "")
+            if raw_fy:
+                norm_fy = normalize_financial_year(raw_fy)
+                print(f"DEBUG: Metadata Extraction [FY] Raw='{raw_fy}' -> Normalized='{norm_fy}'")
+                if norm_fy and validate_fy_sanity(norm_fy):
+                    meta["fy"] = norm_fy
+                else:
+                    print(f"WARNING: Invalid FY extracted/normalized from {file_path}: {raw_fy} -> {norm_fy}")
+                    meta["fy_invalid"] = True
             else:
-                # Monthly Return (GSTR-1, GSTR-3B)
-                
-                # A. Check explicit FY string first (Strongest Signal)
-                fy_match_explicit = re.search(r"(?:Financial Year|Year)\s*[:\.]?\s*(20\d{2}-[0-9]{2,4})", text, re.IGNORECASE)
-                
-                # B. Check "Month Year" (e.g. "April 2018")
-                date_match = re.search(r"(April|May|June|July|August|September|October|November|December|January|February|March)\s*[\s\S]{0,5}\s*(20\d{2})", text, re.IGNORECASE)
-                
-                # C. Check "Period: MM/YYYY" (e.g. "04-2018")
-                # Looks for MM followed by 20XX
-                period_match = re.search(r"(?:Period|Month)\s*[:\-\.]?\s*(\d{2})[/\-](\d{4})", text, re.IGNORECASE)
+                print(f"DEBUG: Metadata Extraction [FY] Not found in {file_path}")
+            
+            return meta
 
-                if fy_match_explicit:
-                    meta['fy'] = fy_match_explicit.group(1)
-                elif date_match:
-                    # Derive from Month Name match
-                    derived = derive_fy_val(date_match.group(1), date_match.group(2))
-                    if derived: meta['fy'] = derived
-                elif period_match:
-                    # Derive from Numeric Period match
-                    derived = derive_fy_val(period_match.group(1), period_match.group(2))
-                    if derived: meta['fy'] = derived
-
-        except Exception:
-            pass
-        return meta
+        except Exception as e:
+            print(f"ERROR: Exception during PDF metadata extraction for {file_path}: {e}")
+            return {}
+        
 
     @staticmethod
     def _compare_fy(fy1, fy2):

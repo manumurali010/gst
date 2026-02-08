@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QLineEdit, QPushButton, QFrame, QGridLayout, QCheckBox, QAbstractItemView)
+                             QLineEdit, QPushButton, QFrame, QGridLayout, QCheckBox, QAbstractItemView, QGraphicsOpacityEffect)
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont
+import copy
 from src.ui.rich_text_editor import RichTextEditor
 from src.ui.components.modern_card import ModernCard
 from src.ui.ui_helpers import render_grid_to_table_widget
@@ -14,87 +15,141 @@ class IssueCard(QFrame):
     removeClicked = pyqtSignal()
     # Signal emitted when editor content changes
     contentChanged = pyqtSignal()
+    
+    from src.ui.developer.grid_adapter import GridAdapter
 
     def __init__(self, template, data=None, parent=None, mode="DRC-01A", content_key="content", save_template_callback=None, issue_number=None):
-
         super().__init__(parent)
-        self.template = template
-        if data and 'table_data' in data:
-             # Force injection into template so init_ui picks it up
-             if isinstance(data['table_data'], list):
-                 self.template['grid_data'] = data['table_data']
-             elif isinstance(data['table_data'], dict):
-                 if 'tables' not in self.template:
-                     self.template['tables'] = {}
-                 self.template['tables'].update(data['table_data'])
+        # [STATE OWNERSHIP] Enforce Immutability
+        self.template = copy.deepcopy(template)
+        print(f"[IssueCard DIAG] __init__ start for {self.template.get('issue_id')}")
         
         self.mode = mode
         self.content_key = content_key
-        
-        # Merge variables from template and data
-        self.variables = template.get('variables', {}).copy()
-        if data and 'variables' in data:
-            self.variables.update(data['variables'])
-            
-        self.calc_logic = template.get('calc_logic', "")
-        self.tax_mapping = template.get('tax_demand_mapping', {})
-        self.data_snapshot = {} # To preserve other data (like DRC-01A content when in SCN mode)
-        
-        self.save_template_callback = save_template_callback # Store callback
         self.issue_number = issue_number
+        self.save_template_callback = save_template_callback
+        
+        # [IDENTITY BOOTSTRAP] Minimal state for init_ui
+        self.variables = self.template.get('variables', {}).copy()
+        self.calc_logic = self.template.get('calc_logic', "")
+        self.tax_mapping = self.template.get('tax_demand_mapping', {})
+        
+        # [STATE OWNERSHIP] Instance-Owned Content
+        self.grid_data = None
+        
+        self.data_snapshot = {}
         self.is_read_only = False
         self.source_text = ""
         self.is_included = True
         self.source_type = None
-        self.source_issue_id = None
-        
-        # --- Authoritative Model Fields ---
+        self.source_issue_id = data.get('source_issue_id') if data else None
+        self.drop_reason = data.get('drop_reason') if data else None
         self.origin = data.get('origin', "SCN") if data else "SCN"
         self.status = data.get('status', "ACTIVE") if data else "ACTIVE"
-        self.drop_reason = data.get('drop_reason') if data else None
-        self.source_issue_id = data.get('source_issue_id') if data else None
-        self.is_adopted = True # SCN Workflow State Authority
+        self.is_adopted = True
+        self.last_rendered_html = ""
+        self._is_bootstrapping = True # [GUARD] Prevent destructive sync during init
+        self.cell_widgets = {}       # [MULTI-TABLE] Aggregate rather than reassign
+
+        # [STATE OWNERSHIP] 2. Grid Data Resolution & Normalization (Single Pass)
+        # Priority 1: Hydrated/Adopted Data (Run-time State)
+        # Priority 2: Template Static Data (Design-time Structure)
         
-        # Narrative-Numeric Consistency Safeguard
-        self.last_rendered_html = "" # Detection baseline
-        
+        raw_grid_data = None
+        if data and 'table_data' in data and data['table_data']:
+             raw_grid_data = data['table_data']
+             print(f"[IssueCard DIAG] Resolving grid_data from Runtime Identity (Adopted)")
+        elif self.template.get('grid_data'):
+             raw_grid_data = self.template['grid_data']
+             print(f"[IssueCard DIAG] Resolving grid_data from Template Default")
+             
+        if raw_grid_data:
+             # Canonical Lock: Normalize exactly once.
+             self.grid_data = self.GridAdapter.normalize_to_schema(raw_grid_data)
+             print(f"[IssueCard DIAG] Canonical Grid Locked. Rows: {len(self.grid_data.get('rows', []))}")
+             
+             # [BOOTSTRAP] Variable Extraction (Read-Only)
+             for row in self.grid_data.get('rows', []):
+                  for cell in row.values():
+                      if isinstance(cell, dict) and cell.get('var'):
+                           val = cell.get('value')
+                           if isinstance(val, (int, float)) or (isinstance(val, str) and val.replace('.','',1).isdigit()):
+                                self.variables[cell['var']] = val
+
+        # [MANDATORY] 1. Unconditional UI Construction First
+        # Decoupled from hydration, table_data, and routing logic.
         self.init_ui()
-        
-        # Initial calculation and classification
+
+
+             
+             # template['grid_data'] is authoritative structural skeleton.
+        pass # Block 1 removed
+             
+        # DISABLED
+        if False: # self.template.get('grid_data'):
+                  self.bind_grid_data(self.template['grid_data'], self.grid_container)
+
+                  # [MANDATORY FIX] Unconditional Variable Bootstrap
+                  # Override template defaults (0) with adopted grid values immediately.
+                  print(f"[IssueCard DIAG] Running Bootstrap for {self.template.get('issue_id')}")
+                  normalized = self.GridAdapter.normalize_to_schema(self.template['grid_data'])
+                  for row in normalized.get('rows', []):
+                      for cell in row.values():
+                          if isinstance(cell, dict) and cell.get('var'):
+                              val = cell.get('value')
+                              # Strict Numeric Check as per user request
+                              if isinstance(val, (int, float)) or (isinstance(val, str) and val.replace('.','',1).isdigit()):
+                                   self.variables[cell['var']] = val
+
+        # [HYDRATION] 3. Value Restoration
+        if data and 'variables' in data:
+            self.variables.update(data['variables'])
+
+        # [CALCULATION] 4. Bootstrapping state
         self.set_classification(self.origin, self.status)
         self.calculate_values() 
+        
+        # [SYNC] 5. Final UI Sync
+        self._is_bootstrapping = False # Release guard
+        self.sync_ui_with_variables()
 
 
     def init_ui(self):
-        self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        self.setStyleSheet("IssueCard { background-color: #ffffff; border: 1px solid #bdc3c7; border-radius: 5px; margin-bottom: 10px; }")
+        """
+        Structural Restoration (STRICT)
+        - Top-Level: ModernCard (Collapsed by default)
+        - Nested: Issue Data Card + Draft Content Card
+        - Persistence: Create once, show/hide only
+        """
+        # Base container styling
+        self.setFrameStyle(QFrame.Shape.NoFrame)
+        self.setStyleSheet("background: transparent;")
         
-        layout = QVBoxLayout(self)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0,0,0,0)
         
-        # Wrapper for Header + Body
-        self.main_layout = QVBoxLayout()
-        layout.addLayout(self.main_layout) # Use main_layout instead of adding directly to self
-        
-        # Header
-        header_layout = QHBoxLayout()
+        # 1. Top-Level Card (Host)
+        # Title determination
         base_title = self.template.get('issue_name', 'Issue')
-        # Also check 'category' if issue_name is generic or missing (common in scrutiny issues)
         if base_title == 'Issue' or not base_title:
              base_title = self.template.get('category', 'Issue')
              
         title_text = base_title
         if self.mode == "SCN":
              title_text += " (SCN Draft)"
-             
-        # "Issue <n> – <Name>" Format
         if self.issue_number:
             title_text = f"Issue {self.issue_number} – {title_text}"
-            
-        self.title = QLabel(f"<b>{title_text}</b>")
-        self.title.setStyleSheet("font-size: 14px; color: #2c3e50;")
-        header_layout.addWidget(self.title)
 
-        # Source Badge
+        self.card = ModernCard(title_text, collapsible=True)
+        self.card.toggle_btn.setChecked(False) # Default Collapsed
+        self.card.content_widget.setVisible(False)
+        self.card.line.setVisible(False)
+        
+        # 2. Header Components (Moved to Card Header)
+        # We access the card's header layout directly to inject controls
+        header_layout = self.card.header_layout
+        
+        # Insert Badge after title
         self.source_badge = QLabel("")
         self.source_badge.hide()
         self.source_badge.setStyleSheet("""
@@ -103,17 +158,15 @@ class IssueCard(QFrame):
                 color: #1a73e8;
                 padding: 2px 8px;
                 border-radius: 10px;
-                font-size: 10px;
+                font-size: 8pt;
                 font-weight: bold;
                 border: 1px solid #d2e3fc;
             }
         """)
-        header_layout.addWidget(self.source_badge)
+        header_layout.insertWidget(2, self.source_badge)
 
-        
-        self.main_layout.addLayout(header_layout) # Add header to main layout
-        header_layout.addStretch()
-        
+        self.card.header_layout.addStretch()
+
         # Inclusion Checkbox
         self.include_cb = QCheckBox("Include in SCN")
         self.include_cb.setChecked(True)
@@ -126,20 +179,21 @@ class IssueCard(QFrame):
         self.remove_btn.clicked.connect(self.handle_remove_or_drop)
         header_layout.addWidget(self.remove_btn)
         
-        
-        # --- Body Wrapper (Stacked for Overlay) ---
+        # 3. Body Structure (Nested Cards)
+        # Using body_stack for overlay capability, but inside the Card
         from PyQt6.QtWidgets import QStackedLayout
         self.body_container = QWidget()
         self.body_stack = QStackedLayout(self.body_container)
         self.body_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
         
-        # Layer 1: Content
+        # Layer 1: Content (Sub-cards)
         self.content_widget = QWidget()
         content_layout = QVBoxLayout(self.content_widget)
         content_layout.setContentsMargins(0,0,0,0)
+        content_layout.setSpacing(10)
         
-        # Section 1: Table (Collapsible)
-        table_card = ModernCard("Table", collapsible=True)
+        # 3.1 Issue Data Card
+        self.data_card = ModernCard("Issue Data", collapsible=True)
         
         # [PART B DIAG] LOG: UI Branch Selection
         issue_id = self.template.get('issue_id')
@@ -154,15 +208,20 @@ class IssueCard(QFrame):
              # Although init_ui creates new widgets, if re-used, we check if layout is clean.
              print(f"[SOP-10 DIAG] Clearing layout check: Layout count before add: {content_layout.count()}")
 
+        print(f"[IssueCard DIAG] init_ui: Checking UI branches for {issue_id}")
+        self.grid_container = self.data_card # Store for late-binding
+        
         # Check if we have grid_data (Excel Import) or legacy placeholders
-        if 'grid_data' in self.template and self.template['grid_data']:
+        # [UNCONDITIONAL RENDERING] Render if key exists, even if empty/pending
+        if 'grid_data' in self.template:
+             print(f"[IssueCard DIAG] init_ui: Branch -> init_grid_ui (grid_data). Truthiness: {bool(self.template['grid_data'])}")
              if issue_id == 'IMPORT_ITC_MISMATCH': print("[SOP-10 UI DIAG] Branch: init_grid_ui (grid_data)")
-             self.init_grid_ui(table_card)
+             self.init_grid_ui(self.grid_container)
         elif self.template.get('summary_table'):
              # SOP-10 / ASMT-10 Unified Schema Support
              if issue_id == 'IMPORT_ITC_MISMATCH': print("[SOP-10 UI DIAG] Branch: init_grid_ui (summary_table)")
              # Map 'summary_table' to 'grid_data' expected by renderer if grid_data is missing
-             self.init_grid_ui(table_card, data=self.template['summary_table'])
+             self.init_grid_ui(self.data_card, data=self.template['summary_table'])
         elif 'tables' in self.template and isinstance(self.template['tables'], list):
             # SOP-5 Multi-Table Support
             for tbl in self.template['tables']:
@@ -170,64 +229,48 @@ class IssueCard(QFrame):
                     # Helper title - QLabel is already imported at module level
                     t_lbl = QLabel(f"<b>{tbl.get('title')}</b>")
                     t_lbl.setStyleSheet("color: #34495e; margin-top: 10px; margin-bottom: 5px;")
-                    table_card.addWidget(t_lbl)
-                self.init_grid_ui(table_card, data=tbl)
+                    self.data_card.addWidget(t_lbl)
+                self.init_grid_ui(self.data_card, data=tbl)
         elif isinstance(self.template.get('tables'), dict):
-            self.init_excel_table_ui(table_card)
+            self.init_excel_table_ui(self.data_card)
             
         # Also load legacy placeholders if they exist (Hybrid Mode)
         if self.template.get('placeholders'):
-            self.init_legacy_ui(table_card)
+            self.init_legacy_ui(self.data_card)
             
-        content_layout.addWidget(table_card)
+        content_layout.addWidget(self.data_card)
             
-        # Mini Totals (Read Only)
+        
+        # 3.2 Draft Content Card
+        self.draft_card = ModernCard("Draft Content", collapsible=True)
+        self.editor = RichTextEditor()
+        self.editor.setMinimumHeight(200) # Drafting focus height
+        self.update_editor_content()
+        self.editor.textChanged.connect(self.contentChanged.emit)
+        self.draft_card.addWidget(self.editor)
+        
+        # Connect Draft Focus Mode
+        self.draft_card.toggle_btn.clicked.connect(self._on_draft_focus_changed)
+        
+        # Mini Totals (Inside Data Card)
         totals_layout = QHBoxLayout()
-        totals_layout.addWidget(QLabel("<b>Calculated Demand:</b>"))
-        
-        # Section 0: Demand Summary in Header
-        self.tax_badge = QLabel("")
-        self.tax_badge.setStyleSheet("""
-            QLabel {
-                background-color: #e8f8f5;
-                color: #27ae60;
-                padding: 4px 10px;
-                border-radius: 12px;
-                font-size: 11px;
-                font-weight: bold;
-                border: 1px solid #d1f2eb;
-            }
-        """)
-        self.tax_badge.hide()
-        header_layout.insertWidget(2, self.tax_badge) # After title and source badge
-        
         self.lbl_tax = QLabel("Tax: Rs. 0")
         self.lbl_interest = QLabel("Interest: Rs. 0")
         self.lbl_penalty = QLabel("Penalty: Rs. 0")
         
         for lbl in [self.lbl_tax, self.lbl_interest, self.lbl_penalty]:
-            lbl.setStyleSheet("background-color: #ecf0f1; padding: 5px; border-radius: 3px; border: 1px solid #bdc3c7;")
+            lbl.setStyleSheet("background-color: #f8f9fa; padding: 5px; border-radius: 3px; border: 1px solid #e9ecef; color: #555;")
             totals_layout.addWidget(lbl)
-            
         totals_layout.addStretch()
-        content_layout.addLayout(totals_layout)
+        self.data_card.addLayout(totals_layout)
         
-        # Section 2: Brief Facts (Collapsible)
-        label_text = "Draft Content" if self.mode == "SCN" else "Brief Facts & Grounds"
-        facts_card = ModernCard(label_text, collapsible=True)
-        self.editor = RichTextEditor()
-        self.editor.setMinimumHeight(150)
-        self.update_editor_content()
-        self.editor.textChanged.connect(self.contentChanged.emit)
-        facts_card.addWidget(self.editor)
-        
-        # Narration Sync Warning
+        # Sync Warning
         self.sync_warning = QLabel("⚠️ Narration out of sync with Table (Manual edits detected)")
-        self.sync_warning.setStyleSheet("color: #e67e22; font-size: 11px; font-weight: bold; margin-bottom: 5px;")
+        self.sync_warning.setStyleSheet("color: #e67e22; font-size: 9pt; font-weight: bold; margin-bottom: 5px;")
         self.sync_warning.hide()
-        facts_card.addWidget(self.sync_warning)
+        self.draft_card.addWidget(self.sync_warning)
         
-        content_layout.addWidget(facts_card)
+        content_layout.addWidget(self.draft_card)
         
         # Add Content to Stack
         self.body_stack.addWidget(self.content_widget)
@@ -238,9 +281,18 @@ class IssueCard(QFrame):
         self.overlay.hide()
         self.body_stack.addWidget(self.overlay)
         
-        # Add Body to Main Layout
-        self.main_layout.addWidget(self.body_container)
+        # Add Body to Main Card
+        self.card.addWidget(self.body_container)
         
+        # Add Main Card to Layout
+        self.main_layout.addWidget(self.card)
+        
+    def _set_opacity(self, widget, opacity):
+        """Helper to apply opacity effect"""
+        effect = QGraphicsOpacityEffect(widget)
+        effect.setOpacity(opacity)
+        widget.setGraphicsEffect(effect)
+
     def _on_inclusion_changed(self, state):
         if self.origin == "ASMT10":
             # RE-ENFORCE: Include/Exclude forbidden for derived issues
@@ -248,10 +300,21 @@ class IssueCard(QFrame):
             return
  
         self.is_included = (state == 2) # Qt.CheckState.Checked
-        self.overlay.setVisible(not self.is_included)
-        if not self.is_included:
-            self.overlay.raise_()
+        
+        # GUARD: Visual Muting Only (No blocking overlay)
+        # self.overlay.setVisible(not self.is_included) 
+        
+        opacity = 1.0 if self.is_included else 0.5
+        self._set_opacity(self.card, opacity)
+            
         self.valuesChanged.emit(self.get_tax_breakdown())
+        
+    def _on_draft_focus_changed(self):
+        """Focus Mode: Dim the Data Card when Draft is expanded"""
+        is_draft_expanded = self.draft_card.toggle_btn.isChecked()
+        # If draft is expanded, dim the data card to 0.6. Else restore to 1.0
+        opacity = 0.6 if is_draft_expanded else 1.0
+        self._set_opacity(self.data_card, opacity)
  
     def set_classification(self, origin="SCN", status="ACTIVE", drop_reason=None):
         """Flexible Classification Setter (Informational)"""
@@ -291,7 +354,8 @@ class IssueCard(QFrame):
         
         # Reset visual styles to standard
         self.setStyleSheet("IssueCard { background-color: #ffffff; border: 1px solid #bdc3c7; border-radius: 5px; margin-bottom: 10px; }")
-        self.title.setStyleSheet("span { color: #2c3e50; font-weight: bold; }")
+        if hasattr(self.card, 'title_label'):
+             self.card.title_label.setStyleSheet("color: #2c3e50; font-weight: bold;")
         
         # Ensure interactive state
         if hasattr(self, 'editor'):
@@ -492,51 +556,107 @@ class IssueCard(QFrame):
 
 
     def init_grid_ui(self, layout, data=None):
-        """Initialize UI from Excel Grid Data"""
-        from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+        """Initialize structural QTableWidget. Supports idempotent setup and skeleton mode."""
+        grid_id = self.template.get('issue_id')
+        print(f"[IssueCard DIAG] init_grid_ui: Start for {grid_id}")
         
-        # [SOP-10 EXPAND] Checkpoint
-        # We hook here because this renders the table content
-        if self.template.get('issue_id') == 'IMPORT_ITC_MISMATCH':
-             import hashlib
-             import json
-             def _safe_hash(d):
-                 try:
-                     s = json.dumps(d, sort_keys=True, default=str)
-                     return hashlib.sha1(s.encode()).hexdigest()
-                 except: return "HASH_ERR"
-                 
-             print(f"\n[SOP-10 EXPAND] Issue ID: {self.template.get('issue_id')}")
-             print(f"[SOP-10 EXPAND] Template Type: {self.template.get('template_type')}")
-             print(f"[SOP-10 EXPAND] Summary Table: {self.template.get('summary_table')}")
-             st = self.template.get('summary_table')
-             print(f"[SOP-10 EXPAND] ID(Summary Table): {id(st)}")
-             print(f"[SOP-10 EXPAND] ID(Summary Rows): {id(st.get('rows')) if st else 'N/A'}")
-             print(f"[SOP-10 EXPAND] Hash: {_safe_hash(self.template)}")
+        # [STATE OWNERSHIP] 1. Resolve Data Source
+        # Prefer instance-owned canonical data if available (Single Source of Truth)
+        canonical_data = self.grid_data if self.grid_data else None
+        
+        # Fallback to arguments only if not yet initialized (e.g. skeleton mode first pass)
+        if not canonical_data:
+             raw_source = data if data else self.template.get('grid_data')
+             if not raw_source:
+                 print("[IssueCard DIAG] init_grid_ui: ABORT - No grid_data available")
+                 return
+             # Normalize on the fly (should have been done in init, but safe fallback)
+             canonical_data = self.GridAdapter.normalize_to_schema(raw_source)
 
-        grid_data = data if data else self.template.get('grid_data')
-        if not grid_data:
+        # 2. Structure (Idempotent Widget Creation)
+        if not hasattr(self, "table"):
+            from PyQt6.QtWidgets import QTableWidget
+            self.table = QTableWidget()
+            self.table.setMinimumHeight(200)
+            self.table.setMaximumHeight(800)
+            
+            # Connect signal ONCE
+            self.table.itemChanged.connect(self.on_grid_item_changed)
+            
+            # Layout Bind
+            if hasattr(layout, 'addWidget'):
+                layout.addWidget(self.table)
+            elif hasattr(layout, 'addLayout'):
+                layout.addLayout(self.table)
+
+        # 3. Reversible Skeleton Mode -> Bind Logic
+        rows = canonical_data.get('rows', [])
+        if not rows:
+             print(f"[IssueCard DIAG] init_grid_ui: SKELETON MODE - No rows yet for {grid_id}")
+             self.table.hide()
+             return
+
+        # 4. Bind (Pass CANONICAL data)
+        self.bind_grid_data(canonical_data, layout, data)
+
+    def bind_grid_data(self, grid_data, layout=None, sub_data=None):
+        """Strictly UI-only binding. Idempotent and reversible. Expects CANONICAL data."""
+        # [STATE OWNERSHIP] Assertion: Input must be canonical. No re-normalization.
+        # Check basic schema compliance
+        if not isinstance(grid_data, dict) or 'rows' not in grid_data:
+             print("[IssueCard ERROR] bind_grid_data received non-canonical data! Attempting safe normalization (Performance Hit).")
+             grid_data = self.GridAdapter.normalize_to_schema(grid_data)
+             
+        normalized = grid_data # It is already normalized
+
+        # [MANDATORY] Late-Initialization Gate: Ensure self.table exists
+        if not hasattr(self, 'table'):
+             if layout:
+                  self.init_grid_ui(layout, data=grid_data)
+             return
+
+        grid_id = self.template.get('issue_id')
+        # normalized = self.GridAdapter.normalize_to_schema(grid_data) # Redundant now
+        rows = normalized.get('rows', [])
+        
+        if not rows:
             return
             
-        self.table = QTableWidget()
-        self.table.itemChanged.connect(self.on_grid_item_changed)
+        # REVERSIBILITY: Show table if it was hidden
+        self.table.show()
+        print(f"[IssueCard DIAG] BINDING real grid_data. Rows={len(rows)}")
         
-        # Unified Renderer (Interactive Mode)
-        # Helper handles columns/rows/style/flags and returns widgets map
-        self.cell_widgets = render_grid_to_table_widget(self.table, grid_data, interactive=True)
-
-        self.table.setMinimumHeight(200)
-        self.table.setMaximumHeight(400)
-        from PyQt6.QtWidgets import QSizePolicy
+        self.cell_widgets = {} # Reset for fresh bind
+        new_widgets = render_grid_to_table_widget(self.table, normalized, interactive=True)
+        for var, item in new_widgets.items():
+            if var not in self.cell_widgets:
+                self.cell_widgets[var] = []
+            self.cell_widgets[var].append(item)
         
+        # [Visual Polish] 
+        from PyQt6.QtWidgets import QHeaderView, QSizePolicy
+        
+        # Define layout_to_check early to avoid NameError in branches
+        layout_to_check = layout.content_layout if hasattr(layout, 'content_layout') else layout
+        
+        if grid_id in ['EXPANDED_TABLE', 'IMPORT_ITC_MISMATCH']:
+            self.table.setMinimumHeight(400)
+            self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        else:
+            self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+            self.table.verticalHeader().setVisible(False)
+            self.table.setAlternatingRowColors(True)
+            self.table.setShowGrid(True)
+            
         # [FIX] SOP-5/SOP-7 UI WIDTH & LAYOUT
         # Determine if this is a 'tables' payload (SOP-5/7) or legacy grid_data
-        # 'data' argument is populated only when iterating over 'tables'
-        is_expanded_table = (data is not None) or (self.template.get('issue_id') in ['TDS_TCS_MISMATCH', 'CANCELLED_SUPPLIERS'])
+        # 'sub_data' argument is populated only when iterating over 'tables'
+        is_expanded_table = (sub_data is not None) or (grid_id in ['TDS_TCS_MISMATCH', 'CANCELLED_SUPPLIERS'])
         
-        if is_expanded_table:
+        if is_expanded_table and layout:
              # Force expansion for Detailed Tables
-             self.table.setMinimumWidth(900)
+             self.table.setMinimumWidth(850)
+             self.table.setMaximumWidth(900)
              self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
              
              # Force Header Stretch
@@ -544,11 +664,17 @@ class IssueCard(QFrame):
              header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
              
              # Apply layout stretch
-             layout.addWidget(self.table, stretch=1)
-        else:
+             # Check if already in layout to avoid double adding
+             if hasattr(layout_to_check, 'indexOf') and layout_to_check.indexOf(self.table) == -1:
+                  if hasattr(layout_to_check, 'addWidget'):
+                       layout_to_check.addWidget(self.table, stretch=1)
+        elif layout:
              # Legacy Behavior for SOP-2/3/4/etc
+             self.table.setMaximumWidth(850)
              self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-             layout.addWidget(self.table)
+             if hasattr(layout_to_check, 'indexOf') and layout_to_check.indexOf(self.table) == -1:
+                  if hasattr(layout_to_check, 'addWidget'):
+                       layout_to_check.addWidget(self.table)
         
         # Provenance Note (Dict Schema Safe)
         rows = grid_data.get('rows', [])
@@ -572,6 +698,25 @@ class IssueCard(QFrame):
                            note.setStyleSheet("color: #7f8c8d; font-size: 10px; padding-left: 5px;")
                            layout.addWidget(note)
                            break # Only show once
+
+    def on_grid_data_adopted(self):
+        """
+        Called exactly once when REAL grid_data is attached to the template.
+        Responsible for exiting Skeleton Mode and binding data to the UI.
+        UI must never infer data readiness from dict truthiness.
+        """
+        grid_data = self.template.get('grid_data')
+        if not grid_data:
+            return
+
+        normalized = self.GridAdapter.normalize_to_schema(grid_data)
+        rows = normalized.get('rows', [])
+        
+        if rows:
+            print(f"[IssueCard DIAG] EXITING SKELETON MODE – binding real grid_data (Rows={len(rows)})")
+            self.bind_grid_data(grid_data, self.grid_container)
+            if hasattr(self, 'table'):
+                 self.table.show()
 
     def init_legacy_ui(self, layout):
         """Initialize UI from legacy placeholders"""
@@ -631,7 +776,7 @@ class IssueCard(QFrame):
 
     def calculate_values(self):
         # 1. Handle Excel Grid Calculation
-        if 'grid_data' in self.template and self.template['grid_data']:
+        if 'grid_data' in self.template:
             self.calculate_grid()
         
         # SOP-5 Multi-Table Support
@@ -698,49 +843,72 @@ class IssueCard(QFrame):
         })
 
     def calculate_grid(self, data=None):
-        """Evaluate formulas in the grid"""
-        # Simple iterative pass (can be improved to topological sort)
-        # We do 2 passes to handle simple forward references
-        
+        """Evaluate formulas in the grid with explicit variable binding precedence"""
         grid_data = data if data else self.template.get('grid_data')
         if not grid_data: return
         
-        for _ in range(2): 
-            for r, row_data in enumerate(grid_data):
-                for c, cell_info in enumerate(row_data):
-                    if cell_info.get('type') == 'formula':
+        # [FIX] Normalize before calculation
+        grid_data = self.GridAdapter.normalize_to_schema(grid_data)
+        rows = grid_data['rows']
+
+        # Pass 1: Bound Variable Bootstrap (Static & Input)
+        # We extract all values into variables map if they have a 'var' tag.
+        # This ensures values like 'tax_igst' provided by normalization aren't lost.
+        for row_data in rows:
+            cells = row_data.values() if isinstance(row_data, dict) else row_data
+            for cell_info in cells:
+                if isinstance(cell_info, dict):
+                    var_name = cell_info.get('var')
+                    if var_name:
+                        # [BOOTSTRAP CORRECTION] Override 0 if grid contains non-zero value
+                        current_val = self.variables.get(var_name)
+                        grid_val = cell_info.get('value')
+                        
+                        is_empty = current_val in (None, "")
+                        is_zero = current_val in (0, 0.0)
+                        has_priority_data = grid_val not in (None, "", 0, 0.0)
+
+                        if is_empty or (is_zero and has_priority_data):
+                            try:
+                                self.variables[var_name] = float(grid_val) if grid_val not in (None, "") else 0.0
+                            except:
+                                self.variables[var_name] = grid_val # String fallback
+                                
+                        # Diagnostic Tracking
+                        if has_priority_data and current_val == 0:
+                             print(f"[IssueCard BOOTSTRAP] Overrode 0 for '{var_name}' with grid value: {grid_val}")
+
+        # Pass 2: Formula Evaluation (Overrides Bootstrap)
+        for r, row_data in enumerate(rows):
+            cells = row_data.values() if isinstance(row_data, dict) else row_data
+            for cell_info in cells:
+                if isinstance(cell_info, dict) and cell_info.get('type') == 'formula':
                         formula = cell_info.get('python_formula')
                         if not formula: continue
                         
                         try:
-                            # Evaluate formula using current variables
-                            # We expose 'v' as the variables dict
-                            # Also expose 'round', 'max', 'min' etc.
                             context = {
                                 'v': self.variables,
-                                'round': round,
-                                'max': max,
-                                'min': min,
-                                'abs': abs
+                                'round': round, 'max': max, 'min': min, 'abs': abs
                             }
-                            
                             result = eval(formula, {}, context)
                             
-                            # Update variable
                             var_name = cell_info.get('var')
-                            self.variables[var_name] = result
-                            
-                            # Update UI
-                            item = self.cell_widgets.get(var_name)
-                            if item:
-                                # Block signal to prevent recursion
-                                self.table.blockSignals(True)
-                                item.setText(str(result))
-                                self.table.blockSignals(False)
+                            if var_name:
+                                self.variables[var_name] = result
                                 
+                                # Update UI [MULTI-TABLE SAFE]
+                                items = self.cell_widgets.get(var_name, [])
+                                if not isinstance(items, list): items = [items]
+                                
+                                for item in items:
+                                    tbl = item.tableWidget()
+                                    if tbl: tbl.blockSignals(True)
+                                    item.setText(str(result))
+                                    if tbl: tbl.blockSignals(False)
+                                    
                         except Exception as e:
-                            print(f"Formula Error {formula}: {e}")
-                            # pass
+                            print(f"[IssueCard] Formula Error {formula}: {e}")
 
     # Removed duplicate empty calculate_excel_table
 
@@ -766,9 +934,11 @@ class IssueCard(QFrame):
         import re
         t = self.template.get('templates', {})
         
+        if not hasattr(self, 'editor'): return
+        
         # SAFEGUARD: Detection of manual edits
         current_html = self.editor.toHtml()
-        if is_recalculation and self.last_rendered_html:
+        if is_recalculation and hasattr(self, 'last_rendered_html') and self.last_rendered_html:
             # Check if user modified the text since last render
             # (Strip whitespace for robust comparison)
             if self.extract_html_body(current_html).strip() != self.extract_html_body(self.last_rendered_html).strip():
@@ -860,16 +1030,19 @@ class IssueCard(QFrame):
             html = html.replace(f"{{{{{var_name}}}}}", val_str)
             html = html.replace(f"{{{{ {var_name} }}}}", val_str) # Handle spacing
             
-        # 2. Inject markers for unresolved placeholders (NO silent blanks)
+        # 2. Inject Display-Only Fallbacks for unresolved placeholders (NO state mutation)
         for var_name in unresolved:
+            # [DISPLAY FALLBACK] Default to "0" or "-" based on heuristic or just clean "0"
+            fallback_val = "0"
+            
             placeholder = f"{{{{{var_name}}}}}"
             if placeholder in html:
-                html = html.replace(placeholder, f"<b style='color:red;'>[[UNRESOLVED: {var_name}]]</b>")
+                html = html.replace(placeholder, fallback_val)
             
             # Also handle spaced version
             placeholder_spaced = f"{{{{ {var_name} }}}}"
             if placeholder_spaced in html:
-                html = html.replace(placeholder_spaced, f"<b style='color:red;'>[[UNRESOLVED: {var_name}]]</b>")
+                html = html.replace(placeholder_spaced, fallback_val)
             
         self.editor.setHtml(html)
         self.last_rendered_html = html # Update baseline
@@ -903,8 +1076,12 @@ class IssueCard(QFrame):
                     ctype = cell_info.get('type', 'empty')
                     
                     # Resolve Value
-                    if var_name and var_name in variables:
-                        val = variables[var_name]
+                    if var_name:
+                        if var_name in variables:
+                            val = variables[var_name]
+                        else:
+                            # [DISPLAY FALLBACK] Unresolved variables default to 0 in HTML view
+                            val = 0
                     
                     # Styling
                     style = "border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;"
@@ -1076,7 +1253,7 @@ class IssueCard(QFrame):
         
         # 1. Base Issue Data
         data.update({
-            'issue_id': self.template['issue_id'],
+            'issue_id': self.template.get('issue_id', 'unknown'),
             'issue': self.template.get('issue_name', ''),
             'variables': self.variables,
             self.content_key: self.editor.toHtml() if hasattr(self, 'editor') else "",
@@ -1115,14 +1292,23 @@ class IssueCard(QFrame):
         self.drop_reason = data.get('drop_reason')
         self.source_issue_id = data.get('source_issue_id')
         
-        # 1.1 Restore Table Data (Essential for Adoptions)
-        if 'table_data' in data:
-            if isinstance(data['table_data'], list):
-                 self.template['grid_data'] = data['table_data']
-            elif isinstance(data['table_data'], dict):
-                 if 'tables' not in self.template:
-                     self.template['tables'] = {}
-                 self.template['tables'].update(data['table_data'])
+        # 1.1 Restore Table Data (Non-Destructive Adoption)
+        if 'table_data' in data and data['table_data']:
+            # [ROUTING PRECEDENCE] template['grid_data'] is authoritative.
+            # Only adopt snapshot structure if template's existing structure is missing.
+            has_structure = bool(self.template.get('grid_data') or self.template.get('tables'))
+            
+            if not has_structure:
+                if isinstance(data['table_data'], list):
+                     self.template['grid_data'] = data['table_data']
+                elif isinstance(data['table_data'], dict):
+                     # Check for Canonical Grid Schema (rows/columns)
+                     if 'rows' in data['table_data'] and 'columns' in data['table_data']:
+                          self.template['grid_data'] = data['table_data']
+                     else:
+                          if 'tables' not in self.template:
+                              self.template['tables'] = {}
+                          self.template['tables'].update(data['table_data'])
 
         # 2. Restore Variables/Facts
         # If origin is ASMT10 (fresh adoption), facts might be empty, so we must 
@@ -1132,21 +1318,18 @@ class IssueCard(QFrame):
         elif 'variables' in data:
             self.variables = data['variables'].copy()
 
-        # Verbatim Table Carry-Forward: Extract variables from table_data
-        if self.origin == "ASMT10" and 'table_data' in data:
-             if isinstance(data['table_data'], list): # grid_data style
-                 for row in data['table_data']:
-                     for cell in row:
-                         if isinstance(cell, dict):
-                             var = cell.get('var')
-                             if var and 'value' in cell:
-                                 self.variables[var] = cell['value']
-            
         # 3. Restore Narration
         # For SCN mode, content_key is 'scn_content' or similar
         content = data.get(self.content_key) or data.get('scn_narration') or data.get('content')
         if content:
             self.editor.setHtml(content)
+            
+        # 4. Final Verification: Sync structural changes if real grid data just arrived
+        if ('table_data' in data and data['table_data']):
+             print(f"[IssueCard DIAG] load_data: Final Bind check for {self.template.get('issue_id')}")
+             # Ensure template has the structure
+             if self.template.get('grid_data'):
+                  self.bind_grid_data(self.template['grid_data'], self.grid_container)
         else:
             # Strictly use SCN template if no manual draft exists
             self.update_editor_content()
@@ -1157,11 +1340,16 @@ class IssueCard(QFrame):
         self.update_editor_content()
         
         # Update inputs/tables with variables
+        self._is_bootstrapping = False
         self.sync_ui_with_variables()
         self.calculate_values()
 
     def sync_ui_with_variables(self):
         """Helper to sync UI widgets with self.variables"""
+        # [NON-DESTRUCTIVE GUARD] Prevent overwriting UI values during bootstrap
+        if getattr(self, '_is_bootstrapping', False):
+             return
+
         # A. Legacy Inputs
         if hasattr(self, 'input_widgets'):
             for name, widget in self.input_widgets.items():
@@ -1172,11 +1360,16 @@ class IssueCard(QFrame):
                     
         # B. Grid Table
         if hasattr(self, 'cell_widgets'):
-            for var_name, item in self.cell_widgets.items():
+            for var_name, items in self.cell_widgets.items():
                 if var_name in self.variables:
-                    self.table.blockSignals(True)
-                    item.setText(str(self.variables[var_name]))
-                    self.table.blockSignals(False)
+                    val = self.variables[var_name]
+                    # Support both list and single-item for robustness
+                    widget_list = items if isinstance(items, list) else [items]
+                    for item in widget_list:
+                        tbl = item.tableWidget()
+                        if tbl: tbl.blockSignals(True)
+                        item.setText(str(val))
+                        if tbl: tbl.blockSignals(False)
                     
         # C. Manual Table
         if hasattr(self, 'table') and not hasattr(self, 'cell_widgets'):

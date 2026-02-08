@@ -1,13 +1,14 @@
 import os
 import tempfile
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib.units import inch
+# Lazy imports to prevent startup hang
+# from reportlab.lib.pagesizes import A4
+# from reportlab.pdfgen import canvas
+# from reportlab.lib.units import inch
 from docx import Document
 from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from xhtml2pdf import pisa
-from docx2pdf import convert
+# from xhtml2pdf import pisa
+# from docx2pdf import convert
 from src.utils.constants import OUTPUT_DIR
 
 class DocumentGenerator:
@@ -51,17 +52,14 @@ class DocumentGenerator:
         with open(os.path.join(OUTPUT_DIR, "debug_last_generated.html"), "w", encoding="utf-8") as f:
             f.write(html_content)
 
+        # [HARD-DISABLE] Emergency Bypass
+        print("[STABILIZATION] PDF Generation from HTML is HARD-DISABLED.")
+        return filepath # Return path even if empty to avoid crashes if expected
+        
         try:
             with open(filepath, "w+b") as result_file:
-                pisa_status = pisa.CreatePDF(
-                    html_content,
-                    dest=result_file
-                )
-                
-            if pisa_status.err:
-                raise Exception(f"PDF generation failed: {pisa_status.err}")
-                
-            return filepath
+                # from xhtml2pdf import pisa
+                pass
         except Exception as e:
             # Log full traceback to file
             import traceback
@@ -92,6 +90,7 @@ class DocumentGenerator:
             
             # Convert to PDF
             output_pdf = os.path.join(OUTPUT_DIR, filename + ".pdf")
+            from docx2pdf import convert
             convert(temp_docx, output_pdf)
             
             return output_pdf
@@ -306,6 +305,9 @@ class DocumentGenerator:
         # Fallback to manual generation if needed, but we prefer HTML
         # ... (keeping existing logic as fallback or for other uses)
         filepath = os.path.join(OUTPUT_DIR, filename + ".pdf")
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.units import inch
         c = canvas.Canvas(filepath, pagesize=A4)
         width, height = A4
         

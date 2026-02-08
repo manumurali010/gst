@@ -1,0 +1,320 @@
+--- Page 1 ---
+Form GSTR-3B
+[See rule 61(5)]
+Year
+2022-23
+Period
+February
+GSTIN of the supplier
+32AADFW8764E1Z1
+2(a). Legal name of the registered person
+WESTERN TRADING COMPANY
+2(b). Trade name, if any
+WESTERN TRADING COMPANY
+2(c). ARN
+AA320223430550Y
+2(d). Date of ARN
+20/03/2023
+(Amount in ₹ for all tables)
+3.1 Details of Outward supplies and inward supplies liable to reverse charge (other than those covered by Table 3.1.1)
+Nature of Supplies
+Total Taxable 
+Value
+Integrated 
+tax
+Central 
+tax
+State/UT 
+tax
+Cess
+(a) Outward taxable supplies (other than zero rated, nil rated and 
+exempted)
+5443327.88
+0.00
+762066.18
+762066.18
+0.00
+(b) Outward taxable supplies (zero rated)
+0.00
+0.00
+-
+-
+0.00
+(c ) Other outward supplies (nil rated, exempted)
+2302683.00
+-
+-
+-
+-
+(d) Inward supplies (liable to reverse charge)
+351500.00
+0.00
+8787.50
+8787.50
+0.00
+(e) Non-GST outward supplies
+0.00
+-
+-
+-
+-
+3.1.1 Details of Supplies notified under section 9(5) of the CGST Act, 2017 and corresponding provisions in IGST/UTGST/
+SGST Acts
+Nature of Supplies
+Total 
+Taxable 
+Value
+Integrated 
+tax
+Central 
+tax
+State/
+UT tax
+Cess
+(i) Taxable supplies on which electronic commerce operator pays tax u/s 9(5) [to 
+be furnished by electronic commerce operator]
+0.00
+0.00
+0.00
+0.00
+0.00
+(ii) Taxable supplies made by registered person through electronic commerce 
+operator, on which electronic commerce operator is required  to pay tax u/s 9(5) 
+[to be furnished by registered person making supplies through electronic 
+commerce operator]
+0.00
+-
+-
+-
+-
+3.2 Out of supplies made in 3.1 (a) and 3.1.1 (i), details of inter-state supplies made
+Nature of Supplies
+Total Taxable Value
+Integrated tax
+Supplies made to Unregistered Persons
+0.00
+0.00
+Supplies made to Composition Taxable 
+Persons
+0.00
+0.00
+Supplies made to UIN holders
+0.00
+0.00
+4.  Eligible ITC
+Details
+Integrated tax
+Central tax
+State/UT tax
+Cess
+A. ITC Available (whether in full or part)
+(1) Import of goods
+0.00
+0.00
+0.00
+0.00
+(2) Import of services
+0.00
+0.00
+0.00
+0.00
+(3) Inward supplies liable to reverse charge (other than 1 & 2 above)
+0.00
+8787.50
+8787.50
+0.00
+  FILED 
+
+--- End of Page Snippet ---
+--- Page 2 ---
+(4) Inward supplies from ISD
+0.00
+0.00
+0.00
+0.00
+(5) All other ITC
+1424558.90
+34794.34
+34794.34
+0.00
+B. ITC Reversed
+(1) As per rules 38,42 & 43 of CGST Rules and section 17(5)
+0.00
+0.00
+0.00
+0.00
+(2) Others
+0.00
+0.00
+0.00
+0.00
+C. Net ITC available (A-B)
+1424558.90
+43581.84
+43581.84
+0.00
+(D) Other Details
+0.00
+0.00
+0.00
+0.00
+(1) ITC reclaimed which was reversed under Table 4(B)(2) in earlier tax 
+period
+0.00
+0.00
+0.00
+0.00
+(2) Ineligible ITC under section 16(4) & ITC restricted due to PoS rules
+0.00
+0.00
+0.00
+0.00
+5  Values of exempt, nil-rated and non-GST inward supplies
+Nature of Supplies
+Inter- State supplies
+Intra- State supplies
+From a supplier under composition scheme, Exempt, Nil rated supply
+0.00
+0.00
+Non GST supply
+0.00
+0.00
+5.1 Interest and Late fee for previous tax period
+Details
+Integrated tax
+Central tax
+State/UT tax
+Cess
+System computed 
+Interest
+-
+-
+-
+-
+Interest Paid
+0.00
+0.00
+0.00
+0.00
+Late fee
+-
+0.00
+0.00
+-
+6.1 Payment of tax
+Description
+Total tax 
+payable
+Tax paid through ITC
+Tax paid in 
+cash
+Interest paid 
+in cash
+Late fee 
+paid in cash
+Integrated tax
+Central tax
+State/UT tax
+Cess
+(A) Other than reverse charge
+Integrated 
+tax
+0.00
+0.00
+0.00
+0.00
+-
+0.00
+0.00
+-
+Central tax
+762066.00
+762066.00
+0.00
+-
+-
+0.00
+0.00
+0.00
+State/UT tax
+762066.00
+762066.00
+-
+0.00
+-
+0.00
+0.00
+0.00
+Cess
+0.00
+-
+-
+-
+0.00
+0.00
+0.00
+-
+(B) Reverse charge
+Integrated 
+tax
+0.00
+-
+-
+-
+-
+0.00
+-
+-
+Central tax
+8788.00
+-
+-
+-
+-
+8788.00
+-
+-
+State/UT tax
+8788.00
+-
+-
+-
+-
+8788.00
+-
+-
+Cess
+0.00
+-
+-
+-
+-
+0.00
+-
+-
+Breakup of tax liability declared (for interest computation)
+Period
+Integrated tax
+Central tax
+State/UT tax
+Cess
+February 2023
+0.00
+770854.00
+770854.00
+0.00
+Verification:
+I hereby solemnly affirm and declare that the information given herein above is true and correct to the best of my knowledge and belief and 
+nothing has been concealed there from.
+  FILED 
+
+--- End of Page Snippet ---
+--- Page 3 ---
+Date: 20/03/2023
+Name of Authorized Signatory
+DANIEL DAISON
+Designation /Status
+MANAGING PARTNER
+  FILED 
+
+--- End of Page Snippet ---

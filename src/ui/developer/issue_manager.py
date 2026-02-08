@@ -12,6 +12,7 @@ from src.ui.rich_text_editor import RichTextEditor
 from src.ui.developer.table_builder import TableBuilderWidget
 from src.ui.components.section_selector import SectionSelectorDialog
 from src.ui.developer.logic_validator import LogicValidator
+from src.ui.developer.grid_adapter import GridAdapter
 
 class IssueListItemWidget(QFrame):
     """Rich List Item for Issues (Card Style)"""
@@ -195,8 +196,8 @@ class IssueManager(QWidget):
         
         tb_layout.addStretch()
         
-        self.active_cb = QCheckBox("Active / Published")
-        tb_layout.addWidget(self.active_cb)
+        # self.active_cb = QCheckBox("Active / Published")
+        # tb_layout.addWidget(self.active_cb)
         
         save_btn = QPushButton("Save Changes")
         save_btn.setStyleSheet("background-color: #3498db; color: white; padding: 6px 15px; border: none; border-radius: 4px;")
@@ -378,6 +379,19 @@ class IssueManager(QWidget):
         self.table_builder = TableBuilderWidget()
         layout.addWidget(QLabel("Table Design & Logic:"))
         layout.addWidget(self.table_builder)
+        
+        # [Preview Adapter]
+        layout.addWidget(QLabel("Visual Verification:"))
+        self.table_preview_adapter_widget = QTableWidget()
+        self.table_preview_adapter_widget.setMinimumHeight(200)
+        self.table_preview_adapter_widget.setStyleSheet("background-color: #f8f9fa;")
+        layout.addWidget(self.table_preview_adapter_widget)
+        
+        # Connect builder changes to preview updater?
+        # For now, explicit verify button or event hook
+        verify_btn = QPushButton("Visualize with Adapter")
+        verify_btn.clicked.connect(self.visualize_adapter_table)
+        layout.addWidget(verify_btn)
 
     def init_placeholders_tab(self):
         layout = QVBoxLayout(self.placeholders_tab)
@@ -503,7 +517,7 @@ class IssueManager(QWidget):
         self.severity_input.setCurrentIndex(0)
         self.version_input.setText("1.0")
         self.tags_input.clear()
-        self.active_cb.setChecked(False)
+        # self.active_cb.setChecked(False)
         
         self.brief_facts_drc_editor.setHtml("")
         self.brief_facts_scn_editor.setHtml("")
@@ -539,8 +553,8 @@ class IssueManager(QWidget):
         self.version_input.setText(issue.get('version', '1.0'))
         self.tags_input.setText(", ".join(issue.get('tags', [])))
         
-        meta = [m for m in self.all_issues if m['issue_id'] == issue_id]
-        if meta: self.active_cb.setChecked(bool(meta[0]['active']))
+        # meta = [m for m in self.all_issues if m['issue_id'] == issue_id]
+        # if meta: self.active_cb.setChecked(bool(meta[0]['active']))
         
         templates = issue.get('templates', {})
         self.brief_facts_drc_editor.setHtml(templates.get('brief_facts', ''))
@@ -618,7 +632,7 @@ class IssueManager(QWidget):
                 "include_conclusion": self.include_conclusion_cb.isChecked(),
                 "conclusion": self.conclusion_editor.toHtml()
             },
-            "active": self.active_cb.isChecked(),
+            "active": True, # Force Active
             "tables": self.table_builder.get_data()
         }
         
@@ -636,7 +650,7 @@ class IssueManager(QWidget):
         
         success, msg = self.db.save_issue(data)
         if success:
-            self.db.publish_issue(self.current_issue_id, self.active_cb.isChecked())
+            self.db.publish_issue(self.current_issue_id, True)
             QMessageBox.information(self, "Success", "Issue saved successfully")
             self.load_issue_list()
         else:
@@ -650,3 +664,11 @@ class IssueManager(QWidget):
             self.db.delete_issue(self.current_issue_id)
             self.load_issue_list()
             self.create_new_issue()
+
+    def visualize_adapter_table(self):
+        """Use GridAdapter to verify the current schema logic"""
+        schema = self.table_builder.get_data()
+        try:
+            GridAdapter.render_schema(self.table_preview_adapter_widget, schema)
+        except Exception as e:
+            QMessageBox.warning(self, "Adapter Error", str(e))

@@ -1,0 +1,202 @@
+﻿{
+  "case_data": {
+    "gstin": "32AADFW8764E1Z1",
+    "legal_name": "WESTERN TRADING COMPANY",
+    "financial_year": "2022-23",
+    "oc_number": "3/2026",
+    "issue_date": "2026-01-21 17:07:55",
+    "taxpayer_details": {
+      "GSTIN": "32AADFW8764E1Z1",
+      "Legal Name": "WESTERN TRADING COMPANY",
+      "Trade Name": "WESTERN TRADING COMPANY",
+      "Address": "Karunya Bhawan Home for The Aged Women, FIRST FLOOR, 13/661D, Puthanvelikara Kadavu Ferry Road, Puthenvelikara, Puthenvelikkara, Ernakulam, Kerala, 683594 ",
+      "State": NaN,
+      "Email": "w***********************@gm****com",
+      "Mobile": "******8206",
+      "Status": "Active",
+      "Constitution": "Partnership"
+    }
+  },
+  "issues": [
+    {
+      "issue_id": "ITC_3B_2B_OTHER",
+      "category": "All Other ITC (GSTR 3B vs GSTR 2B)",
+      "description": "Point 4- All Other ITC (GSTR 3B vs GSTR 2B)",
+      "total_shortfall": 1746718.0,
+      "status": "fail",
+      "status_msg": "Analysis Completed",
+      "summary_table": {
+        "columns": [
+          "Description",
+          "CGST",
+          "SGST",
+          "IGST",
+          "Cess"
+        ],
+        "rows": [
+          {
+            "col0": {
+              "value": "ITC claimed in GSTR-3B (Table 4A5)"
+            },
+            "col1": {
+              "value": 119289.53
+            },
+            "col2": {
+              "value": 119289.53
+            },
+            "col3": {
+              "value": 17678225.2
+            },
+            "col4": {
+              "value": 0.0
+            }
+          },
+          {
+            "col0": {
+              "value": "ITC available in GSTR-2B (Net of Credit Notes)"
+            },
+            "col1": {
+              "value": 119065.53
+            },
+            "col2": {
+              "value": 119065.53
+            },
+            "col3": {
+              "value": 15931955.1
+            },
+            "col4": {
+              "value": 0.0
+            }
+          },
+          {
+            "col0": {
+              "value": "Difference (GSTR 3B - GSTR 2B)"
+            },
+            "col1": {
+              "value": 224.0
+            },
+            "col2": {
+              "value": 224.0
+            },
+            "col3": {
+              "value": 1746270.1
+            },
+            "col4": {
+              "value": 0.0
+            }
+          },
+          {
+            "col0": {
+              "value": "Liability"
+            },
+            "col1": {
+              "value": 224.0
+            },
+            "col2": {
+              "value": 224.0
+            },
+            "col3": {
+              "value": 1746270.1
+            },
+            "col4": {
+              "value": 0
+            }
+          }
+        ]
+      },
+      "issue_master_id": "ITC_3B_2B_OTHER",
+      "issue_name": "All Other ITC Mismatch (GSTR 3B vs GSTR 2B)",
+      "sop_point": 4,
+      "brief_facts": "Discrepancy identified in All Other ITC Mismatch (GSTR 3B vs GSTR 2B).",
+      "is_included": true
+    },
+    {
+      "issue_id": "RULE_42_43_VIOLATION",
+      "category": "Rule 42/43 Reversal Mismatch",
+      "description": "Point 11- Rule 42/43 Reversal Mismatch",
+      "total_shortfall": 1661634.0,
+      "status": "fail",
+      "status_msg": "Liability: 1661633.73",
+      "summary_table": {
+        "columns": [
+          "Description",
+          "Amount (Rs.)"
+        ],
+        "rows": [
+          {
+            "col0": {
+              "value": "Exempt + Non-GST Turnover"
+            },
+            "col1": {
+              "value": 6177195.0
+            }
+          },
+          {
+            "col0": {
+              "value": "Total Turnover"
+            },
+            "col1": {
+              "value": 67014399.44
+            }
+          },
+          {
+            "col0": {
+              "value": "Reversal Ratio"
+            },
+            "col1": {
+              "value": 0.0922
+            }
+          },
+          {
+            "col0": {
+              "value": "Total ITC Availed"
+            },
+            "col1": {
+              "value": 18026529.26
+            }
+          },
+          {
+            "col0": {
+              "value": "ITC Required to be Reversed"
+            },
+            "col1": {
+              "value": 1661633.73
+            }
+          },
+          {
+            "col0": {
+              "value": "ITC Actually Reversed"
+            },
+            "col1": {
+              "value": 0.0
+            }
+          },
+          {
+            "col0": {
+              "value": "Difference"
+            },
+            "col1": {
+              "value": 1661633.73
+            }
+          },
+          {
+            "col0": {
+              "value": "Liability"
+            },
+            "col1": {
+              "value": 1661633.73
+            }
+          }
+        ]
+      },
+      "issue_master_id": "RULE_42_43_VIOLATION",
+      "issue_name": "Rule 42/43 Reversal Mismatch",
+      "sop_point": 11,
+      "brief_facts": "Discrepancy identified in Rule 42/43 Reversal Mismatch.",
+      "is_included": true
+    }
+  ],
+  "generated_at": "2026-01-29T17:55:12.117833",
+  "version": "1.0-migrated",
+  "migrated_at": "2026-01-29T17:55:12.117852"
+}

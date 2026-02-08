@@ -18,7 +18,8 @@ class ConfigManager:
             "pdf_letterhead": "default.html",  # HTML letterhead for PDF
             "word_letterhead": "default.html",  # Can be HTML or DOCX for Word
             "office_name": "GST Department",
-            "jurisdiction": ""
+            "jurisdiction": "",
+            "render_enabled": True # Enabled by default for functionality
         }
         
         # Load or create settings

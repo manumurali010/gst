@@ -170,7 +170,7 @@ class ProceedingsWorkspace(QWidget):
         for i, name in enumerate(["Documents", "Timeline"]):
             lbl = QLabel(f"{name} - Coming Soon")
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet("font-size: 16px; color: #7f8c8d;")
+            lbl.setStyleSheet("font-size: 12pt; color: #7f8c8d;")
             self.content_stack.addWidget(lbl)
             
         # 2a. Central Container (Header + Content Stack)
@@ -397,11 +397,11 @@ class ProceedingsWorkspace(QWidget):
         title_vbox.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         
         self.asmt10_title_lbl = QLabel("🔒 Finalised ASMT-10 — Read-Only Reference")
-        self.asmt10_title_lbl.setStyleSheet("font-weight: bold; font-size: 14px; color: #1e293b;")
+        self.asmt10_title_lbl.setStyleSheet("font-weight: bold; font-size: 10pt; color: #1e293b;")
         title_vbox.addWidget(self.asmt10_title_lbl)
         
         self.asmt10_meta_lbl = QLabel("OC No. - | Date: -")
-        self.asmt10_meta_lbl.setStyleSheet("font-size: 11px; color: #64748b;")
+        self.asmt10_meta_lbl.setStyleSheet("font-size: 8pt; color: #64748b;")
         title_vbox.addWidget(self.asmt10_meta_lbl)
         
         toolbar_layout.addLayout(title_vbox)
@@ -428,7 +428,7 @@ class ProceedingsWorkspace(QWidget):
                     background-color: #f8fafc;
                     border: 1px solid #e2e8f0;
                     border-radius: 4px;
-                    font-size: 12px;
+                    font-size: 9pt;
                 }
                 QPushButton:hover { background-color: #f1f5f9; }
             """)
@@ -823,7 +823,7 @@ class ProceedingsWorkspace(QWidget):
             
             # Header for the page
             header = QLabel(title)
-            header.setStyleSheet("font-size: 20px; font-weight: bold; color: #2c3e50; margin-bottom: 15px;")
+            header.setStyleSheet("font-size: 15pt; font-weight: bold; color: #2c3e50; margin-bottom: 15px;")
             page_layout.addWidget(header)
             
             page_layout.addWidget(page_widget)
@@ -880,11 +880,11 @@ class ProceedingsWorkspace(QWidget):
         
         info_layout = QVBoxLayout()
         self.lbl_legal_name = QLabel("-")
-        self.lbl_legal_name.setStyleSheet("font-size: 24px; font-weight: bold; color: #1e293b;")
+        self.lbl_legal_name.setStyleSheet("font-size: 18pt; font-weight: bold; color: #1e293b;")
         info_layout.addWidget(self.lbl_legal_name)
         
         self.lbl_gstin = QLabel("-")
-        self.lbl_gstin.setStyleSheet("font-family: monospace; font-size: 14px; color: #64748b;")
+        self.lbl_gstin.setStyleSheet("font-family: monospace; font-size: 10pt; color: #64748b;")
         info_layout.addWidget(self.lbl_gstin)
         header_layout.addLayout(info_layout)
         
@@ -898,7 +898,7 @@ class ProceedingsWorkspace(QWidget):
             border-radius: 12px;
             padding: 5px 15px;
             font-weight: bold;
-            font-size: 13px;
+            font-size: 10pt;
             border: 1px solid #e2e8f0;
         """)
         header_layout.addWidget(self.fy_badge, 0, Qt.AlignmentFlag.AlignTop)
@@ -912,7 +912,7 @@ class ProceedingsWorkspace(QWidget):
         self.status_banner.setFixedHeight(50)
         self.status_banner.setStyleSheet("""
             font-weight: 800;
-            font-size: 15px;
+            font-size: 11pt;
             border-radius: 8px;
             padding: 12px;
             border: 1px solid transparent;
@@ -932,7 +932,7 @@ class ProceedingsWorkspace(QWidget):
                 color: #475569;
                 border-radius: 15px;
                 padding: 4px 12px;
-                font-size: 11px;
+                font-size: 8pt;
                 font-weight: 600;
                 border: 1px solid #e2e8f0;
             """)
@@ -953,7 +953,7 @@ class ProceedingsWorkspace(QWidget):
         h_layout.setContentsMargins(15, 10, 15, 10)
         for text in ["Document", "O.C. Number / Reference", "Date", "Status"]:
             lbl = QLabel(text)
-            lbl.setStyleSheet("font-weight: bold; color: #94a3b8; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;")
+            lbl.setStyleSheet("font-weight: bold; color: #94a3b8; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5px;")
             h_layout.addWidget(lbl, 1)
         auth_layout.addWidget(h_row)
         
@@ -976,12 +976,12 @@ class ProceedingsWorkspace(QWidget):
             stat_lbl = QLabel("—")
             
             for lbl in [name_lbl, ref_lbl, date_lbl, stat_lbl]:
-                lbl.setStyleSheet("font-size: 13px; color: #1e293b;")
+                lbl.setStyleSheet("font-size: 10pt; color: #1e293b;")
                 row_layout.addWidget(lbl, 1)
             
             # Special highlighting for ASMT-10 (First Row)
             if i == 0:
-                name_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #1e293b;")
+                name_lbl.setStyleSheet("font-weight: bold; font-size: 10pt; color: #1e293b;")
             
             auth_layout.addWidget(row)
             self.auth_rows.append({
@@ -999,7 +999,7 @@ class ProceedingsWorkspace(QWidget):
 
         # 5. Next Action Hint
         self.next_action_hint = QLabel("")
-        self.next_action_hint.setStyleSheet("color: #64748b; font-style: italic; font-size: 13px; margin-top: 20px; font-weight: 500;")
+        self.next_action_hint.setStyleSheet("color: #64748b; font-style: italic; font-size: 10pt; margin-top: 20px; font-weight: 500;")
         self.next_action_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.summary_layout.addWidget(self.next_action_hint)
 
@@ -1068,7 +1068,7 @@ class ProceedingsWorkspace(QWidget):
             row_asmt['ref'].setText(asmt_oc)
             row_asmt['date'].setText(asmt_date or "—")
             row_asmt['status'].setText("✔ Issued")
-            row_asmt['status'].setStyleSheet("color: #166534; font-weight: 800; font-size: 11px;")
+            row_asmt['status'].setStyleSheet("color: #166534; font-weight: 800; font-size: 8pt;")
             row_asmt['frame'].setStyleSheet("background-color: #f0fdf4; border-radius: 6px; border-bottom: 1px solid #dcfce7;")
             row_asmt['name'].setStyleSheet("font-weight: 800; color: #1e293b;")
         else:
@@ -1147,7 +1147,7 @@ class ProceedingsWorkspace(QWidget):
         # Suggest Button
         suggest_btn = QPushButton("Get Next")
         suggest_btn.setToolTip("Get next available OC Number")
-        suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 10px;")
+        suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 8pt;")
         suggest_btn.clicked.connect(lambda: self.suggest_next_oc(self.oc_number_input))
         
         ref_inner_layout.addWidget(oc_label)
@@ -1344,7 +1344,7 @@ class ProceedingsWorkspace(QWidget):
         view_layout = QVBoxLayout(self.drc01a_view_container)
         
         view_title = QLabel("<b>DRC-01A Generated</b>")
-        view_title.setStyleSheet("font-size: 18px; color: #27ae60; margin-bottom: 20px;")
+        view_title.setStyleSheet("font-size: 14pt; color: #27ae60; margin-bottom: 20px;")
         view_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         view_layout.addWidget(view_title)
         
@@ -1354,7 +1354,7 @@ class ProceedingsWorkspace(QWidget):
         
         summary_lbl = QLabel("Document Generated Successfully.\nClick 'Edit / Revise Draft' to make changes.")
         summary_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        summary_lbl.setStyleSheet("color: #7f8c8d; font-size: 14px; margin: 20px;")
+        summary_lbl.setStyleSheet("color: #7f8c8d; font-size: 10pt; margin: 20px;")
         view_layout.addWidget(summary_lbl)
         
         # Edit Button
@@ -1640,13 +1640,13 @@ class ProceedingsWorkspace(QWidget):
         
         # Sub-header & Helper text
         ref_subheader = QLabel("SCN Identity Setup")
-        ref_subheader.setStyleSheet("font-size: 13px; color: #7f8c8d; margin-top: -10px; margin-bottom: 5px;")
+        ref_subheader.setStyleSheet("font-size: 10pt; color: #7f8c8d; margin-top: -10px; margin-bottom: 5px;")
         self.ref_card.addLayout(QVBoxLayout()) # Internal layout access
         self.ref_card.content_layout.insertWidget(0, ref_subheader)
         
         ref_helper = QLabel("These details identify the Show Cause Notice and are saved even if you exit early.")
         ref_helper.setWordWrap(True)
-        ref_helper.setStyleSheet("font-size: 11px; color: #95a5a6; font-style: italic; margin-bottom: 15px;")
+        ref_helper.setStyleSheet("font-size: 8pt; color: #95a5a6; font-style: italic; margin-bottom: 15px;")
         self.ref_card.content_layout.insertWidget(1, ref_helper)
         
         # Grid for inputs
@@ -1655,8 +1655,8 @@ class ProceedingsWorkspace(QWidget):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setSpacing(15)
         
-        label_style = "color: #5f6368; font-weight: 500; font-size: 12px;"
-        input_style = "padding: 8px; border: 1px solid #dadce0; border-radius: 4px; font-size: 13px;"
+        label_style = "color: #5f6368; font-weight: 500; font-size: 9pt;"
+        input_style = "padding: 8px; border: 1px solid #dadce0; border-radius: 4px; font-size: 10pt;"
         
         # SCN No
         scn_no_label = QLabel("SCN No.")
@@ -1688,7 +1688,7 @@ class ProceedingsWorkspace(QWidget):
                 color: #475569;
                 padding: 6px 10px;
                 border-radius: 4px;
-                font-size: 11px;
+                font-size: 8pt;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -1701,7 +1701,7 @@ class ProceedingsWorkspace(QWidget):
         
         # Provenance Indicator
         self.oc_provenance_lbl = QLabel("")
-        self.oc_provenance_lbl.setStyleSheet("font-size: 10px; color: #3498db; font-style: italic;")
+        self.oc_provenance_lbl.setStyleSheet("font-size: 8pt; color: #3498db; font-style: italic;")
         self.oc_provenance_lbl.hide()
         
         grid.addWidget(oc_label, 1, 0)
@@ -1740,7 +1740,7 @@ class ProceedingsWorkspace(QWidget):
                 padding: 12px;
                 border-radius: 6px;
                 font-weight: bold;
-                font-size: 14px;
+                font-size: 10pt;
             }
             QPushButton:hover {
                 background-color: #1557b0;
@@ -1808,7 +1808,7 @@ class ProceedingsWorkspace(QWidget):
                 font-weight: bold; 
                 padding: 6px 15px; 
                 border-radius: 4px;
-                font-size: 12px;
+                font-size: 9pt;
             }
             QPushButton:hover {
                 background-color: #1557b0;
@@ -1817,7 +1817,7 @@ class ProceedingsWorkspace(QWidget):
         scn_insert_issue_btn.clicked.connect(self.insert_scn_issue)
         
         scn_reset_btn = QPushButton("Reset Adoption")
-        scn_reset_btn.setStyleSheet("background-color: #f39c12; color: white; border-radius: 4px; padding: 5px 10px; font-size: 11px; font-weight: bold;")
+        scn_reset_btn.setStyleSheet("background-color: #f39c12; color: white; border-radius: 4px; padding: 5px 10px; font-size: 8pt; font-weight: bold;")
         scn_reset_btn.clicked.connect(self.reset_scn_adoption)
         
         scn_issue_selection_layout.addWidget(scn_issue_label)
@@ -1846,7 +1846,7 @@ class ProceedingsWorkspace(QWidget):
         demand_header_layout.addStretch()
         regenerate_btn = QPushButton("Sync with Issues")
         regenerate_btn.setToolTip("Auto-generate demand text tiles based on added issues")
-        regenerate_btn.setStyleSheet("padding: 5px; font-size: 11px; background-color: #3498db; color: white; border-radius: 4px;")
+        regenerate_btn.setStyleSheet("padding: 5px; font-size: 8pt; background-color: #3498db; color: white; border-radius: 4px;")
         regenerate_btn.clicked.connect(lambda: self.sync_demand_tiles() if not self.is_scn_phase1() else None)
         demand_header_layout.addWidget(regenerate_btn)
         demand_layout.addLayout(demand_header_layout)
@@ -1943,7 +1943,7 @@ class ProceedingsWorkspace(QWidget):
         view_layout = QVBoxLayout(self.scn_view_container)
         
         view_title = QLabel("<b>SCN Generated</b>")
-        view_title.setStyleSheet("font-size: 18px; color: #27ae60; margin-bottom: 20px;")
+        view_title.setStyleSheet("font-size: 14pt; color: #27ae60; margin-bottom: 20px;")
         view_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         view_layout.addWidget(view_title)
         
@@ -1953,7 +1953,7 @@ class ProceedingsWorkspace(QWidget):
         
         summary_lbl = QLabel("Document Generated Successfully.\nClick 'Edit / Revise Draft' to make changes.")
         summary_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        summary_lbl.setStyleSheet("color: #7f8c8d; font-size: 14px; margin: 20px;")
+        summary_lbl.setStyleSheet("color: #7f8c8d; font-size: 10pt; margin: 20px;")
         view_layout.addWidget(summary_lbl)
         
         edit_btn = QPushButton("Edit / Revise Draft")
@@ -2110,7 +2110,7 @@ class ProceedingsWorkspace(QWidget):
         
         # Title
         title = QLabel("<b>Drafting Personal Hearing Intimation</b>")
-        title.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
+        title.setStyleSheet("font-size: 10pt; margin-bottom: 10px;")
         layout.addWidget(title)
         
         # Reference Details (OC)
@@ -2121,7 +2121,7 @@ class ProceedingsWorkspace(QWidget):
         self.ph_oc_input.textChanged.connect(self.trigger_preview)
         
         ph_oc_suggest_btn = QPushButton("Get Next")
-        ph_oc_suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 10px;")
+        ph_oc_suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 8pt;")
         ph_oc_suggest_btn.clicked.connect(lambda: self.suggest_next_oc(self.ph_oc_input))
         
         oc_date_label = QLabel("OC Date:")
@@ -2200,7 +2200,7 @@ class ProceedingsWorkspace(QWidget):
         
         # Title
         title = QLabel("<b>Drafting Order</b>")
-        title.setStyleSheet("font-size: 14px; margin-bottom: 10px;")
+        title.setStyleSheet("font-size: 10pt; margin-bottom: 10px;")
         layout.addWidget(title)
         
         # Reference Details (OC)
@@ -2211,7 +2211,7 @@ class ProceedingsWorkspace(QWidget):
         self.order_oc_input.textChanged.connect(self.trigger_preview)
         
         order_oc_suggest_btn = QPushButton("Get Next")
-        order_oc_suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 10px;")
+        order_oc_suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 8pt;")
         order_oc_suggest_btn.clicked.connect(lambda: self.suggest_next_oc(self.order_oc_input))
         
         oc_date_label = QLabel("OC Date:")
@@ -2764,6 +2764,10 @@ class ProceedingsWorkspace(QWidget):
                      # Persist other state flags if needed
                      'status': getattr(card, 'status', 'ACTIVE')
                 }
+                
+                print(f"[BRIDGE DIAG] persist_scn: Card {card.template.get('issue_id')} table_data type: {type(data_payload['table_data'])}")
+                if data_payload['template_snapshot']:
+                    print(f"  - Snapshot has grid_data? {'grid_data' in data_payload['template_snapshot']}")
 
                 snapshot_item = {
                     'issue_id': card.template.get('issue_id'),
@@ -2785,20 +2789,40 @@ class ProceedingsWorkspace(QWidget):
             print(f"Error persisting SCN issues: {e}")
 
     def is_stub_grid(self, grid_data):
-        """Authoritative check: Is the grid data empty or just a placeholder stub?"""
-        if not grid_data or not isinstance(grid_data, list):
+        """Authoritative check: Is the grid data empty or just a placeholder stub?
+        Supports both list-of-lists (legacy) and Dictionary Schema (Modern).
+        """
+        if not grid_data:
             return True
-        if len(grid_data) <= 1: # Only header or nothing
-            return True
-        # Check if all data-row cells are empty/zero/None
-        for row in grid_data[1:]:
-            for cell in row:
-                if isinstance(cell, dict):
-                    val = cell.get('value')
-                    # VALID DATA: 0, 0.0, "0" are valid findings.
-                    # STUB DATA: None, "", "____" are placeholders.
-                    if val not in (None, "", "____"):
+            
+        # Case 1: Dictionary Schema {"columns": [], "rows": []}
+        if isinstance(grid_data, dict):
+            rows = grid_data.get('rows', [])
+            if not rows: return True
+            for row in rows:
+                for col_id, cell in row.items():
+                    if isinstance(cell, dict):
+                        val = cell.get('value')
+                        if val not in (None, "", "____"):
+                            return False
+                    elif cell not in (None, "", "____"):
                         return False
+            return True
+
+        # Case 2: List of Lists (Legacy)
+        if isinstance(grid_data, list):
+            if len(grid_data) <= 1: # Only header or nothing
+                return True
+            for row in grid_data[1:]:
+                for cell in row:
+                    if isinstance(cell, dict):
+                        val = cell.get('value')
+                        if val not in (None, "", "____"):
+                            return False
+                    elif cell not in (None, "", "____"):
+                        return False
+            return True
+            
         return True
 
     def _normalize_issue_id(self, issue_id):
@@ -2813,8 +2837,22 @@ class ProceedingsWorkspace(QWidget):
         Convert Scrutiny summary_table (headers/rows) into a semantic NormalizedTable structure.
         Roles are identified heuristically (e.g., last row is Difference in a 3-row table).
         """
-        headers = summary_table.get('headers', [])
+        headers = summary_table.get('headers')
+        if not headers:
+             # Fallback: Scrutiny summary might use 'columns' (Canonical Schema)
+             raw_cols = summary_table.get('columns', [])
+             headers = [c.get('label') if isinstance(c, dict) else str(c) for c in raw_cols]
+             
         rows_data = summary_table.get('rows', [])
+        
+        # [ROBUSTNESS] Header Inference from First Row if missing
+        if not headers and rows_data and isinstance(rows_data[0], dict):
+             headers = list(rows_data[0].keys())
+             print(f"[CONV DIAG] Infereed headers from row data: {headers}")
+
+        # [DIAGNOSTIC] Log input structure
+        print(f"[CONV DIAG] Headers Final: {headers}")
+        print(f"[CONV DIAG] Rows Count: {len(rows_data)}")
         
         # 1. Map Columns to Tax Heads
         columns = []
@@ -2835,63 +2873,156 @@ class ProceedingsWorkspace(QWidget):
         normalized_rows = []
         num_rows = len(rows_data)
         
+        num_value_cols = max(0, len(columns) - 1)
+        
         for i, row in enumerate(rows_data):
-            # Row label handling: Summary table can have rows as lists or dicts (col0, col1...)
-            if isinstance(row, dict):
-                label = str(row.get("col0", ""))
-                values = [row.get(f"col{j}", 0) for j in range(1, len(columns))]
-            else:
-                label = str(row[0]) if isinstance(row, list) and len(row) > 0 else ""
-                values = row[1:] if isinstance(row, list) else []
-            
-            # Heuristic Role Identification (Prefer last row as DIFFERENCE)
+            # 2.1 Calculate Role Deterministically
             role = "BASE"
             if num_rows >= 2 and i == num_rows - 1:
-                 role = "DIFFERENCE"
-            
-            normalized_rows.append({
-                "role": role,
-                "label": label,
-                "values": values
-            })
+                role = "DIFFERENCE"
+
+            try:
+                # Row label handling: Summary table can have rows as lists or dicts (col0, col1...)
+                if isinstance(row, dict):
+                    # 1. Label handling (Semantic vs col0)
+                    label = str(row.get("col0", ""))
+                    if not label:
+                        # Semantic Fallback: Try 'description', 'desc', 'label'
+                        for k in ["description", "desc", "label", "particulars"]:
+                            if k in row:
+                                label = str(row[k])
+                                break
+                                
+                    # 2. Value Mapping (Semantic vs colX)
+                    values = []
+                    for j in range(1, len(columns)):
+                        col_def = columns[j]
+                        header_label = col_def["label"].lower().strip()
+                        
+                        # A. Try Standard colX
+                        val = row.get(f"col{j}")
+                        
+                        # B. Try Semantic Mapping (Deterministic Aliases)
+                        if val is None:
+                            # Map Header Label -> Potential Keys
+                            aliases = []
+                            
+                            if "amount" in header_label or "value" in header_label:
+                                aliases = ["amount", "value", "amt", "total_value"]
+                            elif "tax" in header_label:
+                                if "igst" in header_label: aliases = ["igst", "tax_igst", "igst_amt"]
+                                elif "cgst" in header_label: aliases = ["cgst", "tax_cgst", "cgst_amt"]
+                                elif "sgst" in header_label: aliases = ["sgst", "tax_sgst", "sgst_amt"]
+                                elif "cess" in header_label: aliases = ["cess", "tax_cess", "cess_amt"]
+                                else: aliases = ["tax", "tax_amt"]
+                            elif "turnover" in header_label:
+                                aliases = ["turnover", "total_turnover"]
+                            elif "rate" in header_label:
+                                aliases = ["rate", "tax_rate"]
+                            
+                            # Attempt alias lookup
+                            for alias in aliases:
+                                if alias in row:
+                                    val = row[alias]
+                                    break
+                        
+                        # Default to 0 if not found
+                        if val is None:
+                            val = 0
+                            
+                        values.append(val)
+                else:
+                    label = str(row[0]) if isinstance(row, list) and len(row) > 0 else f"Row {i+1}"
+                    # Handle list rows explicitly
+                    raw_values = row[1:] if isinstance(row, list) else []
+                    values = []
+                    for rv in raw_values:
+                        values.append(rv)
+
+                # 2.2 Enforce Rectangular Shape
+                # 1. Truncate extra columns
+                values = values[:num_value_cols]
+                # 2. Pad missing columns with 0
+                while len(values) < num_value_cols:
+                    values.append(0)
+                
+                normalized_rows.append({
+                    "role": role,
+                    "label": label,
+                    "values": values
+                })
+
+            except Exception as e:
+                # [SAFEGUARD] Fallback to zero-row BUT maintain contract (Role)
+                print(f"Row {i} normalization failed: {e}")
+                normalized_rows.append({
+                    "role": role, # CRITICAL: Maintain role (e.g. DIFFERENCE) so grid conversion binds variables
+                    "label": "Error Row",
+                    "values": [0] * num_value_cols
+                })
 
         return {
             "columns": columns,
             "rows": normalized_rows
         }
 
-    def _convert_normalized_to_grid(self, normalized_table: dict) -> list:
+    def _convert_normalized_to_grid(self, normalized_table: dict) -> dict:
         """
-        Transform NormalizedTable into the SCN-compatible grid_data schema.
+        Transform NormalizedTable into the SCN-compatible grid_data schema (Canonical Dict).
         Binds DIFFERENCE row cells to tax variables.
+        Rules: Deterministic validation, explicit cell schema.
         """
-        columns = normalized_table["columns"]
-        rows = normalized_table["rows"]
+        norm_columns = normalized_table.get("columns", [])
+        rows = normalized_table.get("rows", [])
         
-        grid_data = []
-        
-        # Header Row
-        header_row = []
-        for col in columns:
-            header_row.append({"value": col["label"], "type": "static", "style": "header"})
-        grid_data.append(header_row)
+        # 1. Assert Invariants
+        if not isinstance(norm_columns, list):
+             raise ValueError(f"Normalized columns must be a list, got {type(norm_columns)}")
+             
+        num_cols = len(norm_columns)
+        if num_cols <= 0:
+             # [FIX] Explicit check to prevent KeyError: 0 downstream
+             raise ValueError("MANDATORY: Table must have at least one column (label). Table is empty.")
 
-        # Data Rows
-        for norm_row in rows:
-            grid_row = []
+        # 2. Prepare Columns for GridAdapter Schema
+        grid_columns = []
+        col_mappings = {} 
+        
+        for i, col in enumerate(norm_columns):
+            grid_id = f"col{i}" 
+            grid_columns.append({"id": grid_id, "label": col.get("label", f"Col {i}")})
+            col_mappings[i] = grid_id
+
+        # 3. Convert Rows to Canonical Schema
+        grid_rows = []
+
+        for r_idx, norm_row in enumerate(rows):
+            # Assert row integrity
+            assert "role" in norm_row, f"Row {r_idx} missing role"
+            assert "label" in norm_row, f"Row {r_idx} missing label"
+            assert "values" in norm_row, f"Row {r_idx} missing values"
+            
+            values = norm_row["values"]
             role = norm_row["role"]
             label = norm_row["label"]
-            values = norm_row["values"]
+            
+            # Assert Rectangular Integrity: num_values == num_cols - 1 (label col excluded from values list)
+            assert len(values) == num_cols - 1, f"Row {r_idx} value count ({len(values)}) mismatch with columns ({num_cols-1})"
 
-            # 1. Label Cell (Static)
-            grid_row.append({"value": label, "type": "static"})
+            grid_row = {}
 
-            # 2. Tax Cells
+            # 3.1 Label Cell (col0) - Explicit Schema
+            grid_id_0 = col_mappings[0]
+            grid_row[grid_id_0] = {
+                "value": label, 
+                "type": "static"
+            }
+
+            # 3.2 Data Cells - Explicit Schema
             for i, val in enumerate(values):
                 col_idx = i + 1
-                if col_idx >= len(columns): break
-                
-                col_meta = columns[col_idx]
+                grid_id = col_mappings[col_idx]
+                col_meta = norm_columns[col_idx]
                 tax_head = col_meta.get("tax_head")
                 
                 cell = {"value": val}
@@ -2902,12 +3033,16 @@ class ProceedingsWorkspace(QWidget):
                     cell["var"] = f"tax_{tax_head.lower()}"
                 else:
                     cell["type"] = "static"
-                
-                grid_row.append(cell)
+                    
+                grid_row[grid_id] = cell
             
-            grid_data.append(grid_row)
+            grid_rows.append(grid_row)
 
-        return grid_data
+        return {
+            "columns": grid_columns,
+            "rows": grid_rows
+        }
+
 
     def build_scn_issue_from_asmt10(self, asmt_record: dict) -> dict:
         """
@@ -2951,48 +3086,105 @@ class ProceedingsWorkspace(QWidget):
         
         scn_template['templates'] = t
 
-        # 3. Factual Table Carry-Forward (Verbatim)
-        # CRITICAL: If ASMT-10 had a grid, the SCN template MUST also have that grid metadata
-        # to ensure IssueCard calls init_grid_ui.
+        # 3. Factual Table Carry-Forward (Direct Pass-Through)
+        # [USER REQUEST] "The exact tables which were in the asmt-10 should appear"
+        # We bypass complex normalization and trust the source structure.
         
-        # New Conversion Pipeline: summary_table -> grid_data
         summary_table = asmt_data.get('summary_table')
         grid_data = asmt_data.get('grid_data')
         
-        # CLAIM 3 FIX: Explicit Stub Detection ensures conversion is NOT skipped
-        if summary_table and self.is_stub_grid(grid_data):
+        final_grid = None
+
+        # [FIX] Prioritize Analysis Result (summary_table) over Static Template (grid_data)
+        # The Master DB has 'grid_data' initialized with Zeros, which masked the real values.
+        
+        # Priority 1: Summary Table (Convert to Grid if needed)
+        if summary_table:
+            # Check if it's already in canonical format (rows + columns) OR just needs render-time inference
+            # [DIRECT PASS-THROUGH] We now trust the updated renderer (ui_helpers) to handle List-rows
+            if hasattr(summary_table, '__iter__') and not isinstance(summary_table, (str, bytes)):
+                 # Accept Dict (canonical) AND List (raw rows)
+                 if isinstance(summary_table, list):
+                      if not summary_table: 
+                           final_grid = None
+                      else:
+                           # [OPTION B] Strict Fidelity: Ensure List conforms to GridAdapter
+                           print(f"Direct Pass-Through of List-Based Summary Table for {issue_id}")
+                           # Check if first item is simple value (Flat List) -> Wrap as single col
+                           if not isinstance(summary_table[0], (dict, list)):
+                                # Convert ["A", "B"] -> [{"col0": {"value": "A"}}, ...]
+                                wrapped_rows = []
+                                for val in summary_table:
+                                     wrapped_rows.append({"col0": {"value": val}})
+                                final_grid = {"columns": [{"id": "col0", "label": "Value"}], "rows": wrapped_rows}
+                           else:
+                                # Safe List-of-Lists or List-of-Dicts
+                                final_grid = {'rows': summary_table}
+
+                 elif isinstance(summary_table, dict) and 'rows' in summary_table:
+                      print(f"Direct Pass-Through of Summary Table for {issue_id}")
+                      final_grid = summary_table
+                 else:
+                      # [FIX] Trap for Legacy Scrutiny Dicts (without 'rows') -> Force Normalization
+                      print(f"Legacy Scrutiny Table detected for {issue_id} -> Normalizing")
+                      try:
+                          normalized = self._normalize_summary_table(summary_table)
+                          final_grid = self._convert_normalized_to_grid(normalized)
+                      except Exception as e:
+                          print(f"Legacy Table Conversion Failed: {e}")
+                          final_grid = None
+            else:
+                 try:
+                     normalized = self._normalize_summary_table(summary_table)
+                     final_grid = self._convert_normalized_to_grid(normalized)
+                 except: final_grid = None
+
+        # Priority 2: Existing Grid Data (Canonical) - Fallback for Legacy/Static
+        elif grid_data and isinstance(grid_data, dict) and 'rows' in grid_data:
+            final_grid = grid_data
+        
+        # Inject Provenance Metadata (If we have a valid grid)
+        if final_grid:
             try:
-                print(f"Converting Scrutiny summary_table for issue {issue_id}")
-                normalized = self._normalize_summary_table(summary_table)
-                grid_data = self._convert_normalized_to_grid(normalized)
-                
-                # Inject Provenance Metadata
                 import datetime
-                grid_data[0][0]["source"] = {
+                source_meta = {
                     "origin": "ASMT10",
-                    "asmt_id": self.proceeding_id, # This is the target proceeding ID, but maybe we want source scrutiny id?
+                    "asmt_id": self.proceeding_id, 
                     "converted_on": datetime.datetime.now().isoformat()
                 }
-                # Fix: asmt_id should be source scrutiny id if available
                 source_scrutiny_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
-                grid_data[0][0]["source"]["asmt_id"] = source_scrutiny_id
+                source_meta["asmt_id"] = source_scrutiny_id
                 
-                # Demand Calculation Contract: Inject mapping to bind DIFF cells to demand engine
+                # Injection: Find first available cell in first row
+                if final_grid.get('rows'):
+                    first_row = final_grid['rows'][0]
+                    # Robust injection for List or Dict rows
+                    if isinstance(first_row, dict):
+                         target_col = "col0"
+                         if target_col not in first_row and first_row:
+                             target_col = list(first_row.keys())[0]
+                         if target_col in first_row:
+                             first_row[target_col]["source"] = source_meta
+                
+                # Demand Calculation Contract
                 scn_template['tax_demand_mapping'] = {
                     'tax_igst': 'tax_igst',
                     'tax_cgst': 'tax_cgst',
                     'tax_sgst': 'tax_sgst',
                     'tax_cess': 'tax_cess'
                 }
-                
             except Exception as e:
-                print(f"Table Conversion Failed: {e}")
-                grid_data = None
+                print(f"Metadata Injection Failed: {e}")
 
-        factual_tables = grid_data or asmt_data.get('tables') or []
+        factual_tables = final_grid or asmt_data.get('tables') or []
+
+
         if factual_tables:
             # Force the table structure into the SCN template
             scn_template['grid_data'] = factual_tables
+            print(f"[BRIDGE DIAG] build_scn: Attached grid_data to template for {issue_id}. Type: {type(factual_tables)}")
+        else:
+            print(f"[BRIDGE DIAG] build_scn: NO factual_tables for {issue_id}")
         
         # 4. Narration Initialization
         # We populate variables with factual data for placeholder resolution
@@ -3023,12 +3215,14 @@ class ProceedingsWorkspace(QWidget):
         })
         
         # Ensure converted grid variables are also in the variables dict
-        if grid_data:
-             for row in grid_data:
-                 for cell in row:
-                     var = cell.get('var')
-                     if var and 'value' in cell:
-                         variables[var] = cell['value']
+        if grid_data and isinstance(grid_data, dict) and 'rows' in grid_data:
+             for row in grid_data['rows']:
+                 # Canonical Row is {"col0": {val, type}, "col1": ...}
+                 for cell_key, cell in row.items():
+                     if isinstance(cell, dict):
+                         var = cell.get('var')
+                         if var and 'value' in cell:
+                             variables[var] = cell['value']
         
         # 5. Output Payload (The Authoritative SCN Adoption JSON)
         return {
@@ -3058,12 +3252,13 @@ class ProceedingsWorkspace(QWidget):
             if is_initial_hydration:
                 # Use Adapter for fresh ASMT-10 adoption
                 adapted = self.build_scn_issue_from_asmt10(record)
-                self.add_scn_issue_card(
+                card = self.add_scn_issue_card(
                     template=adapted['template'],
                     data=adapted['data'],
                     origin="ASMT10",
                     source_id=record['issue_id']
                 )
+                if card: card.on_grid_data_adopted()
             else:
                 # Restoration of existing SCN draft (SCN stage) - STRICT SNAPSHOT HYDRATION
                 data_payload = record.get('data', {})
@@ -3084,6 +3279,7 @@ class ProceedingsWorkspace(QWidget):
                         'issue_name': data_payload.get('issue', 'Issue'),
                         'variables': {}
                     }
+                
                 
                 # Extract values from payload structure
                 if 'values' in data_payload:
@@ -3111,13 +3307,62 @@ class ProceedingsWorkspace(QWidget):
                           print(f"Hydration Repair: Provenance-based Auto-Correction SCN -> {source_type} for {issue_id}")
                           current_origin = source_type
                 
-                self.add_scn_issue_card(
+                
+                # [HYDRATION REPAIR] Self-Healing for "Hollow" Templates
+                # Scenario: Snapshot lacks grid_data (e.g., initial draft was saved before table render).
+                # Fix: Re-fetch authoritative table from ASMT-10 source if available.
+                
+                is_hollow = (
+                    current_origin in ["ASMT10", "SCRUTINY"] and 
+                    not template.get('grid_data') and 
+                    not template.get('tables') and
+                    not restore_data.get('table_data')
+                )
+                
+                if is_hollow and source_id and source_proc_id:
+                     print(f"[HYDRATION REPAIR] Detected HOLLOW template for {issue_id}. Attempting repair from {source_proc_id}...")
+                     
+                     # 1. Fetch Source Context
+                     try:
+                         # Performance Note: This fetches case slice. Acceptable for repair scenario.
+                         source_records = self.db.get_case_issues(source_proc_id, stage='DRC-01A')
+                         source_record = next((r for r in source_records if r['issue_id'] == source_id), None)
+                         
+                         if source_record:
+                             # 2. Regenerate Fresh Template/Data from Source
+                             print(f"  - Source record found. Re-building...")
+                             repair_package = self.build_scn_issue_from_asmt10(source_record)
+                             
+                             fresh_template = repair_package['template']
+                             fresh_grid = fresh_template.get('grid_data')
+                             
+                             if fresh_grid:
+                                  print(f"  - REPAIR SUCCESS: Injected {len(fresh_grid.get('rows', []))} rows.")
+                                  
+                                  # 3. Surgical Injection (Preserve User's Draft, Repair Structure)
+                                  template['grid_data'] = fresh_grid
+                                  
+                                  # Also update restore_data to ensure load_data picks it up
+                                  restore_data['table_data'] = fresh_grid
+                             else:
+                                  print("  - Repair Warning: Source also has no grid_data.")
+                         else:
+                             print("  - Repair Failed: Source record not found.")
+                     except Exception as e:
+                         print(f"  - Repair Error: {e}")
+
+                print(f"[BRIDGE DIAG] hydrate_scn: Preparing card {issue_id}. restore_data[table_data] type: {type(restore_data.get('table_data'))}")
+                if template:
+                    print(f"  - Template has grid_data? {'grid_data' in template}")
+                
+                card = self.add_scn_issue_card(
                     template=template,
                     data=restore_data, 
                     origin=current_origin,
                     status=data_payload.get('status', 'ACTIVE'),
                     source_id=source_id
                 )
+                if card: card.on_grid_data_adopted()
 
     def reset_scn_adoption(self):
         """
@@ -3368,7 +3613,7 @@ class ProceedingsWorkspace(QWidget):
             if widget: widget.deleteLater()
             
         lbl = QLabel(message)
-        lbl.setStyleSheet("color: #e74c3c; font-weight: bold; font-size: 16px; margin: 50px;")
+        lbl.setStyleSheet("color: #e74c3c; font-weight: bold; font-size: 12pt; margin: 50px;")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.scn_issues_layout.addWidget(lbl)
 

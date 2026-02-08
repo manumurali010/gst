@@ -24,6 +24,23 @@ def render_grid_to_table_widget(table_widget: QTableWidget, grid_data: dict, int
     columns = grid_data.get("columns", [])
     rows = grid_data.get("rows", [])
     
+    # [ROBUSTNESS] Infer columns from rows if missing (Direct Pass-Through support)
+    if not columns and rows:
+        max_cols = 0
+        inferred_headers = []
+        
+        # Scan first few rows to guess structure
+        sample_row = rows[0]
+        if isinstance(sample_row, dict):
+            inferred_headers = list(sample_row.keys())
+        elif isinstance(sample_row, list):
+            max_cols = max(len(r) for r in rows if isinstance(r, list))
+            inferred_headers = [f"Col {i+1}" for i in range(max_cols)]
+            
+        # Reconstruct canonical columns
+        columns = [{"id": h if isinstance(sample_row, dict) else f"col{i}", "label": str(h)} 
+                   for i, h in enumerate(inferred_headers)]
+
     if not columns and not rows:
         table_widget.setRowCount(0)
         table_widget.setColumnCount(0)
@@ -53,21 +70,65 @@ def render_grid_to_table_widget(table_widget: QTableWidget, grid_data: dict, int
     header = table_widget.horizontalHeader()
     header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
     
+    # [Polish] Header Styling
+    header.setStyleSheet("""
+        QHeaderView::section {
+            background-color: #f1f5f9;
+            color: #1e293b;
+            font-weight: bold;
+            border: 1px solid #e2e8f0;
+            padding: 4px;
+        }
+    """)
+    table_widget.setStyleSheet("""
+        QTableWidget {
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            gridline-color: #e2e8f0;
+        }
+        QTableWidget::item {
+            padding: 4px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+    """)
+    
+    # Populate Rows
     # Populate Rows
     for r, row_data in enumerate(rows):
-        if not isinstance(row_data, dict):
-            print(f"RENDER ERROR: Row {r} is strictly required to be a dict, got {type(row_data)}")
+        # [ROBUSTNESS] Support both Dict and List rows (ASMT-10 Direct Pass-Through)
+        if not isinstance(row_data, (dict, list)):
+            print(f"RENDER ERROR: Row {r} must be dict or list, got {type(row_data)}")
             continue
 
         for c, col_id in enumerate(col_ids):
-            # Fetch cell by Column ID
-            cell = row_data.get(col_id, {})
+            # Fetch cell logic (Dict vs List)
+            cell = {}
+            if isinstance(row_data, dict):
+                 cell = row_data.get(col_id, {})
+            elif isinstance(row_data, list):
+                 if c < len(row_data):
+                     cell = row_data[c]
             
-            # Value
-            val = cell.get('value', '')
-            style = cell.get('style', 'normal')
-            var_name = cell.get('var')
-            ctype = cell.get('type', 'static')
+            # Normalize Cell to Dict or extract value
+            if isinstance(cell, dict):
+                # [ROBUSTNESS] Try multiple known keys or fallback to first value
+                val = cell.get('value')
+                if val is None: val = cell.get('amount')
+                if val is None: val = cell.get('label')
+                # If still None, maybe it's {key:val}? Try implicit value
+                if val is None and len(cell) == 1:
+                     val = list(cell.values())[0]
+                if val is None: val = '' # Final fallback to empty string (not None)
+
+                style = cell.get('style', 'normal')
+                var_name = cell.get('var')
+                ctype = cell.get('type', 'static')
+            else:
+                # Handle primitive values (str, int, float) from raw lists
+                val = cell
+                style = 'normal'
+                var_name = None
+                ctype = 'static'
             
             # Format Value
             val_str = str(val)

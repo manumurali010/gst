@@ -1,12 +1,14 @@
 import pandas as pd
 import os
+import datetime
 import json
 import openpyxl
 import logging
 import warnings
-import fitz
+import fitz # PyMuPDF
 import re
-from src.utils.pdf_parsers import parse_gstr3b_pdf_table_3_1_a, parse_gstr1_pdf_total_liability, parse_gstr3b_pdf_table_3_1_d, parse_gstr3b_pdf_table_4_a_2_3, parse_gstr3b_pdf_table_4_a_4, parse_gstr3b_pdf_table_4_a_5, parse_gstr3b_metadata, parse_gstr3b_pdf_table_4_a_1, parse_gstr3b_pdf_table_3_1_b, parse_gstr3b_pdf_table_3_1_c, parse_gstr3b_pdf_table_3_1_e, parse_gstr3b_pdf_table_4_b_1
+from src.utils.date_utils import normalize_financial_year, validate_fy_sanity, get_fy_end_year
+from src.utils.pdf_parsers import parse_gstr3b_pdf_table_3_1_a, parse_gstr1_pdf_total_liability, parse_gstr3b_pdf_table_3_1_d, parse_gstr3b_pdf_table_4_a_2_3, parse_gstr3b_pdf_table_4_a_4, parse_gstr3b_pdf_table_4_a_5, parse_gstr3b_metadata, parse_gstr3b_pdf_table_4_a_1, parse_gstr3b_pdf_table_3_1_b, parse_gstr3b_pdf_table_3_1_c, parse_gstr3b_pdf_table_3_1_e, parse_gstr3b_pdf_table_4_b_1, parse_gstr3b_sop9_identifiers
 from .gstr_2b_analyzer import GSTR2BAnalyzer
 from src.utils.formatting import format_indian_number
 
@@ -29,7 +31,8 @@ class ScrutinyParser:
         "TDS_TCS_MISMATCH": {"type": "tiered", "alert_limit": 50},
         "IMPORT_ITC_MISMATCH": {"type": "tiered", "alert_limit": 50},
         "RULE_42_43_VIOLATION": {"type": "tiered", "alert_limit": 50},
-        "ITC_3B_2B_9X4": {"type": "tiered", "alert_limit": 50}
+        "ITC_3B_2B_9X4": {"type": "tiered", "alert_limit": 50},
+        "SECTION_16_4_VIOLATION": {"type": "binary", "tolerance": 0} # Strict 0 tolerance
     }
 
     # [UI STANDARDIZATION] Reason Registry (Strict Keys)
@@ -243,7 +246,73 @@ class ScrutinyParser:
         }
         return payload
 
-    def _parse_group_a_liability(self, file_path, sheet_keyword, default_category, template_type, target_cols, gstr3b_pdf_path=None, gstr1_pdf_path=None):
+    # [PHASE 4.1 HARDENING] Explicit Allow-List
+    PHASE4_ALLOWED = {
+        "LIABILITY_3B_R1",
+        "RCM_LIABILITY_ITC",
+        "ISD_CREDIT_MISMATCH",
+        "ITC_3B_2B_OTHER",
+        "IMPORT_ITC_MISMATCH",
+        "RULE_42_43_VIOLATION",
+        "ITC_3B_2B_9X4"
+    }
+
+    def _hydrate_table(self, schema, var_map, issue_id=None):
+        """
+        [Phase 4.1 Corrective]
+        Pure function to hydrate a DB-defined schema with runtime values.
+        - schema: List of rows (from JSON in DB)
+        - var_map: Flat dict of runtime values {var_name: value}
+        - issue_id: Optional ID to enforce allow-list. 
+        
+        Returns:
+            dict with "columns" and "rows" keys ready for UI, or None if hydration fails meaningfully.
+        """
+        if not schema or not isinstance(schema, list): 
+            return None
+            
+        # [PHASE 4.1 GUARD] Allow-List Check
+        if issue_id and issue_id not in self.PHASE4_ALLOWED:
+             return None
+             
+        hydrated_rows = []
+        # Checks if schema empty
+        if not schema: return None
+        
+        # Header Row (Row 0)
+        # We need to extract headers from the first row definition in schema
+        headers = []
+        if len(schema) > 0:
+            header_row = schema[0]
+            for cell in header_row:
+                headers.append(cell.get("value", ""))
+        
+        # Process Data Rows (Skipping header row 0)
+        for r_idx, row_spec in enumerate(schema[1:]):
+            ui_row = {}
+            for c_idx, cell_spec in enumerate(row_spec):
+                # Default value from schema (static text)
+                f_val = cell_spec.get("value")
+                
+                # Hydration: If 'var' key exists, look it up in var_map
+                var_key = cell_spec.get("var")
+                if var_key and var_key in var_map:
+                    f_val = var_map[var_key]
+                
+                # Format: "colX": {"value": ...}
+                ui_row[f"col{c_idx}"] = {"value": f_val}
+            
+            hydrated_rows.append(ui_row)
+            
+        return {
+            "columns": headers,
+            "rows": hydrated_rows
+        }
+
+
+
+
+    def _parse_group_a_liability(self, file_path, sheet_keyword, default_category, template_type, target_cols, gstr3b_pdf_path=None, gstr1_pdf_path=None, db_schema=None):
         """
         Group A Analysis: Month-wise Liability Logic.
         Refactored to support Strict Semantic Facts & Metadata.
@@ -462,10 +531,29 @@ class ScrutinyParser:
             fmt_row("Liability (Positive Only)", row_shortfall)
         ]
         
-        summary_table = {
-            "columns": ["Description", "CGST", "SGST", "IGST", "Cess"],
-            "rows": custom_rows
-        }
+        summary_table = None
+        if db_schema:
+             var_map = {}
+             # [PHASE 4.1 CORRECTIVE] Hydration (Value-Only)
+             # Row 1: GSTR-1
+             for k in ["cgst", "sgst", "igst", "cess"]: var_map[f"row1_{k}"] = round(row_1[k], 2)
+             
+             # Row 2: GSTR-3B
+             for k in ["cgst", "sgst", "igst", "cess"]: var_map[f"row2_{k}"] = round(row_3b[k], 2)
+             
+             # Row 3: Difference (1 - 3B)
+             for k in ["cgst", "sgst", "igst", "cess"]: var_map[f"row3_{k}"] = round(row_diff[k], 2)
+             
+             # Row 4: Liability (Positive Only)
+             for k in ["cgst", "sgst", "igst", "cess"]: var_map[f"row4_{k}"] = round(row_shortfall[k], 2)
+             
+             summary_table = self._hydrate_table(db_schema, var_map, issue_id="LIABILITY_3B_R1")
+
+        if not summary_table:
+            summary_table = {
+                "columns": ["Description", "CGST", "SGST", "IGST", "Cess"],
+                "rows": custom_rows
+            }
 
         result = {
             "issue_id": "LIABILITY_3B_R1",
@@ -494,7 +582,7 @@ class ScrutinyParser:
         return result
 
 
-    def _parse_rcm_liability(self, file_path, gstr3b_pdf_paths=None):
+    def _parse_rcm_liability(self, file_path, gstr3b_pdf_paths=None, db_schema=None):
         """
         SOP Point 2: RCM Liability (3B) vs ITC Availed (4A2 + 4A3).
         Source: GSTR-3B PDF (Strict).
@@ -515,10 +603,14 @@ class ScrutinyParser:
         }
         
         def build_summary_rows(rcm_liab, itc_avail):
+            # Difference: ITC Availed - RCM Liability (Positive means Excess ITC)
             diff_dict = {k: itc_avail[k] - rcm_liab[k] for k in ["cgst", "sgst", "igst", "cess"]}
-            liab_dict = {k: max(0, rcm_liab[k] - itc_avail[k]) for k in ["cgst", "sgst", "igst", "cess"]}
-            total_liab = sum(liab_dict.values())
             
+            # Liability: We flag ONLY Excess ITC (ITC > RCM). 
+            # Gov is safe if RCM > ITC (Under-claim). 
+            liab_dict = {k: max(0, itc_avail[k] - rcm_liab[k]) for k in ["cgst", "sgst", "igst", "cess"]}
+            total_liab = sum(liab_dict.values())
+                
             rows = [
                 {"col0": {"value": "RCM Tax liability as declared in Table 3.1(d) of GSTR-3B"}, "col1": {"value": rcm_liab["cgst"]}, "col2": {"value": rcm_liab["sgst"]}, "col3": {"value": rcm_liab["igst"]}, "col4": {"value": rcm_liab["cess"]}},
                 {"col0": {"value": "ITC availed in Tables 4(A)(2) and 4(A)(3) of GSTR-3B"}, "col1": {"value": itc_avail["cgst"]}, "col2": {"value": itc_avail["sgst"]}, "col3": {"value": itc_avail["igst"]}, "col4": {"value": itc_avail["cess"]}},
@@ -532,9 +624,8 @@ class ScrutinyParser:
         itc_totals = {"igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
 
         if not gstr3b_pdf_paths:
-             rows, _ = build_summary_rows(rcm_totals, itc_totals)
-             res_payload["summary_table"]["rows"] = rows
-             return res_payload
+             # Just fall through logic with empty lists/zeros
+             pass
 
         try:
             # Aggregate data from all resolved PDFs
@@ -564,11 +655,40 @@ class ScrutinyParser:
                 # Check for zero-data case (Explicit Info)
                 # If specific mandatory tables are missing/empty, standard logic might return 0 shortfall
                 # We enforce INFO if it looks like empty parsing
-                if all(v == 0 for v in rcm_totals.values()) and all(v == 0 for v in itc_totals.values()):
-                    res_payload["status"] = "info"
-                    res_payload["status_msg"] = "No RCM data found in PDF"
+                # [USER-REQUEST] Treat zero-data as purely matching (PASS)
+                # if all(v == 0 for v in rcm_totals.values()) and all(v == 0 for v in itc_totals.values()):
+                #    res_payload["status"] = "info"
+                #    res_payload["status_msg"] = "No RCM data found in PDF"
             else:
                  res_payload["status_msg"] = "GSTR-3B PDF parsing failed"
+            
+            # [PHASE 4.1 CORRECTIVE] Hydration (Value-Only)
+            if db_schema:
+                 var_map = {}
+                 # Row 1: RCM Liability
+                 for k in ["cgst", "sgst", "igst", "cess"]: var_map[f"row1_{k}"] = round(rcm_totals[k], 2)
+                 
+                 # Row 2: ITC Availed
+                 for k in ["cgst", "sgst", "igst", "cess"]: var_map[f"row2_{k}"] = round(itc_totals[k], 2)
+                 
+                 # Access computed rows for hydration
+                 r_diff = rows[2]
+                 r_liab = rows[3]
+                 
+                 # Row 3: Difference
+                 var_map["row3_cgst"] = r_diff["col1"]["value"]
+                 var_map["row3_sgst"] = r_diff["col2"]["value"]
+                 var_map["row3_igst"] = r_diff["col3"]["value"]
+                 var_map["row3_cess"] = r_diff["col4"]["value"]
+                 
+                 # Row 4: Liability
+                 var_map["row4_cgst"] = r_liab["col1"]["value"]
+                 var_map["row4_sgst"] = r_liab["col2"]["value"]
+                 var_map["row4_igst"] = r_liab["col3"]["value"]
+                 var_map["row4_cess"] = r_liab["col4"]["value"]
+
+                 hydrated = self._hydrate_table(db_schema, var_map, issue_id="RCM_LIABILITY_ITC")
+                 if hydrated: res_payload["summary_table"] = hydrated
             
             # [RISK HARDENING] Inject standardized meta
             self._inject_meta(res_payload, "GSTR-3B PDF", "GSTR-3B PDF", "high" if parse_any_success else "low")
@@ -588,7 +708,268 @@ class ScrutinyParser:
             
             
 
-    def _parse_group_b_itc_summary(self, file_path, sheet_keyword, default_category, template_type, auto_indices, claimed_indices, diff_indices, issue_id, gstr2a_analyzer=None, gstr2b_analyzer=None):
+    
+    def _normalize_fy_to_end_year(self, fy_str):
+        """
+        Robustly extracts the END YEAR from an FY string.
+        Supports: YYYY-YY (2022-23) AND YYYY-YYYY (2022-2023).
+        Returns: int (e.g. 2023) or None.
+        """
+        try:
+            if not fy_str or "-" not in fy_str: return None
+            
+            parts = fy_str.split("-")
+            if len(parts) != 2: return None
+            
+            p1 = parts[0].strip()
+            p2 = parts[1].strip()
+            
+            if not p1.isdigit() or not p2.isdigit(): return None
+            
+            # Logic A: Rely on Start Year (Safest)
+            # FY 2022-23 -> Start 2022 -> End 2023
+            # FY 2022-2023 -> Start 2022 -> End 2023
+            if len(p1) == 4:
+                return int(p1) + 1
+                
+            # Logic B: If P1 is weird, try P2 keying
+            if len(p2) == 4:
+                return int(p2)
+            elif len(p2) == 2:
+                 # Last resort if P1 failed check
+                 # e.g. "22-23" (Rare in PDF but possible) -> 23 -> 2023
+                 return int("20" + p2)
+                 
+            return None
+        except:
+            return None
+
+    def _get_section_16_4_cutoff(self, fy_str, override_date_str=None):
+        """
+        Calculates 30th November of the FOLLOWING Financial Year using SSOT.
+        """
+        if override_date_str:
+            try: return datetime.datetime.strptime(override_date_str, "%d/%m/%Y")
+            except: pass
+            
+        end_year = self._normalize_fy_to_end_year(fy_str)
+        if not end_year:
+            return None
+        return datetime.datetime(end_year, 11, 30)
+
+
+    def _parse_sop_9(self, gstr3b_pdf_paths, user_cutoff_date=None, configs=None):
+        """
+        SOP-9: Section 16(4) Ineligible ITC.
+        Scope: Ineligible ITC if Date of Filing > 30th Nov of next FY.
+        Input: List of GSTR-3B PDFs.
+        Output: Issue Payload.
+        """
+        from src.utils.pdf_parsers import parse_gstr3b_sop9_identifiers, parse_gstr3b_pdf_table_4_a_1, parse_gstr3b_pdf_table_4_a_2_3, parse_gstr3b_pdf_table_4_a_4, parse_gstr3b_pdf_table_4_a_5
+
+        result = {
+            "issue_id": "SEC_16_4_VIOLATION",
+            "category": "Ineligible ITC",
+            "description": "ITC availed after the cut-off date prescribed under Section 16(4)", # Standard Description
+            "original_header": "Use of ITC after Cut-off Date (Section 16(4))",
+            "total_shortfall": 0.0,
+            "status": "pass",
+            "status_msg": "",
+            "template_type": "summary_table",
+            "summary_table": {
+                "columns": ["Tax Period", "Due Date of Filing Return", "Actual Date of Filing", "Cut-off Date of Availing ITC", "CGST", "SGST", "IGST"],
+                "rows": []
+            },
+            "facts": {},
+            "meta": {}
+        }
+
+        if not gstr3b_pdf_paths:
+            result["status"] = "info"
+            result["status_msg"] = "GSTR-3B PDFs not available"
+            return result
+
+        if configs and configs.get("sop9_blocked"):
+             result["status"] = "info"
+             result["status_msg"] = "SOP-9 analysis cancelled by user."
+             return result
+
+        # 1. Deduplication & Gating (Single Authoritative Rule)
+        # Map: Period -> Best PDF (Latest ARN)
+        processed_periods = {} # Key: (Month, Year) -> {path, date_obj, meta}
+        
+        warnings_log = []
+        is_applicability_failure = False
+
+        for pdf_path in gstr3b_pdf_paths:
+            if not pdf_path or not os.path.exists(pdf_path): continue
+            
+            # Extract Meta
+            meta = parse_gstr3b_sop9_identifiers(pdf_path)
+            
+            if meta.get("error"):
+                warnings_log.append(f"Parsing error in {os.path.basename(pdf_path)}: {meta['error']}")
+                continue
+            
+            # 1. Applicability Check (Frequency)
+            freq = meta.get("frequency", "Unknown")
+            if freq != "Monthly":
+                # Applicability Failure (Distinct from Parsing Failure)
+                # Generic Message Required
+                is_applicability_failure = True
+                warnings_log.append("Monthly GSTR-3B PDFs are required for SOP-9 (Section 16(4)).")
+                continue
+
+            # 2. Parsing Check (Data Availability)
+            if not meta.get("fy") or not meta.get("month"):
+                warnings_log.append(f"Skipping {os.path.basename(pdf_path)}: Could not extract FY/Month")
+                continue
+
+            if not meta.get("filing_date"):
+                # Essential Gating
+                warnings_log.append(f"Skipping {os.path.basename(pdf_path)}: Date of ARN not found")
+                continue
+            
+            # Parse Date for comparison
+            try:
+                arn_date = datetime.datetime.strptime(meta["filing_date"], "%d/%m/%Y")
+            except:
+                warnings_log.append(f"Skipping {os.path.basename(pdf_path)}: Invalid ARN Date format {meta['filing_date']}")
+                continue
+
+            # Duplicate Handling Logic (Option B: Latest ARN wins)
+            key = (meta["month"], meta["fy"])
+            if key in processed_periods:
+                existing = processed_periods[key]
+                if arn_date > existing["date"]:
+                    # Replace with newer
+                    print(f"SOP-9: Duplicate for {key}. Replacing ARN dated {existing['date']} with {arn_date}")
+                    processed_periods[key] = {"path": pdf_path, "date": arn_date, "meta": meta}
+                else:
+                    # Ignore current
+                    print(f"SOP-9: Duplicate for {key}. Ignoring ARN dated {arn_date} (older than {existing['date']})")
+            else:
+                processed_periods[key] = {"path": pdf_path, "date": arn_date, "meta": meta}
+
+        if not processed_periods:
+             result["status"] = "info"
+             # If we had warnings, show them, else generic
+             if is_applicability_failure:
+                 result["status_msg"] = "Monthly GSTR-3B PDFs are required for SOP-9 (Section 16(4))."
+             elif warnings_log:
+                 result["status_msg"] = " / ".join(list(set(warnings_log[:2]))) # Show first 2 unique warnings
+             else:
+                 result["status_msg"] = "No valid Monthly GSTR-3B data found"
+             return result
+
+        # 2. Logic Execution
+        total_violation = 0.0
+        details_rows = []
+        
+        # Month mapping for Due Date calculation (Next Month 20th)
+        month_map = {
+            "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+            "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12
+        }
+
+        for (month_name, fy), data in processed_periods.items():
+            path = data["path"]
+            arn_date = data["date"]
+            meta = data["meta"]
+            
+            # Calculate Cut-off
+            cut_off_date = self._get_section_16_4_cutoff(fy, user_cutoff_date)
+            if not cut_off_date:
+                continue # Should not happen if FY extracted correctly
+                
+            # Comparison
+            # Rule: Violation if Filing Date > Cut-off Date
+            if arn_date > cut_off_date:
+                # Violation Confirmed. Extract Amount.
+                # Sum 4A(1) + 4A(2) + 4A(3) + 4A(4) + 4A(5)
+                # We reuse existing table parsers.
+                # Note: They print debugs, which is fine.
+                
+                t_itc = {"igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
+                
+                p1 = parse_gstr3b_pdf_table_4_a_1(path)
+                p23 = parse_gstr3b_pdf_table_4_a_2_3(path)
+                p4 = parse_gstr3b_pdf_table_4_a_4(path) # Returns dict or None
+                p5 = parse_gstr3b_pdf_table_4_a_5(path) # Returns dict or None
+                
+                for d in [p1, p23, p4, p5]:
+                    if d:
+                        for k in t_itc: t_itc[k] += d.get(k, 0.0)
+                        
+                row_total = t_itc["igst"] + t_itc["cgst"] + t_itc["sgst"] + t_itc["cess"]
+                
+                if row_total > 0:
+                    total_violation += row_total
+                    
+                    # Compute Display Due Date (Informational)
+                    m_idx = month_map.get(month_name.lower())
+                    due_date_str = "N/A"
+                    if m_idx:
+                        # Logic: Next month, 20th. Year depends on month.
+                        # FY 2022-23. 
+                        # If April (4) -> Due 20 May 2022.
+                        # If March (3) -> Due 20 April 2023.
+                        
+                        # Determine Calendar Year of the Return Period
+                        # We have FY 2022-23.
+                        # If Month 4-12 -> Year is 2022 (Start of FY)
+                        # If Month 1-3 -> Year is 2023 (End of FY)
+                        
+                        # Determine Start Year safely
+                        parts = fy.split("-")
+                        p0 = parts[0].strip()
+                        if len(p0) == 4:
+                            start_year = int(p0)
+                        else:
+                            start_year = int("20" + p0)
+                        
+                        # start_year = int("20" + fy.split("-")[0]) # LEGACY BROKEN LINE
+                        ret_year = start_year if m_idx >= 4 else start_year + 1
+                        
+                        # Next Month
+                        next_m = m_idx + 1
+                        next_y = ret_year
+                        if next_m > 12:
+                            next_m = 1
+                            next_y += 1
+                            
+                        due_date_obj = datetime.datetime(next_y, next_m, 20)
+                        due_date_str = due_date_obj.strftime("%d-%m-%Y")
+
+                    # Add Row
+                    details_rows.append({
+                        "col0": {"value": f"{month_name}, {fy}"},
+                        "col1": {"value": due_date_str},
+                        "col2": {"value": arn_date.strftime("%d/%m/%Y")},
+                        "col3": {"value": cut_off_date.strftime("%d/%m/%Y")},
+                        "col4": {"value": round(t_itc["cgst"], 2)},
+                        "col5": {"value": round(t_itc["sgst"], 2)},
+                        "col6": {"value": round(t_itc["igst"], 2)}
+                    })
+
+        # 3. Final Result Construction
+        result["summary_table"]["rows"] = details_rows
+        result["total_shortfall"] = round(total_violation)
+        
+        status, status_msg = self._determine_status(total_violation, "SECTION_16_4_VIOLATION")
+        result["status"] = status
+        
+        if status == "pass":
+             result["status_msg"] = "No Section 16(4) violations detected"
+             if warnings_log and not processed_periods:
+                 result["status"] = "info"
+                 result["status_msg"] = " / ".join(list(set(warnings_log[:1])))
+
+        # Inject Meta
+        self._inject_meta(result, "GSTR-3B PDFs", "Section 16(4) Logic", "high" if processed_periods else "low")
+        
+        return result
+
         """
         Group B Analysis: ITC Comparison (3B vs 2B).
         Supports 3-level headers and corrected sign logic for ITC.
@@ -1010,13 +1391,13 @@ class ScrutinyParser:
     # --- EXISTING PARSERS ---
 
     
-    def _parse_isd_credit(self, file_path, gstr2a_analyzer=None, gstr3b_pdf_paths=None):
+    def _parse_isd_credit(self, file_path, gstr2a_analyzer=None, gstr3b_pdf_paths=None, db_schema=None):
         if gstr2a_analyzer:
-            return self._parse_isd_credit_phase2(file_path, gstr2a_analyzer, gstr3b_pdf_paths)
+            return self._parse_isd_credit_phase2(file_path, gstr2a_analyzer, gstr3b_pdf_paths, db_schema)
         else:
             return self._parse_isd_credit_phase1(file_path)
 
-    def _parse_isd_credit_phase2(self, file_path, gstr2a_analyzer, gstr3b_pdf_paths=None):
+    def _parse_isd_credit_phase2(self, file_path, gstr2a_analyzer, gstr3b_pdf_paths=None, db_schema=None):
         """
         Phase-2 Handler for SOP 3 (ISD Credit). 
         Strict Logic: 3B PDF (Claimed) vs 2B Summary (Available).
@@ -1048,23 +1429,32 @@ class ScrutinyParser:
         
         if gstr3b_pdf_paths:
             print(f"DEBUG: Parsing {len(gstr3b_pdf_paths)} GSTR-3B PDFs for ISD Credit Table 4(A)(4)")
-            pdf_total = 0.0
+            
+            # [PHASE 4.1 FIX] Aggregate components, not just total
+            pdf_total_comps = {"igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
             pdf_reliable = True
+            found_any = False
             
             for pdf in gstr3b_pdf_paths:
                 # Use the new STRICT parser
                 res = parse_gstr3b_pdf_table_4_a_4(pdf)
                 if res:
-                    # Aggregation Rule: Sum all components
-                    pdf_total += (res.get('igst', 0) + res.get('cgst', 0) + res.get('sgst', 0) + res.get('cess', 0))
+                    found_any = True
+                    for k in pdf_total_comps:
+                        pdf_total_comps[k] += res.get(k, 0.0)
                 else:
                     print(f"WARN: Failed to parse Table 4(A)(4) in {os.path.basename(pdf)}")
-                    pdf_reliable = False # One failure tends to invalidate the set for safety
+                    # One failure tends to invalidate the set for safety? Or we proceed with others?
+                    # Usually we proceed if at least some files worked, but missing files means incomplete data.
+                    # Let's assume reliable only if parsing succeeded for files we have.
+                    pass 
             
-            if pdf_reliable:
-                val_3b = pdf_total
-                used_source_3b = "GSTR-3B PDF"
-                is_3b_reliable = True
+            if found_any:
+                 val_3b = sum(pdf_total_comps.values())
+                 # Store components for hydration
+                 val_3b_comps = pdf_total_comps
+                 used_source_3b = "GSTR-3B PDF"
+                 is_3b_reliable = True
         
         # Priority 2: Legacy Excel (Fallback)
         if not is_3b_reliable:
@@ -1203,12 +1593,42 @@ class ScrutinyParser:
             "status": status,
             "total_shortfall": final_shortfall,
             "summary_table": summary_table, # [SOP-3 FIX] Added payload
-            "details": {
+        }
+            
+        # [PHASE 4.1 CORRECTIVE] Hydration (Value-Only + Strict Components)
+        if db_schema:
+             var_map = {}
+             # Row 1: 3B (Claimed)
+             if is_3b_reliable and locals().get('val_3b_comps'):
+                  c_3b = val_3b_comps
+                  for k in ["cgst", "sgst", "igst", "cess"]: var_map[f"row1_{k}"] = round(c_3b.get(k, 0), 2)
+             else:
+                  # Partial data: schema defaults will show 0s. 
+                  pass
+
+             # Row 2: 2B (Available)
+             var_map["row2_cgst"] = round(b2b_c, 2)
+             var_map["row2_sgst"] = round(b2b_s, 2)
+             var_map["row2_igst"] = round(b2b_i, 2)
+             var_map["row2_cess"] = round(b2b_ce, 2)
+             
+             # Row 3: Difference (3B - 2B) & Row 4: Liability
+             if locals().get('val_3b_comps'):
+                  c_3b = val_3b_comps
+                  for k in ["cgst", "sgst", "igst", "cess"]: 
+                       v2 = {"cgst": b2b_c, "sgst": b2b_s, "igst": b2b_i, "cess": b2b_ce}[k]
+                       diff_k = c_3b.get(k, 0) - v2
+                       var_map[f"row3_{k}"] = round(diff_k, 2)
+                       var_map[f"row4_{k}"] = round(max(0, diff_k), 2)
+
+             hydrated = self._hydrate_table(db_schema, var_map, issue_id="ISD_CREDIT_MISMATCH")
+             if hydrated: result["summary_table"] = hydrated
+             
+        result["details"] = {
                 "claimed_3b": val_3b,
                 "available_2b": total_2a,
                 "source_3b": used_source_3b,
                 "breakdown_2b": res_2a
-            }
         }
         
         # [RISK HARDENING] Inject standardized meta
@@ -1506,18 +1926,21 @@ class ScrutinyParser:
             "summary_table": summary_table
         }
         
+
         # [RISK HARDENING] Inject standardized meta
         self._inject_meta(result, "GSTR-3B PDF (3.1a)", "GSTR-2A Excel", "high")
         return result
 
-    def _parse_gstr9_pdf(self, file_path):
+    def _parse_gstr9_pdf(self, file_path, db_schema=None):
         """
         SOP Point 12: GSTR 3B vs 2B (discrepancy identified from GSTR 9).
         Analyzes Table 8 of GSTR 9.
         """
         try:
             doc = fitz.open(file_path)
-            all_text = "\n".join([page.get_text() for page in doc])
+            all_text = ""
+            for page in doc:
+                all_text += page.get_text() + "\n"
             doc.close()
 
             # Using Regex to find values in Table 8
@@ -1526,9 +1949,10 @@ class ScrutinyParser:
             # Table 8B: ITC as per sum total of 6(B) and 6(H) above
             itc_8b_pattern = r"ITC as per sum total of 6\(B\) and 6\(H\) above\s+([0-9,.]+)\s+([0-9,.]+)\s+([0-9,.]+)\s+([0-9,.]+)"
             # Table 8C: ITC on inward supplies... availed in the next financial year
-            itc_8c_pattern = r"next financial year upto specified period\s+([0-9,.]+)\s+([0-9,.]+)\s+([0-9,.]+)\s+([0-9,.]+)"
+            # [SOP-12 FIX] Use \s+ to handle multiline PDF wrapping (Relaxed from literal space)
+            itc_8c_pattern = r"next\s+financial\s+year\s+upto\s+specified\s+period\s+([0-9,.]+)\s+([0-9,.]+)\s+([0-9,.]+)\s+([0-9,.]+)"
 
-            def extract_tax_values(pattern, text):
+            def extract_tax_values(pattern, text, label=None):
                 # Use DOTALL to match across newlines
                 match = re.search(pattern, text, re.DOTALL)
                 if match:
@@ -1537,17 +1961,22 @@ class ScrutinyParser:
                         if not val_str: return 0.0
                         return float(val_str.replace(",", "").strip())
                     
-                    return {
+                    val = {
                         "cgst": clean_val(match.group(1)),
                         "sgst": clean_val(match.group(2)),
                         "igst": clean_val(match.group(3)),
                         "cess": clean_val(match.group(4))
                     }
+                    if label: logging.info(f"[SOP-12] {label} matched values: {val}")
+                    return val
+                
+                if label:
+                     logging.info(f"[SOP-12] {label} pattern NOT matched - defaulting to zero")
                 return {"cgst": 0.0, "sgst": 0.0, "igst": 0.0, "cess": 0.0}
 
             vals_8a = extract_tax_values(itc_8a_pattern, all_text)
             vals_8b = extract_tax_values(itc_8b_pattern, all_text)
-            vals_8c = extract_tax_values(itc_8c_pattern, all_text)
+            vals_8c = extract_tax_values(itc_8c_pattern, all_text, label="Table 8C")
 
             # Calculation for 8D: 8A - (8B + 8C) 
             # If 8D is positive, it means ITC was available in 2A but not availed (Matched/No Issue)
@@ -1607,7 +2036,7 @@ class ScrutinyParser:
 
             status_msg = format_indian_number(total_shortfall, prefix_rs=True) if total_shortfall > 0 else "Matched"
 
-            return {
+            result = {
                 "issue_id": "ITC_3B_2B_9X4",
                 "category": "GSTR 3B vs 2B (discrepancy identified from GSTR 9)",
                 "description": "GSTR 3B vs 2B (discrepancy identified from GSTR 9)",
@@ -1616,6 +2045,40 @@ class ScrutinyParser:
                 "status_msg": status_msg,
                 "summary_table": summary_table
             }
+            
+            # [PHASE 4] Hydration
+            if db_schema:
+                 var_map = {}
+                 
+                 # Row 1: 8A
+                 # Row 1: 8A
+                 var_map["row1_cgst"] = round(vals_8a['cgst'], 2)
+                 var_map["row1_sgst"] = round(vals_8a['sgst'], 2)
+                 var_map["row1_igst"] = round(vals_8a['igst'], 2)
+                 var_map["row1_cess"] = round(vals_8a['cess'], 2)
+
+                 # Row 2: 8B
+                 var_map["row2_cgst"] = round(vals_8b['cgst'], 2)
+                 var_map["row2_sgst"] = round(vals_8b['sgst'], 2)
+                 var_map["row2_igst"] = round(vals_8b['igst'], 2)
+                 var_map["row2_cess"] = round(vals_8b['cess'], 2)
+
+                 # Row 3: 8C
+                 var_map["row3_cgst"] = round(vals_8c['cgst'], 2)
+                 var_map["row3_sgst"] = round(vals_8c['sgst'], 2)
+                 var_map["row3_igst"] = round(vals_8c['igst'], 2)
+                 var_map["row3_cess"] = round(vals_8c['cess'], 2)
+
+                 # Row 4: 8D (Excess/Shortfall)
+                 var_map["row4_cgst"] = round(shortfall_vals['cgst'], 2)
+                 var_map["row4_sgst"] = round(shortfall_vals['sgst'], 2)
+                 var_map["row4_igst"] = round(shortfall_vals['igst'], 2)
+                 var_map["row4_cess"] = round(shortfall_vals['cess'], 2)
+
+                 hydrated = self._hydrate_table(db_schema, var_map, issue_id="ITC_3B_2B_9X4")
+                 if hydrated: result["summary_table"] = hydrated
+            
+            return result
         except Exception as e:
             print(f"GSTR 9 Parse Error: {e}")
             return {
@@ -1625,7 +2088,7 @@ class ScrutinyParser:
                 "status_msg": f"Error: {str(e)}"
             }
 
-    def _parse_import_itc_phase2(self, file_path, gstr2a_analyzer, gstr3b_pdf_paths=None):
+    def _parse_import_itc_phase2(self, file_path, gstr2a_analyzer, gstr3b_pdf_paths=None, db_schema=None):
         """
         SOP 10 Isolated Logic: 3B vs 2A (IMPG).
         Now supports GSTR-3B PDF (Table 4(A)(1)) aggregation.
@@ -1940,6 +2403,29 @@ class ScrutinyParser:
              logging.warning(f"[SOP-10 CREATE] ID(Summary Rows): {id(st.get('rows')) if st else 'N/A'}")
              logging.warning(f"[SOP-10 CREATE] Hash: {_safe_hash(result_payload)}")
              
+             # [PHASE 4] Hydration
+             if db_schema:
+                 var_map = {}
+                 # Map variables. Note: SOP-10 is purely IGST based in current logic.
+                 # Assuming generic row1..4 mapping.
+                 # Map variables. Note: SOP-10 is purely IGST based in current logic.
+                 # Assuming generic row1..4 mapping.
+                 var_map["row1_igst"] = round(val_3b, 2)
+                 
+                 var_map["row2_igst"] = round(val_2a, 2)
+                 
+                 var_map["row3_igst"] = round(diff, 2)
+                 
+                 var_map["row4_igst"] = round(shortfall, 2)
+
+                 # Zero-fill other columns if schema has them
+                 for r in ["row1", "row2", "row3", "row4"]:
+                     for c in ["cgst", "sgst", "cess"]:
+                         var_map[f"{r}_{c}"] = 0.0
+
+                 hydrated = self._hydrate_table(db_schema, var_map, issue_id="IMPORT_ITC_MISMATCH")
+                 if hydrated: result_payload["summary_table"] = hydrated
+             
              return result_payload
              
         except Exception as e:
@@ -1988,12 +2474,198 @@ class ScrutinyParser:
 
 # ... existing imports ... (I will ensure this is placed correctly at top)
 
-    def parse_file(self, file_path, extra_files=None, configs=None, gstr2a_analyzer=None):
+    def _parse_sop_4(self, file_path, gstr3b_pdf_list, gstr2b_composite, issue_id="ITC_3B_2B_OTHER", db_schema=None):
+        """
+        SOP-4: All Other ITC (Table 4(A)(5) vs 2B).
+        """
+        from src.utils.pdf_parsers import parse_gstr3b_pdf_table_4_a_5
+        
+        # 1. Get 3B Data
+        val_3b = {"igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
+        found_3b = False
+        if gstr3b_pdf_list:
+            for pdf in gstr3b_pdf_list:
+                try:
+                    res = parse_gstr3b_pdf_table_4_a_5(pdf)
+                    if res:
+                        found_3b = True
+                        for k in val_3b: val_3b[k] += res.get(k, 0.0)
+                except: pass
+        
+        # 2. Get 2B Data
+        val_2b = {"igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
+        found_2b = False
+        if gstr2b_composite:
+            res_2b = gstr2b_composite.get_all_other_itc_raw_data()
+            if res_2b:
+                found_2b = True
+                val_2b = res_2b
+        
+        # 3. Compute
+        diff = {}
+        liab = {}
+        total_shortfall = 0.0
+        for k in val_3b:
+            diff[k] = val_3b[k] - val_2b[k]
+            liab[k] = max(0, diff[k])
+            total_shortfall += liab[k]
+            
+        status = "fail" if total_shortfall > 0 else "pass"
+        if not found_3b and not found_2b: status = "info"
+        
+        # 4. Result
+        result = {
+            "issue_id": issue_id,
+            "category": "All Other ITC (GSTR 3B vs GSTR 2B)",
+            "description": "Point 4- All Other ITC (GSTR 3B vs GSTR 2B)",
+            "total_shortfall": round(total_shortfall),
+            "status": status,
+            "status_msg": "Analysis Completed" if status != "info" else "Data Missing",
+            "summary_table": {
+                "columns": ["Description", "CGST", "SGST", "IGST", "Cess"],
+                "rows": [
+                    {"col0": {"value": "ITC claimed in GSTR-3B (Table 4A5)"}, "col1": {"value": round(val_3b['cgst'], 2)}, "col2": {"value": round(val_3b['sgst'], 2)}, "col3": {"value": round(val_3b['igst'], 2)}, "col4": {"value": round(val_3b['cess'], 2)}},
+                    {"col0": {"value": "ITC available in GSTR-2B (Net of Credit Notes)"}, "col1": {"value": round(val_2b['cgst'], 2)}, "col2": {"value": round(val_2b['sgst'], 2)}, "col3": {"value": round(val_2b['igst'], 2)}, "col4": {"value": round(val_2b['cess'], 2)}},
+                    {"col0": {"value": "Difference (GSTR 3B - GSTR 2B)"}, "col1": {"value": round(diff['cgst'], 2)}, "col2": {"value": round(diff['sgst'], 2)}, "col3": {"value": round(diff['igst'], 2)}, "col4": {"value": round(diff['cess'], 2)}},
+                    {"col0": {"value": "Liability"}, "col1": {"value": round(liab['cgst'], 2)}, "col2": {"value": round(liab['sgst'], 2)}, "col3": {"value": round(liab['igst'], 2)}, "col4": {"value": round(liab['cess'], 2)}}
+                ]
+            }
+        }
+        
+        # 5. Hydration
+        if db_schema:
+            var_map = {}
+            for k in ["cgst", "sgst", "igst", "cess"]:
+                var_map[f"row1_{k}"] = round(val_3b[k], 2)
+                var_map[f"row2_{k}"] = round(val_2b[k], 2)
+                var_map[f"row3_{k}"] = round(diff[k], 2)
+                var_map[f"row4_{k}"] = round(liab[k], 2)
+            
+            hydrated = self._hydrate_table(db_schema, var_map, issue_id="ITC_3B_2B_OTHER")
+            if hydrated: result["summary_table"] = hydrated
+            
+        return result
+
+    def _parse_sop_11(self, gstr3b_pdf_list, db_schema=None):
+        """
+        SOP-11: Rule 42/43 Reversal Mismatch.
+        Sources: GSTR-3B PDF (Tables 3.1, 4A, 4B).
+        """
+        from src.utils.pdf_parsers import (
+            parse_gstr3b_pdf_table_3_1_a, parse_gstr3b_pdf_table_3_1_b, parse_gstr3b_pdf_table_3_1_c, 
+            parse_gstr3b_pdf_table_3_1_d, parse_gstr3b_pdf_table_3_1_e,
+            parse_gstr3b_pdf_table_4_a_1, parse_gstr3b_pdf_table_4_a_2_3, parse_gstr3b_pdf_table_4_a_4, parse_gstr3b_pdf_table_4_a_5,
+            parse_gstr3b_pdf_table_4_b_1
+        )
+        
+        totals = {
+            "turnover": 0.0, "exempt": 0.0, "itc_availed": 0.0, "reversed_actual": 0.0
+        }
+        found_data = False
+        
+        if gstr3b_pdf_list:
+            for pdf in gstr3b_pdf_list:
+                try:
+                    # Turnover (3.1 a-e)
+                    p_31a = parse_gstr3b_pdf_table_3_1_a(pdf)
+                    p_31b = parse_gstr3b_pdf_table_3_1_b(pdf)
+                    p_31c = parse_gstr3b_pdf_table_3_1_c(pdf)
+                    p_31d = parse_gstr3b_pdf_table_3_1_d(pdf)
+                    p_31e = parse_gstr3b_pdf_table_3_1_e(pdf)
+                    
+                    t_taxable = 0.0
+                    for p in [p_31a, p_31b, p_31c, p_31d, p_31e]:
+                        if p: t_taxable += p.get('taxable_value', 0.0)
+                    
+                    # Exempt (3.1c + 3.1e)
+                    t_exempt = 0.0
+                    if p_31c: t_exempt += p_31c.get('taxable_value', 0.0)
+                    if p_31e: t_exempt += p_31e.get('taxable_value', 0.0)
+                    
+                    # ITC Availed (4A 1-5)
+                    p_4a1 = parse_gstr3b_pdf_table_4_a_1(pdf)
+                    p_4a23 = parse_gstr3b_pdf_table_4_a_2_3(pdf)
+                    p_4a4 = parse_gstr3b_pdf_table_4_a_4(pdf)
+                    p_4a5 = parse_gstr3b_pdf_table_4_a_5(pdf)
+                    
+                    t_itc = 0.0
+                    for p in [p_4a1, p_4a23, p_4a4, p_4a5]:
+                        if p: t_itc += (p.get('igst', 0)+p.get('cgst', 0)+p.get('sgst', 0)+p.get('cess', 0))
+                        
+                    # Reversal Actual (4B1)
+                    p_4b1 = parse_gstr3b_pdf_table_4_b_1(pdf)
+                    t_rev = 0.0
+                    if p_4b1: t_rev += (p_4b1.get('igst', 0)+p_4b1.get('cgst', 0)+p_4b1.get('sgst', 0)+p_4b1.get('cess', 0))
+                    
+                    totals["turnover"] += t_taxable
+                    totals["exempt"] += t_exempt
+                    totals["itc_availed"] += t_itc
+                    totals["reversed_actual"] += t_rev
+                    found_data = True
+                except: pass
+        
+        # Calculation
+        ratio = 0.0
+        if totals["turnover"] > 0:
+            ratio = totals["exempt"] / totals["turnover"]
+            
+        required_rev = totals["itc_availed"] * ratio
+        actual_rev = totals["reversed_actual"]
+        diff = required_rev - actual_rev
+        liability = max(0, diff)
+        
+        status = "fail" if liability > 0 else "pass"
+        status_msg = f"Liability: {liability:.2f}" if liability > 0 else "Matched"
+        if not found_data:
+            status = "info"
+            status_msg = "GSTR-3B PDF not parsing"
+
+        result = {
+            "issue_id": "RULE_42_43_VIOLATION",
+            "category": "Rule 42/43 Reversal Mismatch",
+            "description": "Point 11- Rule 42/43 Reversal Mismatch",
+            "total_shortfall": round(liability),
+            "status": status,
+            "status_msg": status_msg,
+            "summary_table": {
+                "columns": ["Description", "Amount (Rs.)"],
+                "rows": [
+                    {"col0": {"value": "Exempt + Non-GST Turnover"}, "col1": {"value": round(totals['exempt'], 2)}},
+                    {"col0": {"value": "Total Turnover"}, "col1": {"value": round(totals['turnover'], 2)}},
+                    {"col0": {"value": "Reversal Ratio"}, "col1": {"value": round(ratio, 4)}},
+                    {"col0": {"value": "Total ITC Availed"}, "col1": {"value": round(totals['itc_availed'], 2)}},
+                    {"col0": {"value": "ITC Required to be Reversed"}, "col1": {"value": round(required_rev, 2)}},
+                    {"col0": {"value": "ITC Actually Reversed"}, "col1": {"value": round(actual_rev, 2)}},
+                    {"col0": {"value": "Difference"}, "col1": {"value": round(diff, 2)}},
+                    {"col0": {"value": "Liability"}, "col1": {"value": round(liability, 2)}}
+                ]
+            }
+        }
+        
+        # Hydration
+        if db_schema:
+            var_map = {}
+            var_map["row1_amount"] = round(totals['exempt'], 2)
+            var_map["row2_amount"] = round(totals['turnover'], 2)
+            var_map["row3_amount"] = round(ratio, 4)
+            var_map["row4_amount"] = round(totals['itc_availed'], 2)
+            var_map["row5_amount"] = round(required_rev, 2)
+            var_map["row6_amount"] = round(actual_rev, 2)
+            var_map["row7_amount"] = round(diff, 2)
+            var_map["row8_amount"] = round(liability, 2)
+            
+            hydrated = self._hydrate_table(db_schema, var_map, issue_id="RULE_42_43_VIOLATION")
+            if hydrated: result["summary_table"] = hydrated
+            
+        return result
+
+    def parse_file(self, file_path, extra_files=None, configs=None, gstr2a_analyzer=None, db_schemas=None):
         """
         Parses the Excel file and checks for all 11 SOP discrepancies.
         extra_files: dict containing paths for 'gstr_2b', 'eway_bill', etc.
         configs: dict containing 'gstr3b_freq', 'gstin', 'fy' etc.
         gstr2a_analyzer: Instance of GSTR2AAnalyzer (Phase-2)
+        db_schemas: dict mapping issue_id to schema JSON (for hydration)
         """
         issues = []
         # Defensive Handling: extra_files/configs might be passed as lists (legacy caller bug)
@@ -2178,6 +2850,9 @@ class ScrutinyParser:
         analyzed_count = 0
         
         # GSTR-3B PDF Resolution (Dynamic & Robust)
+        if not db_schemas: db_schemas = {}
+        
+        # 1. Pdf Resolution (3B)
         gstr3b_pdf_list = []
         # Authoritative Yearly check
         yearly_3b = extra_files.get('gstr3b_yearly')
@@ -2201,9 +2876,14 @@ class ScrutinyParser:
         representative_3b_pdf = gstr3b_pdf_list[0] if gstr3b_pdf_list else None
 
         # 1. Point 1: Outward Liability
+        # 1. Point 1: Outward Liability
         gstr1_pdf = extra_files.get("gstr1_pdf")
+        
+        # [PHASE 4] DB Schema Injection
+        schema_sop1 = db_schemas.get("LIABILITY_3B_R1")
+        
         res = self._parse_group_a_liability(file_path, "Tax Liability", "Outward Liability (GSTR 3B vs GSTR 1)", "summary_3x4", [9, 10, 11], 
-                                            gstr3b_pdf_path=representative_3b_pdf, gstr1_pdf_path=gstr1_pdf)
+                                            gstr3b_pdf_path=representative_3b_pdf, gstr1_pdf_path=gstr1_pdf, db_schema=schema_sop1)
         if isinstance(res, dict): 
             issues.append(res); analyzed_count += 1
         else:
@@ -2211,7 +2891,8 @@ class ScrutinyParser:
             issues.append({"issue_id": "LIABILITY_3B_R1", "category": "Outward Liability (GSTR 3B vs GSTR 1)", "description": "Point 1- Outward Liability (GSTR 3B vs GSTR 1)", "status_msg": "data not available", "status": "alert"})
         
         # 2. Point 2: RCM (Unconditional & Aggregated)
-        res = self._parse_rcm_liability(file_path, gstr3b_pdf_paths=gstr3b_pdf_list)
+        schema_sop2 = db_schemas.get("RCM_LIABILITY_ITC")
+        res = self._parse_rcm_liability(file_path, gstr3b_pdf_paths=gstr3b_pdf_list, db_schema=schema_sop2)
         if isinstance(res, dict): 
             res['category'] = "RCM (GSTR 3B vs GSTR 2B)"; res['description'] = "Point 2- RCM (GSTR 3B vs GSTR 2B)"
             issues.append(res)
@@ -2225,9 +2906,10 @@ class ScrutinyParser:
         # 3. Point 3: ISD Credit (Requiring 3B + 2A/2B)
         # Use centralized Phase-2 handler which now supports PDF + 2B Summary
         target_analyzer = gstr2b_analyzer if gstr2b_analyzer else gstr2a_analyzer
+        schema_sop3 = db_schemas.get("ISD_CREDIT_MISMATCH")
         
         # Call dispatcher
-        res = self._parse_isd_credit(file_path, gstr2a_analyzer=target_analyzer, gstr3b_pdf_paths=gstr3b_pdf_list)
+        res = self._parse_isd_credit(file_path, gstr2a_analyzer=target_analyzer, gstr3b_pdf_paths=gstr3b_pdf_list, db_schema=schema_sop3)
         
         if isinstance(res, dict): 
             issues.append(res)
@@ -2238,102 +2920,14 @@ class ScrutinyParser:
         
         # 4. Point 4: All Other ITC
         sop4_done = False
+        schema_sop4 = db_schemas.get("ITC_3B_2B_OTHER")
+        
+        # Call extracted method
         if has_3b and gstr2b_composite:
-             try:
-                 # Primary Path: 3B PDF + 2B Summary Row
-                 # 1. Aggregate 3B Data
-                 other_3b = {"igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
-                 parse_3b_success = False
-                 
-                 for pdf_path in gstr3b_pdf_list:
-                      if not pdf_path or not os.path.exists(pdf_path): continue
-                      p_res = parse_gstr3b_pdf_table_4_a_5(pdf_path)
-                      if p_res:
-                           parse_3b_success = True
-                           for k in other_3b: other_3b[k] += p_res.get(k, 0.0)
-                 
-                 # 2. Aggregate 2B Data (Summary Row ONLY)
-                 other_2b = gstr2b_composite.get_all_other_itc_raw_data()
-                 
-                 # 3. ATOMIC DECISION: Both Sources Must Be Valid
-                 if parse_3b_success and other_2b is not None:
-                      # --- PRIMARY CALCULATION ---
-                      diff = {k: other_3b[k] - other_2b[k] for k in ["cgst", "sgst", "igst", "cess"]}
-                      liab = {k: max(0.0, diff[k]) for k in ["cgst", "sgst", "igst", "cess"]}
-                      
-                      total_liab = sum(liab.values())
-                      
-
-                      # 4. Construct Expanded Table (4-Row Layout)
-                      rows = [
-                          {
-                              "col0": {"value": "ITC claimed in GSTR-3B (Table 4A5)"},
-                              "col1": {"value": round(other_3b["cgst"], 2)}, "col2": {"value": round(other_3b["sgst"], 2)},
-                              "col3": {"value": round(other_3b["igst"], 2)}, "col4": {"value": round(other_3b["cess"], 2)}
-                          },
-                          {
-                              "col0": {"value": "ITC available in GSTR-2B (Net of Credit Notes)"},
-                              "col1": {"value": round(other_2b["cgst"], 2)}, "col2": {"value": round(other_2b["sgst"], 2)},
-                              "col3": {"value": round(other_2b["igst"], 2)}, "col4": {"value": round(other_2b["cess"], 2)}
-                          },
-                          {
-                              "col0": {"value": "Difference (GSTR 3B - GSTR 2B)"},
-                              "col1": {"value": round(diff["cgst"], 2)}, "col2": {"value": round(diff["sgst"], 2)},
-                              "col3": {"value": round(diff["igst"], 2)}, "col4": {"value": round(diff["cess"], 2)}
-                          },
-                          {
-                              "col0": {"value": "Liability"},
-                              "col1": {"value": round(liab["cgst"], 2)}, "col2": {"value": round(liab["sgst"], 2)},
-                              "col3": {"value": round(liab["igst"], 2)}, "col4": {"value": round(liab["cess"], 2)}
-                          }
-                      ]
-                      
-                      summary_table = {
-                          "columns": ["Description", "CGST", "SGST", "IGST", "Cess"],
-                          "rows": rows
-                      }
-                      
-                      issue_payload = {
-                          "issue_id": "ITC_3B_2B_OTHER",
-                          "category": "All Other ITC (GSTR 3B vs GSTR 2B)",
-                          "description": "Point 4- All Other ITC (GSTR 3B vs GSTR 2B)",
-                          "source_used": "GSTR_3B_2B",
-                          "total_shortfall": float(total_liab),
-                          "summary_table": summary_table,
-                          "status": "fail" if total_liab > 10.0 else "pass"
-                      }
-                      
-                      if issue_payload["status"] == "fail":
-                            issue_payload["status_msg"] = self._format_status_msg("fail", total_liab)
-                      else:
-                            issue_payload["status_msg"] = "Matched"
-                            
-                      issues.append(issue_payload)
-                      analyzed_count += 1
-                      sop4_done = True
-                 elif parse_3b_success or other_2b is not None:
-                      # Data partial (Found 3B but no 2B, or vice versa) -> Info
-                      issues.append({
-                          "issue_id": "ITC_3B_2B_OTHER",
-                          "category": "All Other ITC (GSTR 3B vs GSTR 2B)",
-                          "description": "Point 4- All Other ITC (GSTR 3B vs GSTR 2B)",
-                          "status": "info",
-                          "status_msg": self._format_status_msg("info", 0, "PARTIAL_DATA")
-                      })
-                      sop4_done = True
-             
-             except Exception as e:
-                 print(f"Error in SOP-4 Expanded: {e}")
-                 import traceback; traceback.print_exc()
-                 # Resume to fallback if primary crashes? Or just alert?
-                 # Let's alert to avoid silent logic switch if file exists.
-                 issues.append({
-                      "issue_id": "ITC_3B_2B_OTHER",
-                      "category": "All Other ITC (GSTR 3B vs GSTR 2B)",
-                      "description": "Point 4- All Other ITC (GSTR 3B vs GSTR 2B)",
-                      "status": "info",
-                      "status_msg": self._format_status_msg("info", 0, "ANALYSIS_ERROR")
-                  })
+             res_sop4 = self._parse_sop_4(file_path, gstr3b_pdf_list, gstr2b_composite, issue_id="ITC_3B_2B_OTHER", db_schema=schema_sop4)
+             if isinstance(res_sop4, dict):
+                 issues.append(res_sop4)
+                 analyzed_count += 1
                  sop4_done = True
 
         if not sop4_done:
@@ -2363,8 +2957,10 @@ class ScrutinyParser:
         # Use updated method that supports PDF aggregation
         # Prioritize GSTR-2B Analyzer if available
         analyzer_to_use = gstr2b_analyzer if gstr2b_analyzer else gstr2a_analyzer
+        schema_sop10 = db_schemas.get("IMPORT_ITC_MISMATCH")
+        
         if analyzer_to_use:
-             res_sop10 = self._parse_import_itc_phase2(file_path, gstr2a_analyzer=analyzer_to_use, gstr3b_pdf_paths=gstr3b_pdf_list)
+             res_sop10 = self._parse_import_itc_phase2(file_path, gstr2a_analyzer=analyzer_to_use, gstr3b_pdf_paths=gstr3b_pdf_list, db_schema=schema_sop10)
              if isinstance(res_sop10, dict):
                  issues.append(res_sop10)
                  if res_sop10.get("status") != "info": analyzed_count += 1
@@ -2383,6 +2979,7 @@ class ScrutinyParser:
              if gstr2a_analyzer:
                  # Phase-2 Strict
                  try:
+                     # schema_sop5 = db_schemas.get("TDS_TCS_MISMATCH") # Deprecated for SOP-5
                      res = self._parse_tds_tcs_phase2(file_path, gstr2a_analyzer=gstr2a_analyzer, extra_files=extra_files, gstr3b_pdf_paths=gstr3b_pdf_list)
                      if isinstance(res, dict):
                          issues.append(res)
@@ -2622,262 +3219,16 @@ class ScrutinyParser:
         else:
              issues.append({"issue_id": "NON_FILER_SUPPLIERS", "category": "ITC passed on by Suppliers who have not filed GSTR 3B", "description": "Point 8- ITC passed on by Suppliers who have not filed GSTR 3B", "template_type": "ineligible_itc", **guard_issue_8})
 
-        # 9. Point 9: Ineligible Availment [Violations of Section 16(4)]
-        gstr3b_monthly_files = {k: v for k, v in extra_files.items() if k.startswith('gstr3b_monthly')}
-        
-        sop9_rows = []
-        sop9_processed_periods = set()
-        sop9_has_fail = False
-        sop9_has_info = False
-        
-        # Helper: Canonicalize Month Name -> (Month Index, Month Name)
-        month_map = {
-            'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
-            'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12,
-            'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'jun': 6, 'jul': 7, 'aug': 8, 'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12
-        }
-        
-        # Sort files roughly by likely month order if possible, or just process all and sort output
-        # We rely on parsed return period for deduplication.
-        
-        total_inadmissible_itc = 0.0
-        
-        import datetime
-        
-        if not gstr3b_monthly_files:
-             # Check if Yearly exists to give specific hint
-             if extra_files.get('gstr3b_yearly') or extra_files.get('gstr3b'):
-                 s9_status = "info"
-                 s9_msg = "SOP-9 requires monthly GSTR-3B PDFs"
-             else:
-                 s9_status = "info"
-                 s9_msg = "GSTR-3B Data Not Available"
-                 
-             issues.append({
-                 "issue_id": "SEC_16_4_VIOLATION",
-                 "category": "Ineligible Availment of ITC [Violation of Section 16(4)]",
-                 "description": "Point 9- Ineligible Availment of ITC [Violation of Section 16(4)]",
-                 "status": s9_status,
-                 "status_msg": s9_msg,
-                 "summary_table": {
-                     "columns": [{"id": "c0", "label": "Status", "width": "100%"}],
-                     "rows": [{"c0": {"value": f"{s9_msg}"}}]
-                 }
-             })
-        else:
-             for key, fpath in gstr3b_monthly_files.items():
-                 meta = parse_gstr3b_metadata(fpath)
-                 
-                 rp = meta.get('return_period')
-                 fd = meta.get('filing_date')
-                 itc = meta.get('itc', {})
-                 
-                 # Deduplication
-                 rp_key = rp.lower().replace(" ", "") if rp else "unknown"
-                 if rp_key in sop9_processed_periods and rp_key != "unknown":
-                     continue # Skip duplicate
-                 if rp_key != "unknown": 
-                     sop9_processed_periods.add(rp_key)
-                 
-                 # Prepare Row Details
-                 row_status = "Pass"
-                 remark = ""
-                 inadmissible = 0.0
-                 
-                 # 1. Parse Period -> FY -> Cut-off
-                 cut_off_date_str = ""
-                 cut_off_date_obj = None
-                 due_date_display = ""
-                 
-                 month_idx = 0
-                 year_val = 0
-                 
-                 if rp:
-                     # Parse "April 2022"
-                     try:
-                         parts = rp.split()
-                         m_str = parts[0].lower()
-                         y_str = parts[-1] 
-                         if m_str in month_map and y_str.isdigit():
-                             month_idx = month_map[m_str]
-                             year_val = int(y_str)
-                             
-                             # FY Logic
-                             if month_idx >= 4: # Apr-Dec
-                                 fy_start = year_val
-                             else: # Jan-Mar
-                                 fy_start = year_val - 1
-                             
-                             # Cut-off: 30 Nov of (FY_Start + 1)
-                             cut_off_year = fy_start + 1
-                             cut_off_date_obj = datetime.date(cut_off_year, 11, 30)
-                             cut_off_date_str = f"30/11/{cut_off_year}"
-                             
-                             # Due Date (Display): 20th of Next Month
-                             # Simple logic: If current is Dec-2022 -> Jan-2023 20th
-                             # Use Date math
-                             curr_date = datetime.date(year_val, month_idx, 1)
-                             formatted_rp = curr_date.strftime("%b-%Y") # e.g. Apr-2022
 
-                             # Add 32 days -> Next month
-                             next_month = curr_date + datetime.timedelta(days=32)
-                             due_date_obj = datetime.date(next_month.year, next_month.month, 20)
-                             due_date_display = due_date_obj.strftime("%d/%m/%Y")
-                             
-                         else:
-                             formatted_rp = rp # Fallback
-                             remark = "Invalid Period Format"
-                             sop9_has_info = True
-                     except:
-                         formatted_rp = rp # Fallback
-                         remark = "Period Parse Error"
-                         sop9_has_info = True
-                 else:
-                     formatted_rp = "Unknown"
-                     remark = "Return Period Missing"
-                     sop9_has_info = True
-                     
-                 # 2. Parse Filing Date
-                 filing_date_obj = None
-                 if fd:
-                     try:
-                         d, m, y = map(int, fd.split('/'))
-                         filing_date_obj = datetime.date(y, m, d)
-                     except:
-                         remark = f"{remark} | Date Parse Error" if remark else "Date Parse Error"
-                         sop9_has_info = True
-                 else:
-                      if not remark: remark = "Filing Date Missing"
-                      sop9_has_info = True
-
-                 # 3. Violation Check (Strict)
-                 # Violation if: Filing > CutOff AND ITC > 0
-                 total_itc_val = sum(itc.values())
-                 
-                 if cut_off_date_obj and filing_date_obj:
-                     if filing_date_obj > cut_off_date_obj:
-                         if total_itc_val > 0:
-                             row_status = "FAIL"
-                             remark = "Filed after Cut-off with ITC"
-                             sop9_has_fail = True
-                             inadmissible = total_itc_val
-                             total_inadmissible_itc += inadmissible
-                         else:
-                             row_status = "PASS"
-                             remark = "Late Filing (Zero ITC)"
-                     else:
-                         row_status = "PASS" # On time
-                 
-                 sop9_rows.append({
-                     "raw_date": datetime.date(year_val, month_idx, 1) if year_val and month_idx else datetime.date.min, # For sorting
-                     "col0": {"value": formatted_rp},
-                     "col1": {"value": due_date_display},
-                     "col2": {"value": fd or ""},
-                     "col3": {"value": cut_off_date_str},
-                     "col4": {"value": float(itc.get('cgst', 0))},
-                     "col5": {"value": float(itc.get('sgst', 0))},
-                     "col6": {"value": float(itc.get('igst', 0))},
-                     "col7": {"value": float(itc.get('cess', 0))},
-                     "col8": {"value": float(inadmissible)},
-                     "status": row_status,
-                     "remark": remark
-                 })
-             
-             # Final Aggregation
-             # Sort by raw_date
-             sop9_rows.sort(key=lambda x: x['raw_date'])
-             
-             # Construct Output Rows (Drop raw_date/status helper fields)
-             final_rows = []
-             for r in sop9_rows:
-                 # Highlight Fail Rows
-                 style = {"style": "background-color: #ffe6e6"} if r['status'] == 'FAIL' else {} # Optional styling? 
-                 # User said "Native Grid". Styling is handled by renderer logic based on content usually? 
-                 # Or I can just pass data.
-                 # Actually, user emphasized "Status Rules". 
-                 # I'll stick to data. The "remark" column will show "Filed after Cut-off".
-                 
-                 # Wait, column schema: Month, Due, Actual, Cutoff, Checks...
-                 # User Plan said: Month, Due, Actual, Cut-off, CGST, SGST, IGST, Cess, Inadmissible ITC
-                 # My row construction matches. 
-                 
-                 final_rows.append({
-                     "col0": r["col0"],
-                     "col1": r["col1"],
-                     "col2": r["col2"],
-                     "col3": r["col3"],
-                     "col4": r["col4"],
-                     "col5": r["col5"],
-                     "col6": r["col6"],
-                     "col7": r["col7"],
-                     "col8": r["col8"]
-                 })
-                 
-             # Mandatory Total Row (Inadmissible Only)
-             final_rows.append({
-                 "col0": {"value": "TOTAL"},
-                 "col1": {"value": ""},
-                 "col2": {"value": ""},
-                 "col3": {"value": ""},
-                 "col4": {"value": ""}, # Only Inadmissible summed? "Total Row sums the Ineligible ITC"
-                 "col5": {"value": ""},
-                 "col6": {"value": ""},
-                 "col7": {"value": ""},
-                 "col8": {"value": round(total_inadmissible_itc, 2)}
-             })
-
-             # Status Logic
-             if sop9_has_fail:
-                 final_status = "fail"
-                 final_msg = f"Inadmissible ITC: {format_indian_number(total_inadmissible_itc, prefix_rs=True)}"
-             elif sop9_has_info and not sop9_has_fail: # Mixed rule: "Else if all months INFO -> INFO". 
-                 # Wait. My code says "has_info". If has_fail is False, and (all rows Pass or Info).
-                 # If *any* pass, is it PASS?
-                 # User Rule: "Else if all months INFO -> SOP-9 = INFO. Else -> PASS"
-                 # So if I have 1 PASS and 1 INFO -> Result is PASS (because not all INFO).
-                 
-                 # I need to check if count(INFO) == count(Rows).
-                 info_count = sum(1 for r in sop9_rows if "Missing" in r.get('remark', '') or "Error" in r.get('remark', ''))
-                 if info_count == len(sop9_rows) and info_count > 0:
-                     final_status = "info"
-                     final_msg = "Data Missing / Ambiguous"
-                 else:
-                     final_status = "pass"
-                     final_msg = "Verified"
-             else:
-                 final_status = "pass"
-                 final_msg = "Verified"
-
-             issues.append({
-                 "issue_id": "SEC_16_4_VIOLATION",
-                 "category": "Ineligible Availment of ITC [Violation of Section 16(4)]",
-                 "description": "Point 9- Ineligible Availment of ITC [Violation of Section 16(4)]",
-                 "total_shortfall": float(total_inadmissible_itc),
-                 "status": final_status,
-                 "status_msg": final_msg,
-                 "summary_table": {
-                     "columns": [
-                         {"id": "col0", "label": "Return Period", "width": "15%"},
-                         {"id": "col1", "label": "Due Date", "width": "10%"},
-                         {"id": "col2", "label": "Actual Date", "width": "10%"},
-                         {"id": "col3", "label": "Cut-off Date", "width": "10%"},
-                         {"id": "col4", "label": "CGST", "width": "10%"},
-                         {"id": "col5", "label": "SGST", "width": "10%"},
-                         {"id": "col6", "label": "IGST", "width": "10%"},
-                         {"id": "col7", "label": "Cess", "width": "10%"},
-                         {"id": "col8", "label": "Inadmissible ITC", "width": "15%"}
-                     ],
-                     "rows": final_rows
-                 }
-             })
-             analyzed_count += 1
 
 
         
         # 12. Point 12: GSTR 3B vs 2B (discrepancy identified from GSTR 9)
+        # 12. Point 12: GSTR 3B vs 2B (discrepancy identified from GSTR 9)
         gstr9_path = extra_files.get('gstr9_yearly')
+        schema_sop12 = db_schemas.get("ITC_3B_2B_9X4")
         if gstr9_path:
-            res_g9 = self._parse_gstr9_pdf(gstr9_path)
+            res_g9 = self._parse_gstr9_pdf(gstr9_path, db_schema=schema_sop12)
             if isinstance(res_g9, dict):
                 issues.append(res_g9)
                 analyzed_count += 1
@@ -2891,133 +3242,25 @@ class ScrutinyParser:
                 })
         
         # 11. Point 11: Rule 42/43 Reversal Mismatch (SOP-11)
-        sop11_status = "pass"
-        sop11_msg = "Verified"
-        sop11_liability = 0.0
-        
-        t_taxable_exempt = 0.0
-        t_taxable_total = 0.0
-        t_itc_avail_total = 0.0
-        t_reversal_actual = 0.0
-        
-        sop11_3b_files = [v for k, v in extra_files.items() if 'gstr3b' in k and str(v).lower().endswith('.pdf')]
-        
-        data_incomplete = False
-        data_incomplete_msg = ""
-        has_sop11_data = False
-        
-        if sop11_3b_files:
-             for f in sop11_3b_files:
-                  try:
-                      # Strict Parsing: do not default to {} yet
-                      r_a = parse_gstr3b_pdf_table_3_1_a(f)
-                      r_b = parse_gstr3b_pdf_table_3_1_b(f)
-                      r_c = parse_gstr3b_pdf_table_3_1_c(f)
-                      r_e = parse_gstr3b_pdf_table_3_1_e(f)
-                      
-                      # [SOP-11 STRICT CHECK]
-                      # User Requirement: If 3.1(c) or 3.1(e) is None, treat as Data Not Available.
-                      # We do not strictly fail on A or B yet as per specific instruction, but logic implies we should.
-                      # Focusing on C/E as requested.
-                      
-                      if r_c is None:
-                          data_incomplete = True
-                          data_incomplete_msg = f"Table 3.1(c) missing/unreadable in {os.path.basename(f)}"
-                          print(f"[SOP-11 FAILURE] {data_incomplete_msg}")
-                          has_sop11_data = False
-                          break
-                          
-                      if r_e is None:
-                          data_incomplete = True
-                          data_incomplete_msg = f"Table 3.1(e) missing/unreadable in {os.path.basename(f)}"
-                          print(f"[SOP-11 FAILURE] {data_incomplete_msg}")
-                          has_sop11_data = False
-                          break
-                      
-                      # Safe to convert to dicts now for value extraction
-                      r_a = r_a or {}
-                      r_b = r_b or {}
-                      
-                      val_a = float(r_a.get('taxable_value', 0.0) or 0)
-                      val_b = float(r_b.get('taxable_value', 0.0) or 0)
-                      val_c = float(r_c.get('taxable_value', 0.0) or 0)
-                      val_e = float(r_e.get('taxable_value', 0.0) or 0)
-                      
-                      # [SOP-11 TRACE]
-                      # print(f"[SOP-11] {os.path.basename(f)} -> A={val_a}, B={val_b}, C={val_c}, E={val_e}")
-                      
-                      t_taxable_exempt += (val_c + val_e)
-                      t_taxable_total += (val_a + val_b + val_c + val_e)
-                      
-                      md = parse_gstr3b_metadata(f)
-                      sum_itc_f = 0.0
-                      if md and 'itc' in md:
-                           sum_itc_f = float(md['itc'].get('igst', 0)) + float(md['itc'].get('cgst', 0)) + float(md['itc'].get('sgst', 0)) + float(md['itc'].get('cess', 0))
-                      
-                      t_itc_avail_total += sum_itc_f
-                      
-                      r_rev = parse_gstr3b_pdf_table_4_b_1(f)
-                      sum_rev = float(r_rev.get('igst', 0)) + float(r_rev.get('cgst', 0)) + float(r_rev.get('sgst', 0)) + float(r_rev.get('cess', 0))
-                      t_reversal_actual += sum_rev
-                      
-                      has_sop11_data = True
-                  except Exception as e:
-                      print(f"SOP-11 Parsing Error ({f}): {e}")
-                      # If an error exception occurs, we should probably flag data incomplete too to be safe?
-                      # For now, relying on explicit None checks.
-
-        sop11_rows = []
-        if data_incomplete:
-             sop11_status = "info"
-             sop11_msg = f"Data not available for one or more months. {data_incomplete_msg}"
-             sop11_rows = [{"col0": {"value": f"Analysis Skipped: {data_incomplete_msg}"}, "col1": {"value": "-"}}]
-        elif not has_sop11_data:
-             sop11_status = "info"
-             sop11_msg = "GSTR-3B PDF not available"
-             sop11_rows = [{"col0": {"value": "Data Missing"}, "col1": {"value": "-"}}]
+        schema_sop11 = db_schemas.get("RULE_42_43_VIOLATION")
+        if gstr3b_pdf_list:
+            res_sop11 = self._parse_sop_11(gstr3b_pdf_list, db_schema=schema_sop11)
+            if isinstance(res_sop11, dict):
+                issues.append(res_sop11)
+                if res_sop11.get("status") != "info": analyzed_count += 1
         else:
-             ratio = 0.0
-             # [RISK HARDENING] Safe Division
-             ratio = self._safe_div(t_taxable_exempt, t_taxable_total)
-             
-             required_reversal = ratio * t_itc_avail_total
-             
-             diff = required_reversal - t_reversal_actual
-             sop11_liability = max(0.0, diff)
-             
-             # [RISK HARDENING] Use Helper
-             sop11_status, sop11_msg = self._determine_status(sop11_liability, "RULE_42_43_VIOLATION")
-             
-             sop11_rows = [
-                  {"col0": {"value": "Exempt + Non-GST Turnover (3.1c + 3.1e)"}, "col1": {"value": round(t_taxable_exempt, 2)}},
-                  {"col0": {"value": "Total Turnover (3.1a + b + c + e)"}, "col1": {"value": round(t_taxable_total, 2)}},
-                  {"col0": {"value": f"Reversal Ratio (Exempt / Total)"}, "col1": {"value": f"{ratio*100:.2f}%"}},
-                  {"col0": {"value": "Total ITC Availed (Table 4(A)(1)-(5))"}, "col1": {"value": round(t_itc_avail_total, 2)}},
-                  {"col0": {"value": "ITC Required to be Reversed"}, "col1": {"value": round(required_reversal, 2)}},
-                  {"col0": {"value": "ITC Actually Reversed (Table 4(B)(1))"}, "col1": {"value": round(t_reversal_actual, 2)}},
-                  {"col0": {"value": "Difference (Required - Actual)"}, "col1": {"value": round(diff, 2)}},
-                  {"col0": {"value": "Liability (Payable)"}, "col1": {"value": round(sop11_liability, 2)}}
-             ]
+             # Just skip or info? Old logic did nothing if list empty, just created empty variables but issue_payload depended on having data?
+             # No, old logic checked `if sop11_3b_files:`.
+             pass
+        
+        # 12. SOP-9: Section 16(4) Ineligible ITC
+        # Scope: 3B PDFs (Aggregated List)
+        # Pass User Cut-off if available in configs
+        res_sop9 = self._parse_sop_9(gstr3b_pdf_list, user_cutoff_date=configs.get("sop9_cutoff_date"), configs=configs)
+        if isinstance(res_sop9, dict):
+             issues.append(res_sop9)
+             if res_sop9.get("status") != "info": analyzed_count += 1
 
-        # [RISK HARDENING] Inject Metadata
-        issue_payload = {
-             "issue_id": "RULE_42_43_VIOLATION",
-             "category": "Rule 42/43 Reversal Mismatch",
-             "description": "Point 11- Rule 42/43 Reversal Mismatch",
-             "total_shortfall": float(sop11_liability),
-             "status": sop11_status,
-             "status_msg": "Analysis Completed" if sop11_status == "pass" else sop11_msg,
-             "summary_table": {
-                 "columns": [
-                     {"id": "col0", "label": "Description", "width": "75%"},
-                     {"id": "col1", "label": "Amount (Rs.)", "width": "25%"}
-                 ],
-                 "rows": sop11_rows
-             }
-        }
-        self._inject_meta(issue_payload, "GSTR-3B PDF", "Calculated (Rule 42)", "high" if has_sop11_data else "low")
-        issues.append(issue_payload)
-        if sop11_status != "info": analyzed_count += 1
         
         summary = {
             "total_issues": len([i for i in issues if isinstance(i, dict) and i.get('total_shortfall', 0) > 0]),

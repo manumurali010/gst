@@ -29,7 +29,7 @@ class ASMT10Generator:
         # DEBUG LOG for SOP-5 UI
         i_id = issue.get('issue_id', 'Unknown')
         stat = issue.get('status', 'Unknown')
-        has_tbl = "YES" if "tables" in issue and issue["tables"] else "NO"
+        has_tbl = "YES" if ("tables" in issue and issue["tables"]) or ("summary_table" in issue and issue["summary_table"]) else "NO"
         print(f"DEBUG UI: issue_id={i_id}, status={stat}, tables_present={has_tbl}")
 
         template_type = issue.get('template_type')
@@ -229,7 +229,12 @@ class ASMT10Generator:
             # Flexible row handling
             if isinstance(row, dict):
                 for key in ["gstin", "name", "itc_availed", "status"]: # Priority order
-                    if key in row: html += f"<td>{row[key]}</td>"
+                    if key in row:
+                        val = row[key]
+                        if key == "itc_availed":
+                             try: val = format_indian_number(float(val), prefix_rs=False)
+                             except: pass
+                        html += f"<td>{val}</td>"
             html += "</tr>"
             
         html += """
@@ -278,12 +283,12 @@ class ASMT10Generator:
             html += f"""
             <tr>
                 <td>{p}</td>
-                <td>{d3['igst']:,.0f}</td><td>{d3['cgst']:,.0f}</td><td>{d3['sgst']:,.0f}</td><td>{d3['cess']:,.0f}</td>
-                <td>{d1['igst']:,.0f}</td><td>{d1['cgst']:,.0f}</td><td>{d1['sgst']:,.0f}</td><td>{d1['cess']:,.0f}</td>
-                <td style="color:red; font-weight:bold;">{dd['igst']:,.0f}</td>
-                <td style="color:red; font-weight:bold;">{dd['cgst']:,.0f}</td>
-                <td style="color:red; font-weight:bold;">{dd['sgst']:,.0f}</td>
-                <td style="color:red; font-weight:bold;">{dd['cess']:,.0f}</td>
+                <td>{format_indian_number(d3['igst'], prefix_rs=False)}</td><td>{format_indian_number(d3['cgst'], prefix_rs=False)}</td><td>{format_indian_number(d3['sgst'], prefix_rs=False)}</td><td>{format_indian_number(d3['cess'], prefix_rs=False)}</td>
+                <td>{format_indian_number(d1['igst'], prefix_rs=False)}</td><td>{format_indian_number(d1['cgst'], prefix_rs=False)}</td><td>{format_indian_number(d1['sgst'], prefix_rs=False)}</td><td>{format_indian_number(d1['cess'], prefix_rs=False)}</td>
+                <td style="color:red; font-weight:bold;">{format_indian_number(dd['igst'], prefix_rs=False)}</td>
+                <td style="color:red; font-weight:bold;">{format_indian_number(dd['cgst'], prefix_rs=False)}</td>
+                <td style="color:red; font-weight:bold;">{format_indian_number(dd['sgst'], prefix_rs=False)}</td>
+                <td style="color:red; font-weight:bold;">{format_indian_number(dd['cess'], prefix_rs=False)}</td>
             </tr>"""
         
         # Add summary row
@@ -292,10 +297,10 @@ class ASMT10Generator:
             <tfoot>
                 <tr style="background-color: #f2f2f2; font-weight: bold;">
                     <td colspan="9" style="text-align: right;">Liability Detected</td>
-                    <td style="color:red;">{totals['igst']:,.0f}</td>
-                    <td style="color:red;">{totals['cgst']:,.0f}</td>
-                    <td style="color:red;">{totals['sgst']:,.0f}</td>
-                    <td style="color:red;">{totals['cess']:,.0f}</td>
+                    <td style="color:red;">{format_indian_number(totals['igst'], prefix_rs=False)}</td>
+                    <td style="color:red;">{format_indian_number(totals['cgst'], prefix_rs=False)}</td>
+                    <td style="color:red;">{format_indian_number(totals['sgst'], prefix_rs=False)}</td>
+                    <td style="color:red;">{format_indian_number(totals['cess'], prefix_rs=False)}</td>
                 </tr>
             </tfoot>
         </table>"""
@@ -334,10 +339,10 @@ class ASMT10Generator:
             html += f"""
                 <tr style="{style}">
                     <td style="{desc_style}">{desc}</td>
-                    <td style="{val_style}">{vals.get('igst', 0):,.0f}</td>
-                    <td style="{val_style}">{vals.get('cgst', 0):,.0f}</td>
-                    <td style="{val_style}">{vals.get('sgst', 0):,.0f}</td>
-                    <td style="{val_style}">{vals.get('cess', 0):,.0f}</td>
+                    <td style="{val_style}">{format_indian_number(vals.get('igst', 0), prefix_rs=False)}</td>
+                    <td style="{val_style}">{format_indian_number(vals.get('cgst', 0), prefix_rs=False)}</td>
+                    <td style="{val_style}">{format_indian_number(vals.get('sgst', 0), prefix_rs=False)}</td>
+                    <td style="{val_style}">{format_indian_number(vals.get('cess', 0), prefix_rs=False)}</td>
                 </tr>
             """
             
@@ -347,10 +352,10 @@ class ASMT10Generator:
             <tfoot>
                 <tr style="background-color: #f2f2f2; font-weight: bold;">
                     <td style="text-align: right;">Liability Detected</td>
-                    <td style="color:red;">{totals['igst']:,.0f}</td>
-                    <td style="color:red;">{totals['cgst']:,.0f}</td>
-                    <td style="color:red;">{totals['sgst']:,.0f}</td>
-                    <td style="color:red;">{totals['cess']:,.0f}</td>
+                    <td style="color:red;">{format_indian_number(totals['igst'], prefix_rs=False)}</td>
+                    <td style="color:red;">{format_indian_number(totals['cgst'], prefix_rs=False)}</td>
+                    <td style="color:red;">{format_indian_number(totals['sgst'], prefix_rs=False)}</td>
+                    <td style="color:red;">{format_indian_number(totals['cess'], prefix_rs=False)}</td>
                 </tr>
             </tfoot>
         </table>"""
@@ -359,32 +364,49 @@ class ASMT10Generator:
     @staticmethod
     def generate_html(data, issues, for_preview=True, show_letterhead=True):
         """Generates the HTML content for ASMT-10 with specific layout and formatting."""
-        # Note: for_preview arg is kept for compatibility but logic is unified for WYSIWYG
-        from src.utils.config_manager import ConfigManager
-        """Generates the HTML content for ASMT-10 with specific layout and formatting."""
         from src.utils.config_manager import ConfigManager
         import re
+        import os
         
         config = ConfigManager()
-        # Filter issues to only show those with detected discrepancies in the draft AND included by user
-        active_issues = [i for i in issues if float(i.get('total_shortfall', 0)) > 0 and i.get('is_included', True)]
-        total_tax = sum(float(i.get('total_shortfall', 0)) for i in active_issues)
         
-        # 1. Fetch Letterhead
+        def robust_float(val):
+            if val is None: return 0.0
+            if isinstance(val, (int, float)): return float(val)
+            try:
+                clean_val = str(val).replace(',', '').strip()
+                return float(clean_val)
+            except (ValueError, TypeError):
+                return 0.0
+
+        # 1. Filter active issues
+        active_issues = [i for i in issues if robust_float(i.get('total_shortfall', 0)) > 0 and i.get('is_included', True)]
+        total_tax = sum(robust_float(i.get('total_shortfall', 0)) for i in active_issues)
+        issues_count = len(active_issues)
+
+        # [STABILIZATION] Zero-Demand Feedback
+        if for_preview and issues_count == 0:
+            return """
+            <div style="font-family: 'Segoe UI', sans-serif; color: #64748b; background: #f8fafc; padding: 40px; text-align: center;">
+                <div style="font-size: 48px; margin-bottom: 20px;">✅</div>
+                <h2 style="color: #1e293b; margin-bottom: 10px;">No Discrepancies with Tax Shortfall</h2>
+                <p style="line-height: 1.6;">Based on the analysis of provided files, no SOP compliance issues with a quantifiable tax shortfall have been identified for this tax period.</p>
+                <div style="margin-top: 20px; font-size: 13px; color: #94a3b8; font-style: italic;">ASMT-10 drafting is only required for cases with detected liabilities.</div>
+            </div>
+            """
+        
+        # 2. Fetch Letterhead
         lh_content = ""
         try:
             lh_path = config.get_letterhead_path('pdf')
             if os.path.exists(lh_path):
                 with open(lh_path, 'r', encoding='utf-8') as f:
                     lh_full = f.read()
-                    # Extract content inside body if present
                     match = re.search(r"<body[^>]*>(.*?)</body>", lh_full, re.DOTALL | re.IGNORECASE)
                     if match:
                         lh_content = match.group(1)
-                        # Remove placeholders and strip problematic internal margins
                         lh_content = lh_content.replace('<div id="form-header-placeholder"></div>', '')
                         lh_content = lh_content.replace('<div id="content-placeholder"></div>', '')
-                        # Strip hardcoded margins and paddings that interfere with global layout
                         lh_content = lh_content.replace('margin: 10px auto;', 'margin: 0 auto;')
                         lh_content = lh_content.replace('margin-bottom: 20px;', 'margin-bottom: 5px;')
                         lh_content = lh_content.replace('padding-top: 0px;', 'padding-top: 0;')
@@ -394,7 +416,7 @@ class ASMT10Generator:
             print(f"Error loading letterhead: {e}")
             lh_content = "<div style='text-align:center;'><h3>GST DEPARTMENT</h3></div>"
 
-        # 2. Preparation of Metadata & Formatting
+        # 3. Preparation of Metadata & Formatting
         def fmt_date(d_str):
             if not d_str or str(d_str).upper() == "N/A": return "N/A"
             try:
@@ -405,27 +427,35 @@ class ASMT10Generator:
             except:
                 return str(d_str)
 
-        notice_date = fmt_date(data.get('notice_date') or data.get('created_at', ''))
+        # Map keys from snapshot or direct data
+        n_date = data.get('notice_date') or data.get('issue_date') or data.get('created_at', '')
+        notice_date = fmt_date(n_date)
         reply_date = fmt_date(data.get('last_date_to_reply', ''))
         oc_number = data.get('oc_number', 'N/A')
 
         issue_sections = ""
         for idx, issue in enumerate(active_issues, 1):
-            # Semantic Correction: Issue <n> – <Issue Name>
-            import re
             raw_name = issue.get('category') or issue.get('issue_name') or "Unknown Issue"
-            # Strip "Point X- " prefix if present
             issue_name = re.sub(r'^Point \d+- ?', '', raw_name, flags=re.IGNORECASE)
             
             section_html = f"""
-
             <div class="issue-block">
                 <p><strong>Issue {idx} – {issue_name}</strong></p>
-                <p class="justify-text">{issue.get('brief_facts') or issue.get('description')}</p>
+                
+                <p style="margin-top: 2px; margin-bottom: 5px; font-weight: bold;">
+                    Estimated Tax: ₹ {format_indian_number(robust_float(issue.get('total_shortfall', 0)), prefix_rs=False)}
+                </p>
+                
+                <div class="justify-text" style="margin-bottom: 10px;">
+                    {issue.get('detailed_narration') or issue.get('brief_facts') or issue.get('description') or issue.get('scn_narration') or ''}
+                </div>
             """
             section_html += ASMT10Generator.generate_issue_table_html(issue)
             section_html += "</div>"
             issue_sections += section_html
+
+        # Dynamic intro text using count
+        intro_text = f"the {issues_count} discrepancies" if issues_count > 0 else "discrepancies"
 
 
         # 3. Recipient Details & Address Wrapping
@@ -445,16 +475,23 @@ class ASMT10Generator:
         # Apply Letterhead suppression
         display_lh = lh_content if show_letterhead else ""
 
+        # [STABILIZATION] Pre-calculate styles for f-string safety
+        bg_color = "#f1f5f9" if for_preview else "#525659"
+        page_width = "820px" if for_preview else "210mm" 
+        page_margin = "30px auto"
+        page_border = "1px solid #e2e8f0" if for_preview else "none"
+        page_shadow = "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)" if for_preview else "0 0 10px rgba(0,0,0,0.5)"
+        page_padding = "60px" if for_preview else "25mm 15mm"
+
         html = f"""
         <html>
         <head>
             <style>
                 /* Print-Ready CSS */
                 @media print {{
-                    @page {{ size: A4 portrait; margin: 15mm; }}
+                    @page {{ size: A4 portrait; margin: 0mm; }}
                     body {{ 
                         background-color: white !important; 
-                        -webkit-print-color-adjust: exact; 
                         width: 100%;
                         margin: 0 !important;
                         padding: 0 !important;
@@ -462,56 +499,54 @@ class ASMT10Generator:
                     .page-container {{
                         width: 100%;
                         margin: 0 !important;
-                        padding: 0 !important;
+                        padding: 25mm 15mm !important;
                         border: none !important;
                         box-shadow: none !important;
-                        min-height: auto !important;
                         background-color: white !important;
+                        display: block !important;
                     }}
                     .footer-sign {{ page-break-inside: avoid; }}
-                    .issue-block {{ page-break-inside: avoid; }}
-                    tr {{ page-break-inside: avoid; }}
                     thead {{ display: table-header-group; }}
-                    tfoot {{ display: table-footer-group; }}
-                    .letterhead-area {{ margin-top: 0 !important; }} 
                 }}
 
-                @page {{ size: A4; margin: 15mm; }}
                 body {{ 
-                    font-family: 'Bookman Old Style', serif; 
+                    font-family: 'Bookman Old Style', 'Times New Roman', serif; 
                     margin: 0; 
                     padding: 0;
                     color: black; 
                     font-size: 11pt; 
-                    background-color: #525659; /* Acrobat gray background for preview */
+                    background-color: {bg_color}; 
+                    -webkit-font-smoothing: antialiased;
                 }}
                 .page-container {{
-                    width: 210mm; 
-                    min-height: 297mm; 
-                    padding: 15mm 20mm; 
-                    margin: 20px auto; 
+                    width: {page_width}; 
+                    min-height: {"1000px" if for_preview else "297mm"}; 
+                    padding: {page_padding}; 
+                    margin: {page_margin}; 
                     background: white; 
-                    box-shadow: 0 0 10px rgba(0,0,0,0.5); 
+                    border: {page_border};
+                    box-shadow: {page_shadow}; 
                     box-sizing: border-box;
-                    display: flex;
-                    flex-direction: column;
+                    display: block;
                 }}
-                .letterhead-area {{ margin-bottom: 5px; }}
+                .letterhead-area {{ margin-bottom: 20px; width: 100%; text-align: center; }}
+                .letterhead-area img {{ max-width: 100%; height: auto; object-fit: contain; }}
                 .oc-header {{ width: 100%; margin-bottom: 15px; font-weight: bold; font-size: 11pt; border-collapse: collapse; }}
                 .oc-header td {{ border: none; padding: 0; }}
-                .form-title-area {{ text-align: center; margin-bottom: 20px; }}
-                .form-title {{ font-size: 11pt; font-weight: bold; margin-bottom: 2px; }}
+                .form-title-area {{ text-align: center; margin-bottom: 25px; }}
+                .form-title {{ font-size: 12pt; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }}
                 .form-rule {{ font-size: 10pt; font-style: italic; }}
-                .recipient {{ margin-bottom: 20px; font-size: 11pt; text-align: left; line-height: 1.2; max-width: 380px; }}
+                .recipient {{ margin-bottom: 25px; font-size: 11pt; text-align: left; line-height: 1.3; max-width: 100%; }}
                 .recipient p {{ margin: 0; padding: 0; }}
                 .tax-period {{ margin-bottom: 15px; font-size: 11pt; font-weight: bold; }}
-                .subject {{ text-align: center; font-weight: bold; margin-bottom: 25px; font-size: 11pt; margin-top: 20px; text-decoration: underline; }}
-                .content-main {{ font-size: 11pt; line-height: 1.4; }}
+                .subject {{ text-align: center; font-weight: bold; margin-bottom: 30px; font-size: 11pt; margin-top: 20px; text-decoration: underline; width: 100%; }}
+                .content-main {{ font-size: 11pt; line-height: 1.5; width: 100%; }}
                 .justify-text {{ text-align: justify; }}
-                .issue-block {{ margin-bottom: 25px; }}
-                .data-table {{ width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 20px; margin-left: auto; margin-right: auto; table-layout: fixed; border: 1px solid black; }}
-                .data-table th, .data-table td {{ border: 1px solid black; padding: 5px; font-size: 9pt; text-align: center; word-wrap: break-word; }}
-                .data-table th {{ background-color: #f2f2f2; font-weight: bold; }}
+                .issue-block {{ margin-bottom: 30px; width: 100%; }}
+                .data-table {{ width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 15px; margin-left: 0; margin-right: 0; table-layout: fixed; border: 1px solid black; }}
+                /* Reduced font and padding to fit 9 columns */
+                .data-table th, .data-table td {{ border: 1px solid black; padding: 3px 2px; font-size: 8pt; text-align: center; word-wrap: break-word; overflow-wrap: break-word; }}
+                .data-table th {{ background-color: #f2f2f2; font-weight: bold; font-size: 8pt; vertical-align: middle; }}
                 .footer-sign {{ margin-top: 50px; text-align: right; font-size: 11pt; }}
             </style>
         </head>
@@ -553,14 +588,14 @@ class ASMT10Generator:
             </div>
 
             <div class="content-main">
-                <p class="justify-text">This is to inform that during the scrutiny of the returns for the financial year {data.get('financial_year')}, the following discrepancies have been noticed:</p>
+                <p class="justify-text">This is to inform that during the scrutiny of the returns for the financial year {data.get('financial_year')}, {intro_text} have been noticed:</p>
                 
                 {issue_sections}
                 
-                <p style="margin-top: 20px;"><strong>Total Tax Liability Identified: ₹ {total_tax:,.0f}</strong></p>
+                <p style="margin-top: 20px;"><strong>Total Tax Liability Identified: ₹ {format_indian_number(total_tax, prefix_rs=False)}</strong></p>
                 
                 <p class="justify-text">You are hereby directed to explain the reasons for the aforesaid discrepancies by <strong>{reply_date}</strong>.</p>
-                <p class="justify-text">If no explanation is received by the said date, it will be presumed that you have nothing to say in the matter and proceedings in accordance with law may be initiated against you without making any further reference to you.</p>
+                <p class="justify-text">Failing which, proceedings in accordance with law may be initiated against you without further reference.</p>
                 
                 <div class="footer-sign">
                     Signature of Proper Officer<br>

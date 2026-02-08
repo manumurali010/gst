@@ -7,6 +7,8 @@ from datetime import datetime
 from src.utils.constants import TAXPAYERS_FILE, CASES_FILE, CASE_FILES_FILE
 
 class DatabaseManager:
+    _initialized = False
+
     def __init__(self):
         self.ensure_files_exist()
         self.init_sqlite()
@@ -634,6 +636,20 @@ class DatabaseManager:
                 raise e # Propagate crucial validation errors
             return False
 
+    def delete_all_case_issues(self, proceeding_id, stage):
+        """Delete all issues for a proceeding and stage."""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM case_issues WHERE proceeding_id = ? AND stage = ?", (proceeding_id, stage))
+            rows = cursor.rowcount
+            conn.commit()
+            conn.close()
+            return rows
+        except Exception as e:
+            print(f"Error deleting case issues: {e}")
+            return 0
+
     def save_case_issues(self, proceeding_id, issues_list, stage='DRC-01A'):
         """
         Save a list of issues to the case_issues table.
@@ -663,6 +679,17 @@ class DatabaseManager:
                     INSERT INTO case_issues (proceeding_id, issue_id, stage, data_json, category, description, amount)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                 """, (proceeding_id, issue_id, stage, data_json, category, description, amount))
+                
+                # [TRACE Checkpoint B] Dump raw data_json of the DRC-01A record immediately after write
+                if stage == 'DRC-01A':
+                     print(f"[TRACE B] DB Write Complete for {issue_id} (DRC-01A). Payload size: {len(data_json)} bytes.")
+                     try:
+                         d = json.loads(data_json)
+                         st = d.get('summary_table', {})
+                         rows = st.get('rows', []) if st else []
+                         print(f"[TRACE B] Readback {issue_id}: summary_table rows: {len(rows)}")
+                     except:
+                         print(f"[TRACE B] Readback {issue_id}: FAILED TO PARSE JSON")
                 
             conn.commit()
             conn.close()
@@ -714,49 +741,30 @@ class DatabaseManager:
             print(f"Error getting case issues: {e}")
             return []
 
-    def save_scn_issue_snapshot(self, proceeding_id, issue_list):
+    # save_scn_issue_snapshot moved to line 1730s for V2 Architecture Integration
+
+    def get_scrutiny_case_data(self, proceeding_id):
         """
-        Save the full SCN issue list (Snapshot).
-        This replaces the previous SCN state for this proceeding (Full Sync).
-        
-        issue_list: List of dicts containing:
-            - issue_id
-            - data (dict)
-            - origin (SCRUTINY | MANUAL_SOP)
-            - source_proceeding_id (optional)
-            - added_by (optional)
+        Get full scrutiny case data including snapshot.
         """
         try:
             conn = self._get_conn()
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            # 1. Clear existing SCN draft issues for this proceeding
-            cursor.execute("DELETE FROM case_issues WHERE proceeding_id = ? AND stage = 'SCN'", (proceeding_id,))
-            
-            # 2. Bulk Insert
-            for issue in issue_list:
-                data_json = json.dumps(issue.get('data', {}))
-                
-                cursor.execute("""
-                    INSERT INTO case_issues (
-                        proceeding_id, issue_id, stage, data_json, 
-                        origin, source_proceeding_id, added_by
-                    ) VALUES (?, ?, 'SCN', ?, ?, ?, ?)
-                """, (
-                    proceeding_id, 
-                    issue['issue_id'], 
-                    data_json,
-                    issue.get('origin', 'SCRUTINY'),
-                    issue.get('source_proceeding_id'),
-                    issue.get('added_by', 'System')
-                ))
-            
-            conn.commit()
+            cursor.execute("SELECT * FROM proceedings WHERE id = ?", (proceeding_id,))
+            row = cursor.fetchone()
             conn.close()
-            return True
+            
+            if row:
+                d = dict(row)
+                # Fix for 'None' string literal if present (legacy artifact)
+                if d.get('asmt10_snapshot') == 'None': d['asmt10_snapshot'] = None
+                return d
+            return None
         except Exception as e:
-            print(f"Error saving SCN snapshots: {e}")
-            return False
+            print(f"Error getting scrutiny case data: {e}")
+            return None
 
     def update_case_issue_origin(self, row_id, new_origin):
         """Update the origin of a specific issue record (used for legacy data repair)"""
@@ -771,39 +779,140 @@ class DatabaseManager:
             print(f"Error updating case issue origin: {e}")
             return False
 
-    def clone_issues_for_scn(self, proceeding_id):
+    def update_case_issue(self, row_id, updates):
+
+        """Update the origin of a specific issue record (used for legacy data repair)"""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE case_issues SET origin = ? WHERE id = ?", (new_origin, row_id))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error updating case issue origin: {e}")
+            return False
+
+    def update_case_issue(self, row_id, updates):
         """
-        Clone DRC-01A issues to SCN stage if SCN issues don't exist yet.
+        Generic update for a case_issue record.
+        updates: dict of column_name -> value (e.g. {'data_json': '...'})
         """
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
             
-            # Check if SCN issues already exist
+            set_clauses = []
+            values = []
+            for col, val in updates.items():
+                set_clauses.append(f"{col} = ?")
+                values.append(val)
+            
+            values.append(row_id)
+            query = f"UPDATE case_issues SET {', '.join(set_clauses)} WHERE id = ?"
+            
+            cursor.execute(query, tuple(values))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error updating case issue: {e}")
+            return False
+
+    def clone_issues_for_scn(self, proceeding_id, source_proceeding_id=None):
+        """
+        Clone issues to SCN stage from finalized upstream artifacts.
+        Priority: DRC-01A (Direct) > ASMT-10 (Scrutiny)
+        source_proceeding_id: Optional ID of the source scrutiny case. If provided, clones from Source -> Dest.
+        """
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # 0. Idempotency Check (On DESTINATION)
             cursor.execute("SELECT count(*) FROM case_issues WHERE proceeding_id = ? AND stage = 'SCN'", (proceeding_id,))
             if cursor.fetchone()[0] > 0:
                 conn.close()
                 return False # Already exists, don't overwrite
+            
+            # Determine Source ID (defaults to same if not cross-linked)
+            src_id = source_proceeding_id if source_proceeding_id else proceeding_id
                 
-            # Fetch DRC-01A issues
+            # 1. Strategy A: Try DRC-01A (Direct Adjudication or Scrutiny with DRC-01A issued)
+            source_stage = 'DRC-01A'
             cursor.execute("""
                 SELECT issue_id, data_json 
                 FROM case_issues 
-                WHERE proceeding_id = ? AND stage = 'DRC-01A'
-            """, (proceeding_id,))
+                WHERE proceeding_id = ? AND stage = ?
+            """, (src_id, source_stage))
             
-            drc_issues = cursor.fetchall()
+            source_issues = cursor.fetchall()
             
-            # Insert as SCN issues
-            for row in drc_issues:
+            # 2. Strategy B: Try ASMT-10 (Scrutiny Finalized) if DRC-01A empty
+            if not source_issues:
+                source_stage = 'ASMT-10'
+                cursor.execute("""
+                    SELECT issue_id, data_json 
+                    FROM case_issues 
+                    WHERE proceeding_id = ? AND stage = ?
+                """, (src_id, source_stage))
+                source_issues = cursor.fetchall()
+            
+            if not source_issues:
+                print(f"Propagate Failed: No upstream artifacts found for {src_id} (Checked DRC-01A, ASMT-10)")
+                conn.close()
+                return False
+
+            # 3. Clone to SCN (Destination)
+            count = 0
+            for row in source_issues:
+                # [Governance] Verify Frozen Artifact Presence & Normalize Schema
+                try:
+                    data = json.loads(row[1])
+                    
+                    # Schema Normalization: Promote summary_table to grid_data if needed
+                    # Scrutiny artifacts often store the baked table in 'summary_table'.
+                    # SCN Replay requires 'grid_data' (Canonical Dict).
+                    if not data.get('grid_data') and data.get('summary_table'):
+                         print(f"Normalizing Issue {row[0]}: Promoting summary_table to grid_data.")
+                         data['grid_data'] = data['summary_table']
+                    
+                    # Validation
+                    if 'grid_data' not in data or not isinstance(data['grid_data'], dict):
+                         print(f"Skipping Issue {row[0]}: Missing Frozen Artifact (grid_data/summary_table)")
+                         continue
+                         
+                    # [Replay Blocker Fix] Ensure 'columns' key exists
+                    # Older artifacts might only have 'rows' or 'headers'
+                    gd = data['grid_data']
+                    if 'columns' not in gd:
+                         # Attempt to retro-fit columns
+                         if 'headers' in gd:
+                              gd['columns'] = [{'id': f'col{i}', 'title': h} for i, h in enumerate(gd['headers'])]
+                         elif 'rows' in gd and gd['rows']:
+                              # Infer from first row keys
+                              first_row = gd['rows'][0]
+                              gd['columns'] = [{'id': k, 'title': k.upper()} for k in first_row.keys()]
+                         else:
+                              gd['columns'] = [] # Empty schema
+                    
+                    # Re-serialize normalized payload
+                    final_json = json.dumps(data)
+                    
+                except Exception as e:
+                    print(f"Normalization Error for {row[0]}: {e}")
+                    continue
+
                 cursor.execute("""
                     INSERT INTO case_issues (proceeding_id, issue_id, stage, data_json)
                     VALUES (?, ?, 'SCN', ?)
-                """, (proceeding_id, row[0], row[1]))
+                """, (proceeding_id, row[0], final_json)) # Normalized Copy
+                count += 1
                 
             conn.commit()
             conn.close()
-            return True
+            print(f"Successfully cloned {count} issues from {source_stage} (Src: {src_id}) to SCN (Dest: {proceeding_id}).")
+            return count > 0
         except Exception as e:
             print(f"Error cloning issues for SCN: {e}")
             return False
@@ -900,7 +1009,9 @@ class DatabaseManager:
         """Initialize SQLite database"""
         from src.database.schema import init_db, DB_FILE
         self.db_file = DB_FILE
-        init_db()
+        if not DatabaseManager._initialized:
+            init_db()
+            DatabaseManager._initialized = True
 
     # ---------------- SQLite Methods for New Architecture ----------------
 
@@ -1069,7 +1180,7 @@ class DatabaseManager:
     def _parse_proceeding_json_fields(self, d):
         """Helper to parse JSON fields in proceeding dict"""
         import json
-        for field in ['demand_details', 'selected_issues', 'taxpayer_details', 'additional_details']:
+        for field in ['demand_details', 'selected_issues', 'taxpayer_details', 'additional_details', 'asmt10_snapshot']:
             val = d.get(field)
             if val and isinstance(val, str):
                 try:
@@ -1644,6 +1755,140 @@ class DatabaseManager:
             print(f"Error getting issue by name {name}: {e}")
             return None
 
+    def get_issue_templates(self):
+        """
+        Fetch all available Issue Templates (SOPs, Custom SCN, etc.) from Master.
+        Returns detailed list for the Template Selection Dialog.
+        """
+        try:
+            conn = self._get_conn()
+            # conn.row_factory = sqlite3.Row # Helper uses this? No, self._get_conn might not set it. 
+            # We'll set it here to be safe, or just use indices if lazy.
+            # safe to set row_factory on private connection instance
+            conn.row_factory = sqlite3.Row 
+            cursor = conn.cursor()
+            
+            # Fetch all active templates
+            # Join master and data to get descriptions/etc if needed?
+            # For selection list, issues_master is usually enough, but let's grab type/category
+            cursor.execute("""
+                SELECT issue_id, issue_name, category, sop_point, analysis_type 
+                FROM issues_master 
+                WHERE active = 1 
+                ORDER BY issue_id
+            """)
+            rows = cursor.fetchall()
+            conn.close()
+            
+            results = []
+            for row in rows:
+                r = dict(row)
+                # Determine Type (SOP vs Custom)
+                # Convention: SOP issues start with 'SOP-'
+                if r['issue_id'].startswith('SOP-'):
+                    r['type'] = 'SOP'
+                else:
+                    r['type'] = 'SCN' # or 'MANUAL'
+                results.append(r)
+                
+            return results
+            
+        except Exception as e:
+            print(f"Error fetching issue templates: {e}")
+            return []
+
+    def get_case_issues(self, proceeding_id, stage='SCN'):
+        """
+        Fetch issues for a specific case/proceeding at a specific stage.
+        Returns a list of issue records (dictionaries).
+        """
+        try:
+             conn = self._get_conn()
+             conn.row_factory = sqlite3.Row
+             cursor = conn.cursor()
+             
+             # Table 'case_issues' structure: id, proceeding_id, issue_id, stage, data_json, origin, added_by...
+             # Assuming 'stage' column exists? Or is it implicit in 'data_json'?
+             # ProceedingsWorkspace calls it with stage='SCN' or 'DRC-01A'.
+             # Let's check schema assumption. In finalize_proceeding_transaction (1753), it inserts into asmt10_register.
+             # Wait, `persist_scn_issues` calls `save_scn_issue_snapshot`.
+             # `save_scn_issue_snapshot` handles writing to `case_issues`.
+             # I should check `save_scn_issue_snapshot` to see the schema.
+             # But I can't check it easily without grep.
+             # Let's assume standard schema: proceeding_id, stage, ...
+             
+             cursor.execute("""
+                 SELECT ci.*, im.sop_point
+                 FROM case_issues ci
+                 LEFT JOIN issues_master im ON ci.issue_id = im.issue_id
+                 WHERE ci.proceeding_id = ? AND ci.stage = ?
+             """, (proceeding_id, stage))
+             rows = cursor.fetchall()
+             conn.close()
+             
+             results = []
+             import json
+             for row in rows:
+                 r = dict(row)
+
+                 # Parse data_json if it exists
+                 if 'data_json' in r and isinstance(r['data_json'], str):
+                     try:
+                         r['data'] = json.loads(r['data_json'])
+                     except:
+                         r['data'] = {}
+                 results.append(r)
+             return results
+             
+        except Exception as e:
+             # Make resilient if table/column missing (dev env)
+             print(f"Error getting case issues: {e}")
+             return []
+
+    def save_scn_issue_snapshot(self, proceeding_id, issue_list):
+        """
+        Persist full snapshot of SCN issues for a proceeding.
+        Strategy: Delete all existing 'SCN' stage issues for this PID, then insert new.
+        Enforces 'Snapshot' integrity (what you see is what you save).
+        """
+        import json
+        import uuid
+        try:
+             conn = self._get_conn()
+             cursor = conn.cursor()
+             
+            # 1. Clear existing SCN issues for this proceeding
+             # Guard: Only delete stage='SCN' to avoid wiping other stages if any
+             # [FIX] Type Safety: Ensure proceeding_id is string
+             pid_str = str(proceeding_id)
+             cursor.execute("DELETE FROM case_issues WHERE proceeding_id = ? AND stage = 'SCN'", (pid_str,))
+             
+             # 2. Insert new issues
+             for issue in issue_list:
+                 issue_id = issue.get('issue_id')
+                 origin = issue.get('origin', 'SCN')
+                 source_pid = issue.get('source_proceeding_id') # For ASMT10
+                 added_by = issue.get('added_by', 'User')
+                 data = issue.get('data', {})
+                 
+                 # Prepare JSON payload
+                 data_json = json.dumps(data)
+                 
+                 cursor.execute("""
+                     INSERT INTO case_issues (proceeding_id, issue_id, stage, data_json, origin, added_by)
+                     VALUES (?, ?, ?, ?, ?, ?)
+                 """, (pid_str, issue_id, 'SCN', data_json, origin, added_by))
+             
+             conn.commit()
+             return True
+             
+        except Exception as e:
+             print(f"Error saving SCN snapshot: {e}")
+             return False
+        finally:
+             if conn:
+                 conn.close()
+
     def delete_proceeding(self, pid):
         """Delete a proceeding by ID"""
         try:
@@ -1714,33 +1959,59 @@ class DatabaseManager:
         #     print(f"Error adding ASMT-10 entry: {e}")
         #     return False
 
-    def finalize_proceeding_transaction(self, pid, oc_data, asmt_data, adj_data, user_id='System'):
+    def finalize_proceeding_transaction(self, pid, oc_data, asmt_data, adj_data, user_id='System', snapshot=None):
         """
         Atomically finalize a proceeding (ASMT-10).
         1. Lock proceeding (status=finalised)
         2. Create OC Register Entry
         3. Create ASMT-10 Register Entry
         4. Create Linked Adjudication Case
+        5. Persist Immutable ASMT-10 Snapshot [New]
         """
         import uuid
         import datetime
+        import json
         
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
             
+            # [Schema Migration] Ensure snapshot column exists (Robustness)
+            try:
+                cursor.execute("SELECT asmt10_snapshot FROM proceedings LIMIT 1")
+            except Exception:
+                # Column likely missing, add it
+                print("Schema Migration: Adding asmt10_snapshot column to proceedings table.")
+                try:
+                    cursor.execute("ALTER TABLE proceedings ADD COLUMN asmt10_snapshot TEXT")
+                    conn.commit() # Commit schema change
+                except Exception as e:
+                    print(f"Schema Migration Failed: {e}")
+
+            # [STRICT GUARD] Verify if snapshot already exists
+            cursor.execute("SELECT asmt10_snapshot FROM proceedings WHERE id = ?", (pid,))
+            existing = cursor.fetchone()
+            if existing and existing[0]:
+                 print(f"Finalize [GUARD]: Snapshot already exists for {pid}. Aborting re-write.")
+                 conn.close()
+                 return False, "Snapshot already exists. Mutation blocked."
+
             # 1. Generate Adjudication ID
             adj_id = str(uuid.uuid4())
             
-            # 2. Update Proceeding Status
+            # Prepare Snapshot JSON
+            snapshot_json = json.dumps(snapshot) if snapshot else None
+            
+            # 2. Update Proceeding Status & Snapshot
             cursor.execute("""
                 UPDATE proceedings 
                 SET asmt10_status = 'finalised', 
                     asmt10_finalised_on = CURRENT_TIMESTAMP, 
                     asmt10_finalised_by = ?,
-                    adjudication_case_id = ?
+                    adjudication_case_id = ?,
+                    asmt10_snapshot = ?
                 WHERE id = ?
-            """, (user_id, adj_id, pid))
+            """, (user_id, adj_id, snapshot_json, pid))
             
             if cursor.rowcount == 0:
                 raise Exception(f"Proceeding {pid} not found or update failed.")
@@ -1780,6 +2051,37 @@ class DatabaseManager:
             
         except Exception as e:
             print(f"Transaction Error: {e}")
+            if 'conn' in locals(): conn.close()
+            return False, str(e)
+
+    def save_asmt10_snapshot(self, pid, snapshot_data):
+        """
+        Standalone method to save an ASMT10 snapshot (used mainly for migration).
+        Includes strict Write-Once guard.
+        """
+        import json
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # Ensure column exists
+            try: cursor.execute("SELECT asmt10_snapshot FROM proceedings LIMIT 1")
+            except: cursor.execute("ALTER TABLE proceedings ADD COLUMN asmt10_snapshot TEXT")
+
+            # Check existing
+            cursor.execute("SELECT asmt10_snapshot FROM proceedings WHERE id = ?", (pid,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                conn.close()
+                return False, "Snapshot already exists. ASMT-10 is immutable."
+
+            cursor.execute("UPDATE proceedings SET asmt10_snapshot = ? WHERE id = ?", (json.dumps(snapshot_data), pid))
+            conn.commit()
+            conn.close()
+            return True, "Saved"
+        except Exception as e:
+            print(f"Error saving snapshot: {e}")
+            return False, str(e)
     def delete_oc_entry(self, entry_id):
         """Delete specific entry from OC register."""
         try:

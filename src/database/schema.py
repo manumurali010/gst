@@ -51,7 +51,8 @@ def init_db():
         "asmt10_status TEXT",
         "asmt10_finalised_on TIMESTAMP",
         "asmt10_finalised_by TEXT",
-        "adjudication_case_id TEXT"
+        "adjudication_case_id TEXT",
+        "asmt10_snapshot TEXT"
     ]
     
     for col_def in migration_cols:

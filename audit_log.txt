@@ -1,0 +1,14 @@
+[2026-01-19T22:19:27.551264] [ERROR] Analysis failed: FATAL INVARIANT FAILURE: Issue 'SECTION_16_4_VIOLATION' cannot be mapped to an SOP Point. DB and Fallback failed. | Context: {'error': "FATAL INVARIANT FAILURE: Issue 'SECTION_16_4_VIOLATION' cannot be mapped to an SOP Point. DB and Fallback failed."}
+[2026-01-19T22:44:49.639502] [ERROR] Analysis failed: year must be in 1..9999, not 202023 | Context: {'error': 'year must be in 1..9999, not 202023'}
+[2026-01-19T22:45:05.493772] [ERROR] Analysis failed: year must be in 1..9999, not 202023 | Context: {'error': 'year must be in 1..9999, not 202023'}
+[2026-01-19T22:47:39.840567] [ERROR] Analysis failed: year must be in 1..9999, not 202023 | Context: {'error': 'year must be in 1..9999, not 202023'}
+[2026-01-19T22:47:53.570981] [ERROR] Analysis failed: year must be in 1..9999, not 202023 | Context: {'error': 'year must be in 1..9999, not 202023'}
+[2026-01-19T23:00:30.356986] [ERROR] Analysis failed: year must be in 1..9999, not 202023 | Context: {'error': 'year must be in 1..9999, not 202023'}
+[2026-01-19T23:09:55.322466] [ERROR] Analysis failed: year must be in 1..9999, not 202023 | Context: {'error': 'year must be in 1..9999, not 202023'}
+[2026-01-19T23:13:23.743852] [ERROR] Analysis failed: year must be in 1..9999, not 202023 | Context: {'error': 'year must be in 1..9999, not 202023'}
+[2026-01-19T23:21:41.129330] [ERROR] Analysis failed: year must be in 1..9999, not 202023 | Context: {'error': 'year must be in 1..9999, not 202023'}
+[2026-01-19T23:31:51.960856] [ERROR] Analysis failed: 'str' object has no attribute 'get' | Context: {'error': "'str' object has no attribute 'get'"}
+[2026-01-20T11:24:43.525924] [ERROR] Analysis failed: ILLEGAL STATE TRANSITION: INIT -> ANALYZED | Context: {'error': 'ILLEGAL STATE TRANSITION: INIT -> ANALYZED'}
+[2026-01-21T22:36:17.180854] [ERROR] Analysis failed: 'ScrutinyParser' object has no attribute '_parse_group_b_itc_summary' | Context: {'error': "'ScrutinyParser' object has no attribute '_parse_group_b_itc_summary'"}
+[2026-02-04 11:57:39,388] [ERROR] Error extracting GSTR-3B metadata from D:/WORK/Scrutiny 2022-23/scrutinyfinolexcables202223/GSTR3B_32AAACF2637D1Z9_032023.pdf: name 'results' is not defined
+[2026-02-04 13:46:06,664] [ERROR] Error extracting GSTR-1 metadata from D:/WORK/Scrutiny 2022-23/scrutinyfinolexcables202223/GSTR-1_IFF_32AAACF2637D1Z9_032023.pdf: name 're_IGNORECASE' is not defined
