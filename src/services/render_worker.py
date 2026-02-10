@@ -10,11 +10,17 @@ import base64
 def render_html_to_png(html_content, output_path):
     """
     Renders HTML content to a PNG image using WeasyPrint.
+    [FIX] Enforces continuous scrolling (no pagination) for PNGs.
     """
     try:
-        from weasyprint import HTML
-        # Render HTML to PNG
-        HTML(string=html_content).write_png(output_path)
+        from weasyprint import HTML, CSS
+        
+        # [FIX] Inject CSS to force continuous page height
+        # This ensures the PNG captures the full content height instead of just one A4 page.
+        continuous_css = CSS(string="@page { size: 1000px auto; margin: 0; }")
+        
+        # Render HTML to PNG with stylesheets
+        HTML(string=html_content).write_png(output_path, stylesheets=[continuous_css])
         return True, "Success"
     except OSError as e:
         # Catch Windows DLL errors (missing GTK)

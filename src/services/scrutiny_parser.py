@@ -2520,7 +2520,7 @@ class ScrutinyParser:
             "description": "Point 4- All Other ITC (GSTR 3B vs GSTR 2B)",
             "total_shortfall": round(total_shortfall),
             "status": status,
-            "status_msg": "Analysis Completed" if status != "info" else "Data Missing",
+            "status_msg": self._format_status_msg(status, total_shortfall, "DATA_MISSING"),
             "summary_table": {
                 "columns": ["Description", "CGST", "SGST", "IGST", "Cess"],
                 "rows": [

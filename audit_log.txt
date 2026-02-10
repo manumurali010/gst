@@ -12,3 +12,4 @@
 [2026-01-21T22:36:17.180854] [ERROR] Analysis failed: 'ScrutinyParser' object has no attribute '_parse_group_b_itc_summary' | Context: {'error': "'ScrutinyParser' object has no attribute '_parse_group_b_itc_summary'"}
 [2026-02-04 11:57:39,388] [ERROR] Error extracting GSTR-3B metadata from D:/WORK/Scrutiny 2022-23/scrutinyfinolexcables202223/GSTR3B_32AAACF2637D1Z9_032023.pdf: name 'results' is not defined
 [2026-02-04 13:46:06,664] [ERROR] Error extracting GSTR-1 metadata from D:/WORK/Scrutiny 2022-23/scrutinyfinolexcables202223/GSTR-1_IFF_32AAACF2637D1Z9_032023.pdf: name 're_IGNORECASE' is not defined
+[2026-02-10 10:22:40,519] [ERROR] Error extracting GSTR-1 metadata from D:/WORK/Scrutiny 2022-23/scrutinyfinolexcables202223/GSTR-1_IFF_32AAACF2637D1Z9_032023.pdf: name 're_IGNORECASE' is not defined

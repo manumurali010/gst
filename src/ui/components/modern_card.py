@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QGraphicsDropShadowEffect, QPushButton, QWidget
+from PyQt6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QGraphicsDropShadowEffect, QPushButton, QWidget, QSizePolicy
 from PyQt6.QtCore import Qt, QPropertyAnimation, QParallelAnimationGroup
 from PyQt6.QtGui import QColor, QIcon
 
@@ -10,6 +10,12 @@ class ModernCard(QFrame):
     def __init__(self, title=None, parent=None, collapsible=True):
         super().__init__(parent)
         self.setObjectName("ModernCard")
+        
+        # [FIX] Strict Layout Policy
+        # Horizontal: Expanding (Take full width)
+        # Vertical: Preferred (Respect content size, allow growing if needed, but shrink when hidden)
+        # 'Maximum' caused overlap because QTableWidget reports a small sizeHint, squashing the card.
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         
         # Main Layout
         self.main_layout = QVBoxLayout(self)

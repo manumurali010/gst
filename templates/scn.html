@@ -14,34 +14,38 @@
 
         /* Preview Mode: A4 Simulation */
         body {
-            background-color: #525659;
-            /* [User Req] Reference Gray */
+            background-color: white;
+             /* [User Req] Pure White Background (was #525659) */
             margin: 0;
-            padding: 40px;
+            padding: 20px;
         }
 
         .page-container {
             background-color: white;
-            width: 210mm;
-            /* [User Req] A4 Width */
+            /* [User Req] Remove Fixed Width for Preview to prevent horizontal scroll */
+            /* width: 210mm; */
+            max-width: 210mm;
+            width: auto;
             min-height: 297mm;
-            padding: 20mm;
+            /* padding: 20mm; */ 
+            padding: 10mm;
             margin: 0 auto;
-            /* [Fix] Robust Centering */
-            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+            /* [Fix] Removed Box Shadow */
+            /* box-shadow: 0 0 15px rgba(0, 0, 0, 0.5); */
             box-sizing: border-box;
             display: block;
         }
 
         p {
-            margin-bottom: 10px;
+            margin-bottom: 15px;
             text-align: justify;
             /* [User Req] Justify alignment */
         }
-
+        
         .header {
             text-align: center;
             font-weight: bold;
+            font-size: 11pt; /* [User Req] 11pt */
         }
 
         .right-align {
@@ -73,7 +77,8 @@
         <!-- Letterhead -->
         {{ letter_head | safe }}
 
-        <table style="border: none; width: 100%; margin-bottom: 20px;">
+        <!-- [User Req] No Gap needed between Letter head and OC No -->
+        <table style="border: none; width: 100%; margin-top: 0px; margin-bottom: 20px;">
             <tbody>
                 <tr style="border: none;">
                     <td style="border: none; text-align: left; width: 50%;">
@@ -86,7 +91,7 @@
             </tbody>
         </table>
 
-        <div style="text-align: center; font-weight: bold; margin-bottom: 20px;">
+        <div style="text-align: center; font-weight: bold; font-size: 11pt; margin-bottom: 20px;">
             SHOW CAUSE NOTICE No. {{ scn_no }}/{{ current_financial_year }}/GST-{{ designation }}
         </div>
 

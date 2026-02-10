@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-                             QListWidget, QStackedWidget, QSplitter, QScrollArea, QTextEdit, 
+                             QListWidget, QStackedWidget, QSplitter, QScrollArea, QTextEdit, QTextBrowser,
                              QMessageBox, QFrame, QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView, QDateEdit, QComboBox, QLineEdit, QFileDialog, QDialog, QGridLayout, QSpacerItem, QSizePolicy)
 from PyQt6.QtCore import Qt, QTimer, QDate, pyqtSignal
 from PyQt6 import QtCore
@@ -17,6 +17,7 @@ from src.ui.components.finalization_panel import FinalizationPanel
 from src.services.asmt10_generator import ASMT10Generator
 import os
 import json
+import copy
 from jinja2 import Template, Environment, FileSystemLoader
 import datetime
 
@@ -612,7 +613,24 @@ class ProceedingsWorkspace(QWidget):
         
         return {}
 
+    def _clear_scn_workspace_state(self):
+        """Reset SCN workspace to pristine state before loading new data."""
+        if hasattr(self, 'scn_issue_cards'):
+            for card in self.scn_issue_cards:
+                card.setParent(None)
+                if hasattr(self, 'scn_issues_layout'):
+                    self.scn_issues_layout.removeWidget(card)
+                card.deleteLater()
+            self.scn_issue_cards = []
+            
+        # Reset Workflow Flags
+        self.scn_issues_initialized = False
+        self.scn_workflow_phase = "METADATA"
+
     def load_proceeding(self, pid):
+        # [FIX] State Persistence: Clear existing workspace first
+        self._clear_scn_workspace_state()
+        
         self.is_hydrated = False
         self.proceeding_id = pid
         self.proceeding_data = self.db.get_proceeding(pid)
@@ -698,15 +716,16 @@ class ProceedingsWorkspace(QWidget):
                 background-color: white;
                 border-left: 1px solid #dadce0;
                 border-bottom: 1px solid #dadce0;
+                /* [FIX] Pure White, No Shadow as requested */
             }
         """)
         
-        # Drop Shadow
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(15)
-        shadow.setOffset(-2, 0)
-        shadow.setColor(Qt.GlobalColor.lightGray) # Using global color enum
-        self.preview_pane_widget.setGraphicsEffect(shadow)
+        # [FIX] Removed Shadow Effect
+        # shadow = QGraphicsDropShadowEffect(self)
+        # shadow.setBlurRadius(15)
+        # shadow.setOffset(-2, 0)
+        # shadow.setColor(Qt.GlobalColor.lightGray) # Using global color enum
+        # self.preview_pane_widget.setGraphicsEffect(shadow)
         
         # Focus Safety (Critical)
         self.preview_pane_widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -744,27 +763,19 @@ class ProceedingsWorkspace(QWidget):
         preview_header.addWidget(btn_close)
         
         self.preview_pane_layout.addLayout(preview_header)
+    
+        # [FIX] Switched from Image-based (WeasyPrint PNG) to Native HTML Preview (QTextBrowser)
+        # Reason 1: WeasyPrint new versions dropped write_png support, causing crashes.
+        # Reason 2: QTextBrowser provides native scrolling and text selection.
         
-        # Scroll Area for documents
-        self.preview_scroll = QScrollArea()
-        self.preview_scroll.setWidgetResizable(True)
-        self.preview_scroll.setStyleSheet("border: none; background-color: #f8f9fa;")
+        self.preview_browser = QTextBrowser()
+        self.preview_browser.setOpenExternalLinks(False) # or True if we want to allow links
+        self.preview_browser.setStyleSheet("border: none; background-color: white;")
+        self.preview_browser.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         
-        # Ensure scroll area doesn't steal focus either
-        self.preview_scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.preview_pane_layout.addWidget(self.preview_browser)
         
-        self.preview_content_widget = QWidget()
-        self.preview_content_widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        
-        self.preview_content_layout = QVBoxLayout(self.preview_content_widget)
-        self.preview_content_layout.setSpacing(20)
-        self.preview_content_layout.setContentsMargins(20, 20, 20, 20)
-        self.preview_content_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-        
-        self.preview_scroll.setWidget(self.preview_content_widget)
-        self.preview_pane_layout.addWidget(self.preview_scroll)
-        
-        # Canonical pointer
+        # Canonical pointer (kept for compatibility with resize logic usage)
         self.preview_container = self.preview_pane_widget
 
     def create_side_nav_layout(self, items, page_changed_callback=None):
@@ -2579,6 +2590,16 @@ class ProceedingsWorkspace(QWidget):
                                        f"The issue '{issue_name}' has already been added to the draft.")
                  return
 
+            # [FIX] JIT Repair for Insertion (Safety Net)
+            if template:
+                tgt_grid = template.get('grid_data')
+                if tgt_grid and isinstance(tgt_grid, dict):
+                    cols = tgt_grid.get('columns')
+                    if isinstance(cols, list) and cols and not isinstance(cols[0], dict):
+                         print(f"  - JIT Repair (Insert): Upgrading string columns for {template.get('issue_id')}")
+                         new_cols = [{"id": f"col{i}", "label": str(c)} for i, c in enumerate(cols)]
+                         tgt_grid['columns'] = new_cols
+
             self.add_scn_issue_card(
                 template=template,
                 data=data,
@@ -3124,6 +3145,19 @@ class ProceedingsWorkspace(QWidget):
                  elif isinstance(summary_table, dict) and 'rows' in summary_table:
                       print(f"Direct Pass-Through of Summary Table for {issue_id}")
                       final_grid = summary_table
+                      
+                      # [FIX] Enforce Canonical Column Schema (Prevent Metadata Loss)
+                      # If columns are strings, upgrade them immediately.
+                      cols = final_grid.get('columns')
+                      if isinstance(cols, list) and cols and not isinstance(cols[0], dict):
+                          print(f"Detected Legacy String Columns for {issue_id} -> Upgrading to Canonical Schema")
+                          new_cols = []
+                          for i, col_val in enumerate(cols):
+                              # Generate ID: col0, col1...
+                              # Use value as Label
+                              new_cols.append({"id": f"col{i}", "label": str(col_val)})
+                          final_grid['columns'] = new_cols
+
                  else:
                       # [FIX] Trap for Legacy Scrutiny Dicts (without 'rows') -> Force Normalization
                       print(f"Legacy Scrutiny Table detected for {issue_id} -> Normalizing")
@@ -3266,19 +3300,41 @@ class ProceedingsWorkspace(QWidget):
                 
                 # Rule: NEVER consult Issue Master for restored issues.
                 # Use the template snapshot embedded in the data payload.
-                template = data_payload.get('template_snapshot')
+                template_snapshot = data_payload.get('template_snapshot')
                 
-                if not template:
-                     print(f"WARNING: No template snapshot for {issue_id}. Fallback to Master (Legacy).")
-                     template = self.db.get_issue(issue_id) or self.db.get_issue_by_name(issue_id)
+                # [FIX] Hydration Data Flow: Authoritative Master Merge
+                # Problem: Snapshot might be "hollow" (missing issue_name, brief_facts_scn).
+                # Solution: Fetch Master (if available) and overlay snapshot data.
+                
+                master_template = self.db.get_issue(issue_id) or self.db.get_issue_by_name(issue_id)
+                
+                if master_template:
+                     # 1. Base is Master (Identity + Static Text + Logic)
+                     template = copy.deepcopy(master_template)
                      
+                     # 2. Overlay Snapshot State (The "Values")
+                     if template_snapshot:
+                          # Preserve User Edits / Specific Tables (ASMT10)
+                          if 'grid_data' in template_snapshot:
+                               template['grid_data'] = template_snapshot['grid_data']
+                          if 'variables' in template_snapshot:
+                               template['variables'] = template_snapshot['variables']
+                               
+                     # Note: We purposely do NOT overlay 'issue_name' or 'templates' from snapshot
+                     # to ensure we get the latest corrections from Master.
+                else:
+                     # Fallback: Trust Snapshot if Master gone (e.g. ad-hoc/custom issues)
+                     template = template_snapshot
+                     if not template:
+                          print(f"WARNING: No template snapshot or master for {issue_id}.")
+
                 if not template:
-                    # Absolute fallback for corrupted IDs
-                    template = {
+                     # Absolute fallback for corrupted IDs
+                     template = {
                         'issue_id': issue_id, 
                         'issue_name': data_payload.get('issue', 'Issue'),
                         'variables': {}
-                    }
+                     }
                 
                 
                 # Extract values from payload structure
@@ -3352,6 +3408,21 @@ class ProceedingsWorkspace(QWidget):
                          print(f"  - Repair Error: {e}")
 
                 print(f"[BRIDGE DIAG] hydrate_scn: Preparing card {issue_id}. restore_data[table_data] type: {type(restore_data.get('table_data'))}")
+                
+                # [FIX] JIT Repair for Legacy Snapshots (Failed Strictness Check)
+                # Existing snapshots in DB may have string-columns. Upgrade them NOW.
+                for target in [template, restore_data]:
+                    tgt_grid = None
+                    if target == template: tgt_grid = target.get('grid_data')
+                    else: tgt_grid = target.get('table_data')
+                    
+                    if tgt_grid and isinstance(tgt_grid, dict):
+                        cols = tgt_grid.get('columns')
+                        if isinstance(cols, list) and cols and not isinstance(cols[0], dict):
+                             print(f"  - JIT Repair: Upgrading string columns for {issue_id}")
+                             new_cols = [{"id": f"col{i}", "label": str(c)} for i, c in enumerate(cols)]
+                             tgt_grid['columns'] = new_cols
+
                 if template:
                     print(f"  - Template has grid_data? {'grid_data' in template}")
                 
@@ -3866,40 +3937,34 @@ class ProceedingsWorkspace(QWidget):
             return
 
         # 4. Render to UI
-        if not hasattr(self, 'preview_content_layout'):
-            return
-            
         # Target Header
         if hasattr(self, 'preview_label_widget'):
             self.preview_label_widget.setText(header_text)
 
-        # Clear existing
-        self._clear_preview()
-        
-        # Calculate width
-        target_width = self.preview_scroll.width() - 50 if hasattr(self, 'preview_scroll') else 800
-        if target_width < 100: target_width = 800
-
-        # Generate Images
-        images = PreviewGenerator.generate_preview_image(html, all_pages=True)
-        if images:
-            for img_bytes in images:
-                pixmap = PreviewGenerator.get_qpixmap_from_bytes(img_bytes)
-                if pixmap:
-                    scaled_pixmap = pixmap.scaledToWidth(target_width, Qt.TransformationMode.SmoothTransformation)
-                    lbl = QLabel()
-                    lbl.setPixmap(scaled_pixmap)
-                    lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    lbl.setStyleSheet("border: 1px solid #dadce0; margin-bottom: 10px; background-color: white;")
-                    self.preview_content_layout.addWidget(lbl)
-        else:
-            self.preview_content_layout.addWidget(QLabel("Preview generation failed"))
+        # [FIX] Direct HTML Rendering via QTextBrowser
+        # Bypasses the fragile Image Generation pipeline (WeasyPrint PNG)
+        if hasattr(self, 'preview_browser'):
+            # Ensure base URL is set for any relative resource resolution (if needed)
+            self.preview_browser.setHtml(html)
+            
+        # Legacy Fallback cleanup (if old widgets exist)
+        if hasattr(self, 'preview_content_layout'):
+            # If we accidentally have both, clear the old layout
+            while self.preview_content_layout.count():
+                item = self.preview_content_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
 
     def _clear_preview(self):
-        if not hasattr(self, 'preview_content_layout'): return
-        while self.preview_content_layout.count():
-            item = self.preview_content_layout.takeAt(0)
-            if item.widget(): item.widget().deleteLater()
+        # [FIX] Clear Native Browser
+        if hasattr(self, 'preview_browser'):
+            self.preview_browser.setHtml("")
+            
+        # Legacy cleanup
+        if hasattr(self, 'preview_content_layout'):
+            while self.preview_content_layout.count():
+                item = self.preview_content_layout.takeAt(0)
+                if item.widget(): item.widget().deleteLater()
 
     def generate_drc01a_html(self):
         if not self.proceeding_data:

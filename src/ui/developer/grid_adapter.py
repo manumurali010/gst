@@ -38,15 +38,13 @@ class GridAdapter:
                 return data
             elif not cols and not data['rows']:
                 return data
-            # If columns exist but are NOT dicts (e.g. strings), fall through to re-normalization
+            # If columns exist but are NOT dicts (e.g. strings), FAIL FAST
             if isinstance(cols, list) and len(cols) > 0 and not isinstance(cols[0], dict):
-                print("[GridAdapter] Detected pseudo-canonical data (string columns). Re-normalizing.")
-                # We need to treat this as partial data. 
-                # If rows are already normalized (dicts of {value:.., type:..}), we just need to fix columns?
-                # Or if rows are just dicts of values?
-                # The user says "columns is a list of strings instead of dicts".
-                # If rows are [{'Tax': 100}], we can treat this as Case 1 (List of Dicts) by just passing 'rows'.
-                return GridAdapter.normalize_to_schema(data['rows'])
+                # [USER REQUEST] GridAdapter must not "fix" string columns -- it should reject them.
+                # This ensures upstream sources (like SCN conversion) MUST output canonical data.
+                error_msg = "[GridAdapter] CRITICAL: Detected pseudo-canonical data (string columns). Rejected to prevent corruption."
+                print(error_msg)
+                raise ValueError(error_msg)
 
             
         # Case 1: List of Dicts [{"A": 1}, {"A": 2}]

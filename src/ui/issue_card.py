@@ -17,6 +17,9 @@ class IssueCard(QFrame):
     contentChanged = pyqtSignal()
     
     from src.ui.developer.grid_adapter import GridAdapter
+    
+    # [CONST] Idempotency Contract
+    CANONICAL_PLACEHOLDER = "[Enter Brief Facts here]"
 
     def __init__(self, template, data=None, parent=None, mode="DRC-01A", content_key="content", save_template_callback=None, issue_number=None):
         super().__init__(parent)
@@ -26,10 +29,24 @@ class IssueCard(QFrame):
         
         self.mode = mode
         self.content_key = content_key
+        # [STATE OWNERSHIP] Capture persisted content for strict restoration
+        self.saved_content = data.get(content_key) if data else None
+        
         self.issue_number = issue_number
         self.save_template_callback = save_template_callback
         
         # [IDENTITY BOOTSTRAP] Minimal state for init_ui
+        self.issue_id = self.template.get('issue_id', 'unknown')
+        
+        # [INVARIANT] 1. Header Title Derivation (Computed ONCE)
+        # Priority: issue_name > formatted(issue_id)
+        raw_name = self.template.get('issue_name', '')
+        if not raw_name or raw_name == 'Issue':
+             # Fallback to ID title-cased (e.g. IMPORT_ITC_MISMATCH -> Import Itc Mismatch)
+             self.display_title = self.issue_id.replace('_', ' ').title()
+        else:
+             self.display_title = raw_name
+             
         self.variables = self.template.get('variables', {}).copy()
         self.calc_logic = self.template.get('calc_logic', "")
         self.tax_mapping = self.template.get('tax_demand_mapping', {})
@@ -64,8 +81,15 @@ class IssueCard(QFrame):
              print(f"[IssueCard DIAG] Resolving grid_data from Template Default")
              
         if raw_grid_data:
-             # Canonical Lock: Normalize exactly once.
-             self.grid_data = self.GridAdapter.normalize_to_schema(raw_grid_data)
+             # Canonical Lock: Assert normalization happened upstream.
+             # [STRICT CONTRACT] IssueCard expects pre-normalized data.
+             if isinstance(raw_grid_data, dict) and 'columns' in raw_grid_data and len(raw_grid_data['columns']) > 0:
+                 if not isinstance(raw_grid_data['columns'][0], dict):
+                     print(f"[IssueCard CRITICAL] Non-canonical columns detected! {raw_grid_data['columns'][0]}")
+                     # raise ValueError("IssueCard received non-canonical grid data") 
+                     # For now, print critical error but allow proceed if empty
+
+             self.grid_data = raw_grid_data
              print(f"[IssueCard DIAG] Canonical Grid Locked. Rows: {len(self.grid_data.get('rows', []))}")
              
              # [BOOTSTRAP] Variable Extraction (Read-Only)
@@ -125,18 +149,23 @@ class IssueCard(QFrame):
         self.setFrameStyle(QFrame.Shape.NoFrame)
         self.setStyleSheet("background: transparent;")
         
-        self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(0,0,0,0)
+        # [FIX] Layout Safety: Check existing before creating
+        if self.layout():
+            self.main_layout = self.layout()
+        else:
+            self.main_layout = QVBoxLayout(self)
+            self.main_layout.setContentsMargins(0,0,0,0)
         
         # 1. Top-Level Card (Host)
-        # Title determination
-        base_title = self.template.get('issue_name', 'Issue')
-        if base_title == 'Issue' or not base_title:
-             base_title = self.template.get('category', 'Issue')
-             
-        title_text = base_title
+        # [FIX] UI Header Title logic
+        # Constraint: init_ui must NOT compute title, only decorate it.
+        title_text = self.display_title
+        
         if self.mode == "SCN":
-             title_text += " (SCN Draft)"
+             # Ensure we don't duplicate if title already has it (unlikely but safe)
+             if "(SCN Draft)" not in title_text:
+                 title_text += " (SCN Draft)"
+        
         if self.issue_number:
             title_text = f"Issue {self.issue_number} – {title_text}"
 
@@ -180,18 +209,20 @@ class IssueCard(QFrame):
         header_layout.addWidget(self.remove_btn)
         
         # 3. Body Structure (Nested Cards)
-        # Using body_stack for overlay capability, but inside the Card
-        from PyQt6.QtWidgets import QStackedLayout
-        self.body_container = QWidget()
-        self.body_stack = QStackedLayout(self.body_container)
-        self.body_stack.setStackingMode(QStackedLayout.StackingMode.StackAll)
+        # [FIX] Simplified Layout (No StackAll)
+        # Directly use the ModernCard's content layout (Strict API usage)
         
-        # Layer 1: Content (Sub-cards)
-        self.content_widget = QWidget()
-        content_layout = QVBoxLayout(self.content_widget)
-        content_layout.setContentsMargins(0,0,0,0)
-        content_layout.setSpacing(10)
+        main_card_layout = self.card.content_layout
         
+        # [DEBUG] Hierarchy Check
+        print(f"[IssueCard DIAG] main_card_layout type: {type(main_card_layout)}")
+        print(f"[IssueCard DIAG] main_card_layout parent: {main_card_layout.parentWidget()}")
+        
+        p = main_card_layout.parentWidget()
+        while p:
+            print(f"[IssueCard DIAG] Ancestor: {p} | Layout: {type(p.layout()) if p.layout() else 'None'}")
+            p = p.parentWidget()
+
         # 3.1 Issue Data Card
         self.data_card = ModernCard("Issue Data", collapsible=True)
         
@@ -199,58 +230,44 @@ class IssueCard(QFrame):
         issue_id = self.template.get('issue_id')
         if issue_id == 'IMPORT_ITC_MISMATCH':
              print(f"[SOP-10 UI DIAG] init_ui: Issue ID={issue_id}")
-             print(f"[SOP-10 UI DIAG] Template Keys: {list(self.template.keys())}")
-             print(f"[SOP-10 UI DIAG] Has 'grid_data'? {bool(self.template.get('grid_data'))}")
-             print(f"[SOP-10 UI DIAG] Has 'tables'? {bool(self.template.get('tables'))}")
-             print(f"[SOP-10 UI DIAG] Has 'summary_table'? {bool(self.template.get('summary_table'))}")
-             
-             # [LOG 5] Explicitly Check Layout Clearing
-             # Although init_ui creates new widgets, if re-used, we check if layout is clean.
-             print(f"[SOP-10 DIAG] Clearing layout check: Layout count before add: {content_layout.count()}")
+             # ... (keep logs)
 
         print(f"[IssueCard DIAG] init_ui: Checking UI branches for {issue_id}")
         self.grid_container = self.data_card # Store for late-binding
         
-        # Check if we have grid_data (Excel Import) or legacy placeholders
-        # [UNCONDITIONAL RENDERING] Render if key exists, even if empty/pending
+        # Check if we have grid_data...
         if 'grid_data' in self.template:
-             print(f"[IssueCard DIAG] init_ui: Branch -> init_grid_ui (grid_data). Truthiness: {bool(self.template['grid_data'])}")
-             if issue_id == 'IMPORT_ITC_MISMATCH': print("[SOP-10 UI DIAG] Branch: init_grid_ui (grid_data)")
+             # ... (init_grid_ui calls)
              self.init_grid_ui(self.grid_container)
         elif self.template.get('summary_table'):
-             # SOP-10 / ASMT-10 Unified Schema Support
-             if issue_id == 'IMPORT_ITC_MISMATCH': print("[SOP-10 UI DIAG] Branch: init_grid_ui (summary_table)")
-             # Map 'summary_table' to 'grid_data' expected by renderer if grid_data is missing
              self.init_grid_ui(self.data_card, data=self.template['summary_table'])
         elif 'tables' in self.template and isinstance(self.template['tables'], list):
-            # SOP-5 Multi-Table Support
             for tbl in self.template['tables']:
                 if tbl.get('title'):
-                    # Helper title - QLabel is already imported at module level
                     t_lbl = QLabel(f"<b>{tbl.get('title')}</b>")
                     t_lbl.setStyleSheet("color: #34495e; margin-top: 10px; margin-bottom: 5px;")
                     self.data_card.addWidget(t_lbl)
                 self.init_grid_ui(self.data_card, data=tbl)
         elif isinstance(self.template.get('tables'), dict):
             self.init_excel_table_ui(self.data_card)
-            
-        # Also load legacy placeholders if they exist (Hybrid Mode)
+        
         if self.template.get('placeholders'):
             self.init_legacy_ui(self.data_card)
             
-        content_layout.addWidget(self.data_card)
+        main_card_layout.addWidget(self.data_card)
             
-        
         # 3.2 Draft Content Card
         self.draft_card = ModernCard("Draft Content", collapsible=True)
         self.editor = RichTextEditor()
-        self.editor.setMinimumHeight(200) # Drafting focus height
+        self.editor.setMinimumHeight(200)
         self.update_editor_content()
         self.editor.textChanged.connect(self.contentChanged.emit)
         self.draft_card.addWidget(self.editor)
         
         # Connect Draft Focus Mode
-        self.draft_card.toggle_btn.clicked.connect(self._on_draft_focus_changed)
+        # [FIX] Removed Focus Mode (Opacity) as it caused visual artifacts ("Grey" card) 
+        # and potential z-order compositing errors.
+        # self.draft_card.toggle_btn.clicked.connect(self._on_draft_focus_changed)
         
         # Mini Totals (Inside Data Card)
         totals_layout = QHBoxLayout()
@@ -270,51 +287,31 @@ class IssueCard(QFrame):
         self.sync_warning.hide()
         self.draft_card.addWidget(self.sync_warning)
         
-        content_layout.addWidget(self.draft_card)
-        
-        # Add Content to Stack
-        self.body_stack.addWidget(self.content_widget)
-        
-        # Layer 2: Blocking Overlay (Only covers body)
-        self.overlay = QFrame()
-        self.overlay.setStyleSheet("background-color: rgba(255, 255, 255, 180); border-radius: 5px;")
-        self.overlay.hide()
-        self.body_stack.addWidget(self.overlay)
-        
-        # Add Body to Main Card
-        self.card.addWidget(self.body_container)
+        main_card_layout.addWidget(self.draft_card)
         
         # Add Main Card to Layout
         self.main_layout.addWidget(self.card)
         
-    def _set_opacity(self, widget, opacity):
-        """Helper to apply opacity effect"""
-        effect = QGraphicsOpacityEffect(widget)
-        effect.setOpacity(opacity)
-        widget.setGraphicsEffect(effect)
-
     def _on_inclusion_changed(self, state):
         if self.origin == "ASMT10":
             # RE-ENFORCE: Include/Exclude forbidden for derived issues
             self.include_cb.setChecked(True)
             return
- 
+
         self.is_included = (state == 2) # Qt.CheckState.Checked
         
         # GUARD: Visual Muting Only (No blocking overlay)
         # self.overlay.setVisible(not self.is_included) 
         
-        opacity = 1.0 if self.is_included else 0.5
-        self._set_opacity(self.card, opacity)
+        # [FIX] Simplified Inclusion Feedback (No Opacity)
+        # opacity = 1.0 if self.is_included else 0.5
+        # self._set_opacity(self.card, opacity)
             
         self.valuesChanged.emit(self.get_tax_breakdown())
         
     def _on_draft_focus_changed(self):
-        """Focus Mode: Dim the Data Card when Draft is expanded"""
-        is_draft_expanded = self.draft_card.toggle_btn.isChecked()
-        # If draft is expanded, dim the data card to 0.6. Else restore to 1.0
-        opacity = 0.6 if is_draft_expanded else 1.0
-        self._set_opacity(self.data_card, opacity)
+        """Focus Mode: Deprecated to prevent layout/z-order artifacts."""
+        pass
  
     def set_classification(self, origin="SCN", status="ACTIVE", drop_reason=None):
         """Flexible Classification Setter (Informational)"""
@@ -601,13 +598,17 @@ class IssueCard(QFrame):
 
     def bind_grid_data(self, grid_data, layout=None, sub_data=None):
         """Strictly UI-only binding. Idempotent and reversible. Expects CANONICAL data."""
-        # [STATE OWNERSHIP] Assertion: Input must be canonical. No re-normalization.
-        # Check basic schema compliance
+        # [ARCH INVARIANT] Grid Normalization MUST NOT happen here.
+        # Function expects already-canonical data.
+        
+        # 1. Strict Schema Assertion
         if not isinstance(grid_data, dict) or 'rows' not in grid_data:
-             print("[IssueCard ERROR] bind_grid_data received non-canonical data! Attempting safe normalization (Performance Hit).")
-             grid_data = self.GridAdapter.normalize_to_schema(grid_data)
-             
-        normalized = grid_data # It is already normalized
+             print(f"[IssueCard CRITICAL] bind_grid_data received INVALID schema for {self.issue_id}. Aborting bind.")
+             # We do NOT try to fix it. We fail safe.
+             return
+
+        # 2. Schema is valid -> Proceed
+        normalized = grid_data 
 
         # [MANDATORY] Late-Initialization Gate: Ensure self.table exists
         if not hasattr(self, 'table'):
@@ -709,12 +710,14 @@ class IssueCard(QFrame):
         if not grid_data:
             return
 
+        # [FIX] Normalize BEFORE binding to satisfy strict invariant
         normalized = self.GridAdapter.normalize_to_schema(grid_data)
         rows = normalized.get('rows', [])
         
         if rows:
             print(f"[IssueCard DIAG] EXITING SKELETON MODE – binding real grid_data (Rows={len(rows)})")
-            self.bind_grid_data(grid_data, self.grid_container)
+            # Pass NORMALIZED data, not raw grid_data
+            self.bind_grid_data(normalized, self.grid_container)
             if hasattr(self, 'table'):
                  self.table.show()
 
@@ -764,6 +767,30 @@ class IssueCard(QFrame):
             
         self.variables[var_name] = val
         
+        # [FIX] Sync to Canonical Grid Data Source (Robust via Index)
+        try:
+            if self.grid_data and 'rows' in self.grid_data:
+                row_idx = item.row()
+                col_idx = item.column()
+                
+                rows = self.grid_data.get('rows', [])
+                cols = self.grid_data.get('columns', [])
+                
+                if 0 <= row_idx < len(rows) and 0 <= col_idx < len(cols):
+                    # Resolve Column ID from Schema Order
+                    col_id = cols[col_idx].get('id')
+                    if col_id:
+                        # Locate cell dict in canonical source
+                        row_dict = rows[row_idx]
+                        if col_id in row_dict:
+                            if isinstance(row_dict[col_id], dict):
+                                row_dict[col_id]['value'] = val
+                            else:
+                                # Auto-repair: convert raw value to cell dict if needed
+                                row_dict[col_id] = {'value': val, 'type': 'static'}
+        except Exception as e:
+            print(f"[IssueCard ERROR] Failed to sync grid edit: {e}")
+            
         # 1. Update numeric totals
         self.calculate_values()
         
@@ -955,19 +982,29 @@ class IssueCard(QFrame):
         
         # 1. Determine Brief Facts content based on mode
         if self.mode == "SCN":
-            brief_facts = get_content('brief_facts_scn')
-            if not brief_facts:
-                brief_facts = get_content('scn') # Legacy fallback
-            if not brief_facts:
-                brief_facts = get_content('brief_facts') # Absolute fallback
+            # [FIX] Strict Idempotency Logic (Iter 2)
+            # Priority 1: Restored Content (User Edits)
+            # Priority 2: Template Authoritative (template['templates']['brief_facts_scn'])
+            # Priority 3: Canonical Placeholder
             
-            # User Requirement: Alert if template is empty
-            if not brief_facts:
-                from PyQt6.QtWidgets import QMessageBox
-                issue_name = self.template.get('issue_name', 'Issue')
-                QMessageBox.warning(self, "No Template Available", 
-                                   f"No SCN template found for '{issue_name}'.\n\nPlease enter the facts manually.")
-                brief_facts = "[Enter Brief Facts here]"
+            check_content = self.saved_content
+            
+            # Simple validity check
+            has_saved_content = check_content and len(check_content.strip()) > 0 and check_content != self.CANONICAL_PLACEHOLDER
+            
+            if has_saved_content:
+                brief_facts = self.extract_html_body(check_content)
+                if not brief_facts.strip(): has_saved_content = False
+            
+            if has_saved_content:
+                 brief_facts = self.extract_html_body(check_content)
+            else:
+                 # Adoption Mode: Strictly fetch from authoritative template location
+                 # No guessing. No probing root keys.
+                 brief_facts = t.get('brief_facts_scn')
+                 
+                 if not brief_facts:
+                     brief_facts = self.CANONICAL_PLACEHOLDER
         else:
             brief_facts = get_content('brief_facts')
 
@@ -1059,18 +1096,52 @@ class IssueCard(QFrame):
         # 0. Grid Data Support (Excel Import) - High Priority check
         if 'grid_data' in template:
             grid_data = template['grid_data']
-            rows = len(grid_data)
-            cols = len(grid_data[0]) if rows > 0 else 0
             
+            # [FIX] Robust Normalization for Canonical Grid (List vs Dict)
+            # The new IssueCard enforces {'columns': ..., 'rows': ...} but legacy data might be List[List].
+            # We must normalize to List[List] for HTML generation.
+            rows_data = []
+            if isinstance(grid_data, dict):
+                rows_data = grid_data.get('rows', [])
+            elif isinstance(grid_data, list):
+                rows_data = grid_data
+                
+            # [CRITICAL FIX] Overwrite variables context so downstream logic sees a List
+            # This prevents KeyError: 0 when Jinja/Legacy logic tries to index it numerically
+            if 'grid_data' in variables:
+                 variables['grid_data'] = rows_data
+                 
+            rows = len(rows_data)
+            
+            # [FIX] Defensive Column Counting
+            cols = 0
+            if rows > 0:
+                first_row = rows_data[0]
+                if isinstance(first_row, (list, tuple)):
+                    cols = len(first_row)
+                elif isinstance(first_row, dict):
+                    # Handle potential dict-based rows (rare but possible in some schemas)
+                    cols = len(first_row.keys())
+
             html += """
             <div style="margin-bottom: 20px; margin-top: 15px;">
                 <p style="font-weight: bold; margin-bottom: 8px; font-size: 11pt;">Calculation Table</p>
                 <table style="width: 100%; border-collapse: collapse; font-size: 10pt; font-family: 'Bookman Old Style', serif; border: 2px solid #000;">
             """
             
-            for r, row_data in enumerate(grid_data):
+            for r, row_data in enumerate(rows_data):
                 html += "<tr>"
-                for c, cell_info in enumerate(row_data):
+                
+                # Ensure row_data is iterable (List)
+                # If it's a dict (from some legacy/weird state), convert values? 
+                # Canonical rows are List[Dict] (cell objects)
+                cells = []
+                if isinstance(row_data, list):
+                     cells = row_data
+                elif isinstance(row_data, dict) and 'cells' in row_data:
+                     cells = row_data['cells']
+                
+                for c, cell_info in enumerate(cells):
                     val = cell_info.get('value', '')
                     var_name = cell_info.get('var')
                     ctype = cell_info.get('type', 'empty')
@@ -1273,7 +1344,9 @@ class IssueCard(QFrame):
         data['scn_narration'] = data.get(self.content_key, "")
         
         # 4. Table Data Persistence (CRITICAL for ad-hoc conversions)
-        if 'grid_data' in self.template:
+        if self.grid_data:
+             data['table_data'] = self.grid_data
+        elif 'grid_data' in self.template:
              data['table_data'] = self.template['grid_data']
 
         # Legacy compatibility (optional)

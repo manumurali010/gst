@@ -41,7 +41,8 @@ class PreviewGenerator:
         # We use files because stdout can be unreliable for large binary data on Windows cmd
         with tempfile.TemporaryDirectory() as tmpdir:
             input_file = os.path.join(tmpdir, "input.html")
-            output_file = os.path.join(tmpdir, "output.png" if not all_pages else "output.pdf")
+            # [FIX] Force PNG extension
+            output_file = os.path.join(tmpdir, "output.png")
             
             try:
                 with open(input_file, "w", encoding="utf-8") as f:
@@ -49,12 +50,17 @@ class PreviewGenerator:
                 
                 # Command to run the worker
                 # Use sys.executable to ensure we use the same environment
+                # [FIX] Always use PNG for Preview. 
+                # PDF cannot be displayed in QLabel. We rely on render_worker to handle height/pagination.
+                target_format = "png"
+                output_file = os.path.join(tmpdir, "output.png")
+                
                 cmd = [
                     sys.executable,
                     worker_script,
                     "--input", input_file,
                     "--output", output_file,
-                    "--format", "png" if not all_pages else "pdf"
+                    "--format", target_format
                 ]
                 
                 print(f"[STABILIZATION] Spawning render worker (timeout=5s)...")
