@@ -4195,10 +4195,10 @@ class ProceedingsWorkspace(QWidget):
                     
                     # We use a table for alignment to mimic the "flex" look since QTextBrowser supports tables well
                     issues_html += f"""
-                    <table style="width: 100%; margin-bottom: 10px; border: none;">
+                    <table cellspacing="0" cellpadding="0" style="width: 100%; margin-bottom: 10px; border: none;">
                         <tr style="border: none;">
-                            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">{current_para_num}.</td>
-                            <td style="vertical-align: top; border: none; font-weight: bold;">Issue No. {i}: {title}</td>
+                            <td style="width: 1px; white-space: nowrap; vertical-align: top; border: none; font-weight: bold; padding: 0; padding-right: 5px;">{current_para_num}.</td>
+                            <td style="vertical-align: top; border: none; font-weight: bold; padding: 0;">Issue No. {i}: {title}</td>
                         </tr>
                     </table>
                     """
@@ -4206,11 +4206,10 @@ class ProceedingsWorkspace(QWidget):
                     # --- Sub Paragraphs (e.g., "3.1 Content...") ---
                     sub_para_count = 1
                     
-                    raw_html = card.generate_html()
-                    parts = raw_html.split('<div style="margin-bottom: 20px;')
-                    
-                    editor_part = parts[0]
-                    table_part = '<div style="margin-bottom: 20px;' + parts[1] if len(parts) > 1 else ""
+                    # [FIX] Direct Separation of Content and Table
+                    # Instead of fragile string splitting, we generate them separately.
+                    editor_part = card.editor.toHtml()
+                    table_part = card.generate_table_html(card.template, card.variables)
                     
                     # Regex split for paragraphs
                     import re
@@ -4224,26 +4223,29 @@ class ProceedingsWorkspace(QWidget):
                         
                     for p_content in paras:
                         if p_content.strip():
+                            # [FIX] Enforce Justify Alignment in Body Text
+                            p_content = f'<div style="text-align: justify;">{p_content}</div>'
+                            
                             num_str = f"{current_para_num}.{sub_para_count}"
-                            issues_html += f"""
-                            <table style="width: 100%; margin-bottom: 10px; border: none;">
-                                <tr style="border: none;">
-                                    <td style="width: 50px; vertical-align: top; border: none; padding-left: 15px; font-weight: bold;">{num_str}</td>
-                                    <td style="vertical-align: top; border: none;">{p_content}</td>
-                                </tr>
-                            </table>
-                            """
-                            sub_para_count += 1
+                        issues_html += f"""
+                        <table cellspacing="0" cellpadding="0" style="width: 100%; margin-bottom: 10px; border: none;">
+                            <tr style="border: none;">
+                                <td style="width: 1px; white-space: nowrap; vertical-align: top; border: none; padding: 0; font-weight: bold; padding-right: 5px;">{num_str}</td>
+                                <td style="vertical-align: top; border: none; padding: 0;">{p_content}</td>
+                            </tr>
+                        </table>
+                        """
+                        sub_para_count += 1
                     
                     # Table as Sub-Para
-                    if table_part:
+                    if table_part and table_part.strip():
                         num_str = f"{current_para_num}.{sub_para_count}"
                         issues_html += f"""
                         <div style="display: flex; margin-bottom: 10px;">
-                            <table style="width: 100%; border: none;">
+                            <table cellspacing="0" cellpadding="0" style="width: 100%; border: none;">
                                 <tr style="border: none;">
-                                    <td style="width: 50px; vertical-align: top; border: none; padding-left: 15px; font-weight: bold;">{num_str}</td>
-                                    <td style="vertical-align: top; border: none;">{table_part}</td>
+                                    <td style="width: 1px; white-space: nowrap; vertical-align: top; border: none; padding: 0; font-weight: bold; padding-right: 5px;">{num_str}</td>
+                                    <td style="vertical-align: top; border: none; padding: 0;">{table_part}</td>
                                 </tr>
                             </table>
                         </div>

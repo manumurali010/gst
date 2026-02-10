@@ -1094,8 +1094,16 @@ class IssueCard(QFrame):
         html = ""
         
         # 0. Grid Data Support (Excel Import) - High Priority check
+        # [FIX] Check both template and variables for grid_data to ensure table renders
+        grid_source = None
         if 'grid_data' in template:
-            grid_data = template['grid_data']
+            grid_source = template['grid_data']
+        elif 'grid_data' in variables:
+            grid_source = variables['grid_data']
+            
+        if grid_source:
+            grid_data = grid_source
+            print(f"[IssueCard DIAG] Found grid_source type: {type(grid_source)}")
             
             # [FIX] Robust Normalization for Canonical Grid (List vs Dict)
             # The new IssueCard enforces {'columns': ..., 'rows': ...} but legacy data might be List[List].
@@ -1105,7 +1113,12 @@ class IssueCard(QFrame):
                 rows_data = grid_data.get('rows', [])
             elif isinstance(grid_data, list):
                 rows_data = grid_data
-                
+            
+            print(f"[IssueCard DIAG] Normalized rows_data length: {len(rows_data)}")
+            if len(rows_data) > 0:
+                print(f"[IssueCard DIAG] Sample row_data[0] type: {type(rows_data[0])}")
+                print(f"[IssueCard DIAG] Sample row_data[0] keys/content: {rows_data[0]}")
+            
             # [CRITICAL FIX] Overwrite variables context so downstream logic sees a List
             # This prevents KeyError: 0 when Jinja/Legacy logic tries to index it numerically
             if 'grid_data' in variables:
@@ -1113,38 +1126,51 @@ class IssueCard(QFrame):
                  
             rows = len(rows_data)
             
-            # [FIX] Defensive Column Counting
-            cols = 0
-            if rows > 0:
-                first_row = rows_data[0]
-                if isinstance(first_row, (list, tuple)):
-                    cols = len(first_row)
-                elif isinstance(first_row, dict):
-                    # Handle potential dict-based rows (rare but possible in some schemas)
-                    cols = len(first_row.keys())
-
+            # [FIX] Generate Table HTML manually to ensure it appears
+            # ... (Rest of existing logic, but we need to see the loop below)
+            
             html += """
             <div style="margin-bottom: 20px; margin-top: 15px;">
                 <p style="font-weight: bold; margin-bottom: 8px; font-size: 11pt;">Calculation Table</p>
                 <table style="width: 100%; border-collapse: collapse; font-size: 10pt; font-family: 'Bookman Old Style', serif; border: 2px solid #000;">
             """
             
+            # Attempt to get header columns if possible
+            if isinstance(grid_data, dict) and 'columns' in grid_data:
+                columns = grid_data['columns']
+                print(f"[IssueCard DIAG] columns data: {columns}")
+                html += "<tr>"
+                for col in columns:
+                    col_name = col.get('name', 'Column') if isinstance(col, dict) else str(col)
+                    html += f'<th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">{col_name}</th>'
+                html += "</tr>"
+            
             for r, row_data in enumerate(rows_data):
                 html += "<tr>"
                 
                 # Ensure row_data is iterable (List)
-                # If it's a dict (from some legacy/weird state), convert values? 
-                # Canonical rows are List[Dict] (cell objects)
                 cells = []
                 if isinstance(row_data, list):
                      cells = row_data
-                elif isinstance(row_data, dict) and 'cells' in row_data:
-                     cells = row_data['cells']
-                
+                elif isinstance(row_data, dict):
+                    if 'cells' in row_data:
+                         cells = row_data['cells']
+                    else:
+                        # Fallback: maybe it's a direct dict of values? 
+                        cells = list(row_data.values())
+
                 for c, cell_info in enumerate(cells):
-                    val = cell_info.get('value', '')
-                    var_name = cell_info.get('var')
-                    ctype = cell_info.get('type', 'empty')
+                    val = ""
+                    var_name = None
+                    ctype = 'empty'
+                    
+                    if isinstance(cell_info, dict):
+                        val = cell_info.get('value', '')
+                        var_name = cell_info.get('var')
+                        ctype = cell_info.get('type', 'empty')
+                    else:
+                        val = str(cell_info)
+                        ctype = 'static' # Assume static if just a value
                     
                     # Resolve Value
                     if var_name:
@@ -1156,23 +1182,6 @@ class IssueCard(QFrame):
                     
                     # Styling
                     style = "border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;"
-                    
-                    # Header detection (heuristic: static and row 0 or 1, or bold/gray in cell_info?)
-                    # For now, we assume imported Excel uses row 0-10 as header? No, 'grid_data' is just the table part.
-                    # The importer sets 'table_start_row' but only grid_data starting from there is saved.
-                    # So row 0 of grid_data is the first data row (headers were potentially skipped or included?).
-                    # Check importer:
-                    # current_row = table_start_row + 2
-                    # grid_data does NOT include headers currently based on importer logic!
-                    # Wait, importer loop: for r in range(current_row, max_row + 1): ... grid_data.append(row_data)
-                    # So grid_data is DATA ONLY.
-                    # This means we might be missing headers in the HTML if we only render grid_data.
-                    # But the User said "table appeared perfectly". In the Form UI, init_grid_ui renders grid_data.
-                    # Does init_grid_ui add headers?
-                    # self.table.horizontalHeader().setVisible(False)
-                    # It renders exactly what is in grid_data.
-                    # So if the import logic skipped headers, the form has no headers?
-                    # Unless `static` cells in row 0 are headers.
                     
                     if ctype == 'static':
                         style += "background-color: #f2f2f2; font-weight: bold;"
@@ -1187,7 +1196,9 @@ class IssueCard(QFrame):
                     # Format float
                     try:
                         if isinstance(val, (int, float)):
-                            if 'tax' in str(var_name).lower() or 'int' in str(var_name).lower() or 'pen' in str(var_name).lower() or val > 1000:
+                            # Check if it looks like currency/tax
+                            s_var = str(var_name).lower() if var_name else ""
+                            if 'tax' in s_var or 'int' in s_var or 'pen' in s_var or val > 1000:
                                 val = f"{val:,.2f}"
                             else:
                                 val = str(val)

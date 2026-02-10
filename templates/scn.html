@@ -3,6 +3,11 @@
 
 <head>
     <style>
+        /* [Fix] Global Box Sizing to prevent width+padding overflow */
+        * {
+            box-sizing: border-box;
+        }
+
         body {
             font-family: 'Bookman Old Style', serif;
             font-size: 11pt;
@@ -15,24 +20,28 @@
         /* Preview Mode: A4 Simulation */
         body {
             background-color: white;
-             /* [User Req] Pure White Background (was #525659) */
+            /* [User Req] Pure White Background (was #525659) */
             margin: 0;
-            padding: 20px;
+            padding: 0;
+            /* [FIX] Remove body padding to prevent double-padding overflow */
+            overflow-x: hidden;
+            /* [FIX] Force hide horizontal overflow */
+            width: 100%;
         }
 
         .page-container {
             background-color: white;
             /* [User Req] Remove Fixed Width for Preview to prevent horizontal scroll */
             /* width: 210mm; */
-            max-width: 210mm;
-            width: auto;
+            max-width: 100%;
+            /* [User Req] Fit to window to avoid side scroll */
+            width: 100%;
             min-height: 297mm;
-            /* padding: 20mm; */ 
+            /* padding: 20mm; */
             padding: 10mm;
             margin: 0 auto;
             /* [Fix] Removed Box Shadow */
             /* box-shadow: 0 0 15px rgba(0, 0, 0, 0.5); */
-            box-sizing: border-box;
             display: block;
         }
 
@@ -41,11 +50,12 @@
             text-align: justify;
             /* [User Req] Justify alignment */
         }
-        
+
         .header {
             text-align: center;
             font-weight: bold;
-            font-size: 11pt; /* [User Req] 11pt */
+            font-size: 11pt;
+            /* [User Req] 11pt */
         }
 
         .right-align {
