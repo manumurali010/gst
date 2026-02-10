@@ -516,6 +516,23 @@ class AdjudicationWizard(QWidget):
         except Exception as e:
             print(f"Error loading SCN template: {e}")
             return "<p>Error: SCN template not found</p>"
+            
+        # [FIX] Inject CSS (Manual Replacement since this doesn't use Jinja2 Environment)
+        try:
+            css_dir = os.path.join('templates', 'css')
+            with open(os.path.join(css_dir, 'scn_base.css'), 'r', encoding='utf-8') as f:
+                base_css = f.read()
+            # Use Qt CSS for Wizard Preview (Continuous Scroll)
+            with open(os.path.join(css_dir, 'scn_qt.css'), 'r', encoding='utf-8') as f:
+                renderer_css = f.read()
+                
+            html = html.replace("{{ base_css | safe }}", base_css)
+            html = html.replace("{{ renderer_css | safe }}", renderer_css)
+        except Exception as e:
+            print(f"Error injecting CSS in Wizard: {e}")
+            # Fallback to empty to avoid broken placeholders
+            html = html.replace("{{ base_css | safe }}", "")
+            html = html.replace("{{ renderer_css | safe }}", "")
         
         # Basic Details
         html = html.replace("{{OCNumber}}", "")  # Placeholder for O.C. Number

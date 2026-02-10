@@ -2,49 +2,29 @@
 <html>
 
 <head>
+    <meta charset="UTF-8">
+    <title>Show Cause Notice</title>
     <style>
-        body {
-            font-family: 'Bookman Old Style', serif;
-            font-size: 12pt;
-            line-height: 1.5;
-            margin: 40px;
-            counter-reset: para-counter;
-            /* Initialize counter */
+        /* Base Styles (Shared) */
+            {
+                {
+                base_css | safe
+            }
         }
 
-        p {
-            margin-bottom: 10px;
-            text-align: justify;
-        }
-
-        .header {
-            text-align: center;
-            font-weight: bold;
-        }
-
-        .right-align {
-            text-align: right;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-            margin-bottom: 10px;
-        }
-
-        td,
-        th {
-            border: 1px solid black;
-            padding: 5px;
-            vertical-align: top;
+        /* Renderer Specific Styles (Qt/PDF) */
+            {
+                {
+                renderer_css | safe
+            }
         }
     </style>
 </head>
 
 <body>
-    <!-- Letterhead -->
-    <!DOCTYPE html>
+    
+        <!-- Letterhead -->
+        <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -57,147 +37,306 @@
 </body>
 </html>
 
-    <table style="border: none; width: 100%; margin-bottom: 20px;">
-        <tbody>
-            <tr style="border: none;">
-                <td style="border: none; text-align: left; width: 50%;">
-                    <strong>OC No:</strong> 2/2026
-                </td>
-                <td style="border: none; text-align: right; width: 50%;">
-                    <strong>Date:</strong> 04/01/2026
+        <!-- [User Req] No Gap needed between Letter head and OC No -->
+        <table style="border: none; width: 100%; margin-top: 0px; margin-bottom: 20px;">
+            <tbody>
+                <tr style="border: none;">
+                    <td style="border: none; text-align: left; width: 50%;">
+                        <strong>OC No:</strong> 4/2026
+                    </td>
+                    <td style="border: none; text-align: right; width: 50%;">
+                        <strong>Date:</strong> 10/02/2026
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div style="text-align: center; font-weight: bold; font-size: 11pt; margin-bottom: 20px;">
+            SHOW CAUSE NOTICE No. 3/2022-23/GST-Superintendent
+        </div>
+
+        <div class="header">
+            FORM GST DRC-01<br>
+            [See rule 142(1)]<br>
+            Show Cause Notice under section 73
+        </div>
+
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
+
+        <!-- Para 1 -->
+        <table class="para-table">
+            <tr>
+                <td class="para-num">1.</td>
+                <td class="para-content">
+                    <strong>WESTERN TRADING COMPANY, WESTERN TRADING COMPANY, Karunya Bhawan Home for The Aged Women, FIRST FLOOR, 13/661D, Puthanvelikara Kadavu Ferry Road, Puthenvelikara, Puthenvelikkara, Ernakulam, Kerala, 683594 
+                    </strong>(hereinafter referred to as ‘the taxpayer’) is holding GST registration bearing
+                    GSTIN:<strong>32AADFW8764E1Z1 </strong>in the capacity of a ‘registered person’ as envisaged under section 2(94) of the
+                    Central
+                    Goods
+                    and Services Tax Act, 2017 (hereinafter referred to as “the Act”) is a Registered
+                    firm
+                    with
+                    trade name <strong>M/s. WESTERN TRADING COMPANY. </strong>
                 </td>
             </tr>
-        </tbody>
-    </table>
+        </table>
 
-    <div style="text-align: center; font-weight: bold; margin-bottom: 20px;">
-        SHOW CAUSE NOTICE No. 1/2021-22/GST-Superintendent
-    </div>
+        <!-- Para 2 -->
+        <table class="para-table">
+            <tr>
+                <td class="para-num">2.</td>
+                <td class="para-content">
+                    All references in this Notice to a Section of the Central Goods and Services Tax Act, 2017 (CGST
+                    Act,
+                    2017)
+                    implies reference to the corresponding section of the Kerala State Goods and Services Tax Act, 2017
+                    (KSGST
+                    Act, 2017). Similarly, all references to a Rule of the Central Goods and Services Tax Rules, 2017
+                    (CGST
+                    Rules, 2017) implies reference to the corresponding Rules of the Kerala State Goods and Services Tax
+                    Rules,
+                    2017 (KSGST Rules, 2017).
+                </td>
+            </tr>
+        </table>
 
-    <div class="header">
-        FORM GST DRC-01<br>
-        [See rule 142(1)]<br>
-        Show Cause Notice under section 73
-    </div>
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
 
-    <p>&nbsp;</p>
+        <!-- Grounds of SCN Header -->
+        <div style="text-align: center; font-weight: bold; margin-bottom: 15px; text-decoration: underline;">
+            GROUNDS OF SCN
+        </div>
 
-    <!-- Para 1 -->
-    <table style="width: 100%; margin-bottom: 10px; border: none;">
-        <tr style="border: none;">
-            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">1.</td>
-            <td style="vertical-align: top; border: none;">
-                <strong>M/S KAITHARAN AGENCIES, M/S KAITHARAN AGENCIES, XII/51, PUTHENVELIKARA, PUTHENVELIKARA, Ernakulam, Kerala, 683594 
-                </strong>(hereinafter referred to as ‘the taxpayer’) is holding GST registration bearing
-                GSTIN:<strong>32AAPFK0963M1ZZ </strong>in the capacity of a ‘registered person’ as envisaged under section 2(94) of the Central
-                Goods
-                and Services Tax Act, 2017 (hereinafter referred to as “the Act”) is a Registered
-                firm
-                with
-                trade name <strong>M/s. M/S KAITHARAN AGENCIES. </strong>
-            </td>
-        </tr>
-    </table>
-
-    <!-- Para 2 -->
-    <table style="width: 100%; margin-bottom: 10px; border: none;">
-        <tr style="border: none;">
-            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">2.</td>
-            <td style="vertical-align: top; border: none;">
-                All references in this Notice to a Section of the Central Goods and Services Tax Act, 2017 (CGST Act,
-                2017)
-                implies reference to the corresponding section of the Kerala State Goods and Services Tax Act, 2017
-                (KSGST
-                Act, 2017). Similarly, all references to a Rule of the Central Goods and Services Tax Rules, 2017 (CGST
-                Rules, 2017) implies reference to the corresponding Rules of the Kerala State Goods and Services Tax
-                Rules,
-                2017 (KSGST Rules, 2017).
-            </td>
-        </tr>
-    </table>
-
-    <p>&nbsp;</p>
-
-    <!-- Grounds of SCN Header -->
-    <div style="text-align: center; font-weight: bold; margin-bottom: 15px; text-decoration: underline;">
-        GROUNDS OF SCN
-    </div>
-
-    <!-- Issues (Dynamic Numbering) -->
-    
-                    <table style="width: 100%; margin-bottom: 10px; border: none;">
-                        <tr style="border: none;">
-                            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">3.</td>
-                            <td style="vertical-align: top; border: none; font-weight: bold;">Issue No. 1: GSTR 3B vs 2B (discrepancy identified from GSTR 9)</td>
-                        </tr>
-                    </table>
-                    
-                            <table style="width: 100%; margin-bottom: 10px; border: none;">
-                                <tr style="border: none;">
-                                    <td style="width: 50px; vertical-align: top; border: none; padding-left: 15px; font-weight: bold;">3.1</td>
-                                    <td style="vertical-align: top; border: none;"><span style=" font-weight:700;">Brief Facts:</span><br />Point 12- GSTR 3B vs 2B (discrepancy identified from GSTR 9) </td>
-                                </tr>
-                            </table>
-                            
-                            <table style="width: 100%; margin-bottom: 10px; border: none;">
-                                <tr style="border: none;">
-                                    <td style="width: 50px; vertical-align: top; border: none; padding-left: 15px; font-weight: bold;">3.2</td>
-                                    <td style="vertical-align: top; border: none;"><br /></td>
-                                </tr>
-                            </table>
-                            
-                            <table style="width: 100%; margin-bottom: 10px; border: none;">
-                                <tr style="border: none;">
-                                    <td style="width: 50px; vertical-align: top; border: none; padding-left: 15px; font-weight: bold;">3.3</td>
-                                    <td style="vertical-align: top; border: none;"><span style=" font-weight:700;">Conclusion:</span><br /></td>
-                                </tr>
-                            </table>
-                            
-                        <div style="display: flex; margin-bottom: 10px;">
-                            <table style="width: 100%; border: none;">
-                                <tr style="border: none;">
-                                    <td style="width: 50px; vertical-align: top; border: none; padding-left: 15px; font-weight: bold;">3.4</td>
-                                    <td style="vertical-align: top; border: none;"><div style="margin-bottom: 20px; margin-top: 15px;">
+        <!-- Issues (Dynamic Numbering) -->
+        
+                        <table class="para-table">
+                            <tr>
+                                <td class="para-num">3.</td>
+                                <td class="para-content"><strong>Issue No. RULE_42_43_VIOLATION: Rule 42/43 Reversal Mismatch</strong></td>
+                            </tr>
+                        </table>
+                        
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">3.1</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Brief Facts:</span><br />On examination of returns, a discrepancy related to Rule 42/43 Reversal Mismatch was identified.</td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">3.2</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Grounds:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">3.3</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Legal Provisions:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">3.4</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Conclusion:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                            <table class="para-table">
+                                <tr>
+                                    <td class="para-num">3.5</td>
+                                    <td class="para-content">
+            <div style="margin-bottom: 20px; margin-top: 15px;">
                 <p style="font-weight: bold; margin-bottom: 8px; font-size: 11pt;">Calculation Table</p>
                 <table style="width: 100%; border-collapse: collapse; font-size: 10pt; font-family: 'Bookman Old Style', serif; border: 2px solid #000;">
-            <tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>Description</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>IGST</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>CGST</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>SGST</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>Cess</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>ITC as per Table 8A of GSTR 9</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>3,979.00</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>26,121,558.00</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>26,121,558.00</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>450</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>ITC as per Table 8B of GSTR 9</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>4,602.00</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>32,908,371.00</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>32,908,371.00</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>ITC as per Table 8C of GSTR 9</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>ITC availed in Excess as per GSTR 9</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>623.00</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>6,786,812.00</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>6,786,812.00</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.00</td></tr>
+            <tr><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>Exempt + Non-GST Turnover</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>6,177,195.00</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>Total Turnover</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>67,014,399.44</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>Reversal Ratio</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0922</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>Total ITC Availed</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>18,026,529.26</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>ITC Required to be Reversed</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>1,661,633.73</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>ITC Actually Reversed</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>Difference</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>1,661,633.73</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>Liability</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>1,661,633.73</td></tr>
                 </table>
             </div>
             </td>
                                 </tr>
                             </table>
-                        </div>
+                            
+                        <table class="para-table">
+                            <tr>
+                                <td class="para-num">4.</td>
+                                <td class="para-content"><strong>Issue No. ITC_3B_2B_OTHER: All Other ITC Mismatch (GSTR 3B vs GSTR 2B)</strong></td>
+                            </tr>
+                        </table>
                         
-
-    <p>&nbsp;</p>
-
-    <!-- Demand Section (Para X) -->
-    <table style="width: 100%; margin-bottom: 10px; border: none;">
-        <tr style="border: none;">
-            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">4.</td>
-            <td style="vertical-align: top; border: none;">
-                <strong>Demand-</strong> Based on the facts of the issue and reference of laws as mentioned above,
-                whereas
-                it appears that <strong>M/S KAITHARAN AGENCIES, M/S KAITHARAN AGENCIES, XII/51, PUTHENVELIKARA, PUTHENVELIKARA, Ernakulam, Kerala, 683594  </strong>is liable to pay tax
-                amounting to Rs. 13,574,247.00/- (IGST Rs. 623.00/-, CGST Rs. 6,786,812.00/- &amp;
-                SGST
-                Rs. 6,786,812.00/-) for the contraventions made by them as discussed above, they are hereby directed
-                to
-                Show Cause to <strong>Superintendent, Paravur Range</strong> as to why:
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">4.1</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Brief Facts:</span><br />On examination of returns, a discrepancy related to All Other ITC Mismatch (GSTR 3B vs GSTR 2B) was identified.</td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">4.2</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Grounds:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">4.3</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Legal Provisions:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">4.4</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Conclusion:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                            <table class="para-table">
+                                <tr>
+                                    <td class="para-num">4.5</td>
+                                    <td class="para-content">
+            <div style="margin-bottom: 20px; margin-top: 15px;">
+                <p style="font-weight: bold; margin-bottom: 8px; font-size: 11pt;">Calculation Table</p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 10pt; font-family: 'Bookman Old Style', serif; border: 2px solid #000;">
+            <tr><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>ITC claimed in GSTR-3B (Table 4A5)</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>119,289.53</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>119,289.53</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>17,678,225.20</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>ITC available in GSTR-2B (Net of Credit Notes)</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>119,065.53</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>119,065.53</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>15,931,955.10</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>Difference (GSTR 3B - GSTR 2B)</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>224.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>224.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>1,746,270.10</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: left;'>Liability</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>224.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>224.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>1,746,270.10</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0</td></tr>
+                </table>
+            </div>
             </td>
-        </tr>
-    </table>
+                                </tr>
+                            </table>
+                            
+                        <table class="para-table">
+                            <tr>
+                                <td class="para-num">5.</td>
+                                <td class="para-content"><strong>Issue No. IMPORT_ITC_MISMATCH: Import ITC Mismatch (GSTR 3B vs ICEGATE)</strong></td>
+                            </tr>
+                        </table>
+                        
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">5.1</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Brief Facts:</span><br />On examination of returns, a discrepancy related to Import ITC Mismatch (GSTR 3B vs ICEGATE) was identified.</td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">5.2</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Grounds:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">5.3</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Legal Provisions:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">5.4</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Conclusion:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                            <table class="para-table">
+                                <tr>
+                                    <td class="para-num">5.5</td>
+                                    <td class="para-content">
+            <div style="margin-bottom: 20px; margin-top: 15px;">
+                <p style="font-weight: bold; margin-bottom: 8px; font-size: 11pt;">Calculation Table</p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 10pt; font-family: 'Bookman Old Style', serif; border: 2px solid #000;">
+            <tr><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>r1</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>ITC claimed in GSTR-3B (Table 4(A)(1))</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>r2</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>ITC available as per GSTR-2B (IMPG + IMPGSEZ)</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>r3</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>Difference (GSTR-3B - GSTR-2B)</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>r4</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>Liability (Positive Shortfall Only)</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr>
+                </table>
+            </div>
+            </td>
+                                </tr>
+                            </table>
+                            
+                        <table class="para-table">
+                            <tr>
+                                <td class="para-num">6.</td>
+                                <td class="para-content"><strong>Issue No. ISD_CREDIT_MISMATCH: ISD Credit mismatch (GSTR 3B vs GSTR 2B)</strong></td>
+                            </tr>
+                        </table>
+                        
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">6.1</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Brief Facts:</span><br />On examination of returns, a discrepancy related to ISD Credit mismatch (GSTR 3B vs GSTR 2B) was identified.</td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">6.2</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Grounds:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">6.3</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Legal Provisions:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">6.4</td>
+                                        <td class="para-content"><span style=" font-weight:700;">Conclusion:</span><br /></td>
+                                    </tr>
+                                </table>
+                                
+                            <table class="para-table">
+                                <tr>
+                                    <td class="para-num">6.5</td>
+                                    <td class="para-content">
+            <div style="margin-bottom: 20px; margin-top: 15px;">
+                <p style="font-weight: bold; margin-bottom: 8px; font-size: 11pt;">Calculation Table</p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 10pt; font-family: 'Bookman Old Style', serif; border: 2px solid #000;">
+            <tr><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th><th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">Column</th></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>r1</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>ITC availed i.r.o of 'Inward Supplies from ISD' in Table 4(A)(4) of GSTR-3B</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>r2</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>ITC as per GSTR-2B ISD</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>r3</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>Difference (Claimed - Available)</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>r4</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;background-color: #f2f2f2; font-weight: bold;'>Liability (Positive Shortfall)</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td><td style='border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;text-align: right;'>0.0</td></tr>
+                </table>
+            </div>
+            </td>
+                                </tr>
+                            </table>
+                            
 
-    <p>&nbsp;</p>
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
 
-    <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
+        <!-- Demand Section (Para X) -->
+        <table class="para-table">
+            <tr>
+                <td class="para-num">7.</td>
+                <td class="para-content">
+                    <strong>Demand-</strong> Based on the facts of the issue and reference of laws as mentioned above,
+                    whereas it appears that <strong>WESTERN TRADING COMPANY, WESTERN TRADING COMPANY, Karunya Bhawan Home for The Aged Women, FIRST FLOOR, 13/661D, Puthanvelikara Kadavu Ferry Road, Puthenvelikara, Puthenvelikkara, Ernakulam, Kerala, 683594  </strong>is liable
+                    to pay tax amounting to Rs. 0.00/- (IGST Rs. 0.00/-, CGST Rs. 0.00/-
+                    &amp; SGST Rs. 0.00/-) for the contraventions made by them as discussed above, they are
+                    hereby directed to Show Cause to <strong>Superintendent, Paravur Range</strong> as
+                    to why:
+                </td>
+            </tr>
+        </table>
+
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
+
+        <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
 <html><head><meta name="qrichtext" content="1" /><meta charset="utf-8" /><style type="text/css">
 p, li { white-space: pre-wrap; }
 hr { height: 1px; border-width: 0; }
 li.unchecked::marker { content: "\2610"; }
 li.checked::marker { content: "\2612"; }
 </style></head><body style=" font-family:'Segoe UI','Roboto','sans-serif'; font-size:14px; font-weight:400; font-style:normal;">
-<p style=" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;">i. An amount of Rs. 13,574,247.00/- (Rupees One Crore Thirty Five Lakh Seventy Four Thousand Two Hundred Forty Seven Only) (IGST Rs. 623.00/-, CGST- Rs. 6,786,812.00/- and SGST- Rs. 6,786,812.00/-) for the contraventions mentioned in issue 1 should not be demanded and recovered from them under the provisions of Section 73(1) of CGST Act 2017 /Kerala SGST Act, 2017 read with Section 20 of the IGST Act, 2017;</p></body></html><br><br><!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
+<p style=" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;">i. An amount of Rs. 0.00/- (Rupees Zero Only) (IGST Rs. 0.00/-, CGST- Rs. 0.00/- and SGST- Rs. 0.00/-) for the contraventions mentioned in issue 1 should not be demanded and recovered from them under the provisions of Section 73(1) of CGST Act 2017 /Kerala SGST Act, 2017 read with Section 20 of the IGST Act, 2017;</p></body></html><br><br><!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
 <html><head><meta name="qrichtext" content="1" /><meta charset="utf-8" /><style type="text/css">
 p, li { white-space: pre-wrap; }
 hr { height: 1px; border-width: 0; }
@@ -213,167 +352,170 @@ li.checked::marker { content: "\2612"; }
 </style></head><body style=" font-family:'Segoe UI','Roboto','sans-serif'; font-size:14px; font-weight:400; font-style:normal;">
 <p style=" margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;">iii. Penalty should not be imposed on them under the provision of Section 73 (1) of CGST Act 2017 read with Section 122 (2) (a) of CGST Act, 2017 and corresponding section under the Kerala SGST Act, 2017 read with section 20 of the IGST Act, 2017, for the contraventions referred hereinabove.</p></body></html><br><br>
 
-    <p>&nbsp;</p>
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
 
-    <!-- Post-Demand (Para X+1) -->
-    <table style="width: 100%; margin-bottom: 10px; border: none;">
-        <tr style="border: none;">
-            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">5.</td>
-            <td style="vertical-align: top; border: none;">
-                <u>With regard to the above demand, where any person chargeable with tax under sub section (1) or sub
-                    section (3) of Section 73 of CGST Act 2017/Kerala SGST Act, 2017 read with Section 20 of the IGST
-                    Act,
-                    2017 pays the said tax along with interest payable under Section 50 within thirty days of issue of
-                    show
-                    cause notice, no penalty shall be payable and all proceedings in respect of the said notice shall be
-                    deemed to be concluded.</u>
-            </td>
-        </tr>
-    </table>
-
-    <table style="width: 100%; margin-bottom: 10px; border: none;">
-        <tr style="border: none;">
-            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">6.</td>
-            <td style="vertical-align: top; border: none;">
-                As per Section 29(3) of the CGST Act 2017/Kerala SGST Act, 2017 read with Section 20 of the IGST Act,
-                2017,
-                the cancellation of the registration under this Section shall not affect the liability of person to pay
-                tax
-                and other dues under this Act or to discharge any obligation under this Act or the rules made thereunder
-                for
-                any period prior to the date of cancellation whether or not such tax and other dues are determined
-                before or
-                after the date of cancellation.
-            </td>
-        </tr>
-    </table>
-
-    <p>&nbsp;</p>
-
-    <table style="width: 100%; margin-bottom: 10px; border: none;">
-        <tr style="border: none;">
-            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">7.</td>
-            <td style="vertical-align: top; border: none;">
-                <strong> M/S KAITHARAN AGENCIES, M/S KAITHARAN AGENCIES, XII/51, PUTHENVELIKARA, PUTHENVELIKARA, Ernakulam, Kerala, 683594  </strong>is also directed to produce, at the
-                time
-                of showing cause, all the evidences upon which they intend to rely on in support of their defence. They
-                should also indicate in their written reply as to whether they wish to be heard in person before the
-                case is
-                adjudicated. If no such mention is made in their written reply or if they do not appear before the
-                adjudicating authority when the case is posted for personal hearing, it will be presumed that they do
-                not
-                wish to be heard in person.
-            </td>
-        </tr>
-    </table>
-
-    <p>&nbsp;</p>
-
-    <table style="width: 100%; margin-bottom: 10px; border: none;">
-        <tr style="border: none;">
-            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">8.</td>
-            <td style="vertical-align: top; border: none;">
-                If no cause is shown against the action proposed to be taken <strong>within thirty days (30
-                    days)</strong>
-                from the date of receipt of this notice or if they fail to appear before the adjudicating authority when
-                the
-                case is posted for hearing, the case will be decided ex-parte on its own merits without any further
-                reference.
-            </td>
-        </tr>
-    </table>
-
-    <p>&nbsp;</p>
-
-    <table style="width: 100%; margin-bottom: 10px; border: none;">
-        <tr style="border: none;">
-            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">9.</td>
-            <td style="vertical-align: top; border: none;">
-                This notice is issued without prejudice to any other action that may be taken against them under the
-                provisions of the CGST Act, 2017/Kerala SGST Act, 2017 and IGST Act, 2017 as amended or the Rules made
-                there
-                under or under any other law for the time being in force in India. Further, this notice is issued
-                without
-                prejudice to the right to support it with any material evidence which may be collected at a later date
-                and
-                which may be considered relevant to the proceedings in this matter.
-            </td>
-        </tr>
-    </table>
-
-    <p>&nbsp;</p>
-
-    <table style="width: 100%; margin-bottom: 10px; border: none;">
-        <tr style="border: none;">
-            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">10.</td>
-            <td style="vertical-align: top; border: none;">
-                The Department reserves the right to add, amend, delete or modify any part or portion of this show cause
-                notice, if considered necessary at any point of time before the case is adjudicated and such addition,
-                amendment, deletion or modification shall be deemed to be part and parcel of this notice.
-            </td>
-        </tr>
-    </table>
-
-    <p>&nbsp;</p>
-
-    <table style="width: 100%; margin-bottom: 10px; border: none;">
-        <tr style="border: none;">
-            <td style="width: 40px; vertical-align: top; border: none; font-weight: bold;">11.</td>
-            <td style="vertical-align: top; border: none;">
-                In this Show Cause Notice, reliance is placed on the following documents:
-            </td>
-        </tr>
-    </table>
-
-    <table>
-        <tbody>
+        <!-- Post-Demand (Para X+1) -->
+        <table class="para-table">
             <tr>
-                <td width="15%">
-                    <p>Si No.</p>
-                </td>
-                <td>
-                    <p>Description</p>
+                <td class="para-num">8.</td>
+                <td class="para-content waiver-para">
+                    With regard to the above demand, where any person chargeable with tax under sub-section (1) or
+                    sub-section (3) of Section 73 of the CGST Act, 2017 / Kerala SGST Act, 2017 read with Section 20 of
+                    the IGST Act, 2017 pays the said tax along with interest payable under Section 50 within thirty days
+                    of issue of the show cause notice, no penalty shall be payable and all proceedings in respect of the
+                    said notice shall be deemed to be concluded.
                 </td>
             </tr>
-            
+        </table>
+
+        <table class="para-table">
             <tr>
-                <td>(i)</td>
-                <td>No documents listed</td>
+                <td class="para-num">9.
+                </td>
+                <td class="para-content">As per Section 29(3) of the CGST Act 2017/Kerala SGST Act, 2017 read with
+                    Section 20 of the IGST Act, 2017, the cancellation of the registration under this Section shall not
+                    affect the liability of person to pay tax and other dues under this Act or to discharge any
+                    obligation under this Act or the rules made thereunder for any period prior to the date of
+                    cancellation whether or not such tax and other dues are determined before or after the date of
+                    cancellation.
+                </td>
             </tr>
+        </table>
+
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
+
+        <table class="para-table">
+            <tr>
+                <td class="para-num">10.</td>
+                <td class="para-content"><strong> WESTERN TRADING COMPANY, WESTERN TRADING COMPANY, Karunya Bhawan Home for The Aged Women, FIRST FLOOR, 13/661D, Puthanvelikara Kadavu Ferry Road, Puthenvelikara, Puthenvelikkara, Ernakulam, Kerala, 683594  </strong>is also
+                    directed to produce, at the time of showing cause, all the evidences upon which they intend to rely
+                    on in support of their defence. They should also indicate in their written reply as to whether they
+                    wish to be heard in person before the case is adjudicated. If no such mention is made in their
+                    written reply or if they do not appear before the adjudicating authority when the case is posted for
+                    personal hearing, it will be presumed that they do not wish to be heard in person.
+                </td>
+            </tr>
+        </table>
+
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
+
+        <table class="para-table">
+            <tr>
+                <td class="para-num">11.</td>
+                <td class="para-content">If no cause is shown against the action proposed to be taken <strong>within
+                        thirty days (30 days)</strong> from the date of receipt of this notice or if they fail to appear
+                    before the adjudicating authority when the case is posted for hearing, the case will be decided
+                    ex-parte on its own merits without any further reference.
+                </td>
+            </tr>
+        </table>
+
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
+
+        <table class="para-table">
+            <tr>
+                <td class="para-num">12.
+                </td>
+                <td class="para-content">This notice is issued without prejudice to any other action that may be taken
+                    against them under the provisions of the CGST Act, 2017/Kerala SGST Act, 2017 and IGST Act, 2017 as
+                    amended or the Rules made there under or under any other law for the time being in force in India.
+                    Further, this notice is issued without prejudice to the right to support it with any material
+                    evidence which may be collected at a later date and which may be considered relevant to the
+                    proceedings in this matter.
+                </td>
+            </tr>
+        </table>
+
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
+
+        <table class="para-table">
+            <tr>
+                <td class="para-num">13.
+                </td>
+                <td class="para-content">The Department reserves the right to add, amend, delete or modify any part or
+                    portion of this show cause notice, if considered necessary at any point of time before the case is
+                    adjudicated and such addition, amendment, deletion or modification shall be deemed to be part and
+                    parcel of this notice.
+                </td>
+            </tr>
+        </table>
+
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
+
+        <table class="para-table">
+            <tr>
+                <td class="para-num">14.</td>
+                <td class="para-content">
+                    In this Show Cause Notice, reliance is placed on the following documents:
+                </td>
+            </tr>
+        </table>
+
+        <table class="calc-table">
+            <tbody>
+                <tr>
+                    <td width="15%">
+                        <p>Si No.</p>
+                    </td>
+                    <td>
+                        <p>Description</p>
+                    </td>
+                </tr>
+                
+                <tr>
+                    <td>(i)</td>
+                    <td>No documents listed</td>
+                </tr>
+                
+            </tbody>
+        </table>
+
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
+
+        <!-- [FIX] Replaced Float with Table for Signature Block -->
+        <table class="para-table" style="margin: 20px 0;">
+            <tr>
+                <td style="border: none; width: 50%;"></td> <!-- Spacer -->
+                <td style="border: none; width: 50%; text-align: right; vertical-align: top;">
+                    <p style="margin: 0; padding: 0;"><strong>VISHNU V</strong></p>
+                    <p style="margin: 0; padding: 0;"><strong>Superintendent</strong></p>
+                </td>
+            </tr>
+        </table>
+
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
+
+        <p>To,</p>
+        <p><strong>WESTERN TRADING COMPANY, </strong></p>
+        <p><strong>WESTERN TRADING COMPANY, </strong></p>
+        <p><strong>32AADFW8764E1Z1</strong></p>
+        <p><strong>Karunya Bhawan Home for The Aged Women, FIRST FLOOR, 13/661D, Puthanvelikara Kadavu Ferry Road, Puthenvelikara, Puthenvelikkara, Ernakulam, Kerala, 683594 </strong></p>
+
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
+
+        <p>Copy submitted to:</p>
+        <!-- Spacer -->
+        <div style="height: 5px;"></div>
+
+        <ul>
             
-        </tbody>
-    </table>
+            <li>No copies listed</li>
+            
+        </ul>
 
-    <p>&nbsp;</p>
+        <!-- Spacer -->
+        <div style="height: 15px;"></div>
 
-    <div style="float: right; width: 300px;">
-        <p><strong>VISHNU V</strong></p>
-        <p><strong>Superintendent</strong></p>
-    </div>
-    <div style="clear: both;"></div>
-
-    <p>&nbsp;</p>
-
-    <p>To,</p>
-    <p><strong>M/S KAITHARAN AGENCIES, </strong></p>
-    <p><strong>M/S KAITHARAN AGENCIES, </strong></p>
-    <p><strong>32AAPFK0963M1ZZ</strong></p>
-    <p><strong>XII/51, PUTHENVELIKARA, PUTHENVELIKARA, Ernakulam, Kerala, 683594 </strong></p>
-
-    <p>&nbsp;</p>
-
-    <p>Copy submitted to:</p>
-    <p>&nbsp;</p>
-
-    <ul>
         
-        <li>No copies listed</li>
-        
-    </ul>
-
-    <p>&nbsp;</p>
-    <p>&nbsp;</p>
-
 </body>
 
 </html>

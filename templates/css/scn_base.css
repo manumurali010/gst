@@ -1,0 +1,145 @@
+/* Typography */
+body {
+    font-family: 'Bookman Old Style', serif;
+    font-size: 11pt;
+    line-height: 1.5;
+    color: black;
+}
+
+/* Page Container - Shared Logic */
+.page-container {
+    width: 100%;
+    margin: 0 auto;
+    padding: 0;
+    display: block;
+}
+
+/* Standard Classes as per standardization */
+.scn-title {
+    font-size: 11pt;
+    font-weight: bold;
+    text-align: center;
+    display: block;
+    margin-bottom: 5px;
+    word-break: break-word;
+    /* Safety */
+}
+
+.scn-body {
+    font-size: 11pt;
+    text-align: justify;
+    display: block;
+    line-height: 1.5;
+    /* Explicit */
+    word-break: normal;
+    overflow-wrap: break-word;
+    /* [FIX] Replaced 'anywhere' with 'break-word' */
+}
+
+/* Tables - Shared Logic */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: 15px;
+    /* Standard gap */
+    font-size: 10pt;
+    /* Slightly smaller for tables */
+    /* [FIX] Removed global table-layout: fixed per scoped strategy */
+}
+
+/* Paragraph table */
+.para-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 10px;
+    font-size: 11pt;
+}
+
+.calc-table {
+    table-layout: fixed;
+    /* Rigid columns for data */
+    border-collapse: collapse;
+    width: 100%;
+}
+
+/* Number column */
+.para-num {
+    width: 28px;
+    padding: 0 4px 0 0;
+    font-weight: bold;
+    vertical-align: top;
+    white-space: nowrap;
+}
+
+/* Paragraph text */
+.para-content {
+    padding: 0;
+    text-align: justify;
+    vertical-align: top;
+    word-break: normal;
+    overflow-wrap: break-word;
+}
+
+/* Emphasis without breaking justification */
+.waiver-para {
+    border-bottom: 1px solid black;
+    padding-bottom: 2px;
+}
+
+/* [NEW] Professional Legal Paragraph Wrapper for Qt */
+.legal-para {
+    margin: 0;
+    text-align: justify;
+    word-break: normal;
+    overflow-wrap: break-word;
+}
+
+th,
+td {
+    border: 1px solid black;
+    padding: 5px;
+    vertical-align: top;
+    /* [FIX] Removed global text-align: left per mandatory requirement */
+    word-break: break-word;
+    overflow-wrap: break-word;
+    /* [FIX] Strictly forbidden 'anywhere' */
+}
+
+th {
+    background-color: #f2f2f2;
+    font-weight: bold;
+    text-align: center;
+}
+
+/* Utilities */
+.full-width-table {
+    width: 100%;
+    border: none;
+    margin: 0;
+}
+
+.full-width-table td {
+    border: none;
+    padding: 0;
+}
+
+p {
+    margin-bottom: 15px;
+    margin-top: 0;
+    text-align: justify;
+    line-height: 1.5;
+    word-break: normal;
+    overflow-wrap: break-word;
+    /* [FIX] strictly forbidden 'anywhere' */
+}
+
+/* Header/Sub-header helpers */
+.header {
+    text-align: center;
+    font-weight: bold;
+    font-size: 11pt;
+}
+
+.right-align {
+    text-align: right;
+}

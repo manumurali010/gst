@@ -573,7 +573,38 @@ class IssueManager(QWidget):
         self.conclusion_editor.setHtml(templates.get('conclusion', ''))
         self.include_conclusion_cb.setChecked(templates.get('include_conclusion', True))
         
-        self.table_builder.set_data(issue.get('tables', {}))
+        self.conclusion_editor.setHtml(templates.get('conclusion', ''))
+        self.include_conclusion_cb.setChecked(templates.get('include_conclusion', True))
+        
+        # [PHASE A] Semantic Table Inspection (Hardened)
+        # Rules:
+        # 1. Custom Issues (CUST-*) -> Always Editable Spreadsheet
+        # 2. System Issues -> Must have grid_data. If missing, show Error.
+        
+        grid_data = issue.get('grid_data')
+        tables = issue.get('tables', {})
+        is_custom = str(issue_id).startswith("CUST-")
+        
+        if is_custom:
+            # Mode: Spreadsheet (Editable)
+            self.table_builder.set_read_only(False)
+            self.table_builder.set_data(tables)
+            self.current_issue_is_semantic = False
+            
+        elif grid_data:
+            # Mode: Semantic (Read-Only)
+            hydrated = GridAdapter.hydrate_from_grid_schema(grid_data)
+            self.table_builder.set_data(hydrated)
+            self.table_builder.set_read_only(True)
+            self.current_issue_is_semantic = True
+            
+        else:
+            # Mode: System Issue (Missing Schema) -> Error State
+            self.table_builder.set_data({'rows': 0, 'cols': 0, 'cells': []})
+            self.table_builder.set_read_only(True)
+            self.table_builder.status_lbl.setText("⚠️ No table schema defined for this issue.")
+            self.table_builder.status_lbl.setStyleSheet("color: red; font-weight: bold;")
+            self.current_issue_is_semantic = True # Prevent overwriting with empty table
         
         self.placeholders_table.setRowCount(0)
         for p in issue.get('placeholders', []):
@@ -633,8 +664,30 @@ class IssueManager(QWidget):
                 "conclusion": self.conclusion_editor.toHtml()
             },
             "active": True, # Force Active
-            "tables": self.table_builder.get_data()
+            # "tables": self.table_builder.get_data() # [MODIFIED] Moved to logic block below
         }
+        
+        # [PHASE A] Semantic Data Preservation (Hard Guard)
+        # If the issue was loaded as Semantic (has grid_data), we MUST NOT overwrite it 
+        # with the TableBuilder's 2D array.
+        
+        # 1. Fetch original to preserve grid_data
+        original_issue = self.db.get_issue(self.current_issue_id)
+        if original_issue and original_issue.get('grid_data'):
+            # Semantic Mode: Preserve original grid_data
+            data['grid_data'] = original_issue['grid_data']
+            
+            # [PHASE-B] Editing support deferred. Do not implement extracting schema from UI yet.
+            # We explicitly do NOT save 'tables' here to avoid confusion/corruption.
+            # The 'tables' field in DB might remain as is or be ignored if grid_data exists.
+            
+            # Optional: If you want to persist the 'view' state, you could save tables, 
+            # but for safety, we skip it to ensure single source of truth.
+            data['tables'] = original_issue.get('tables', {})
+            
+        else:
+            # Spreadsheet Mode: Save TableBuilder data
+            data['tables'] = self.table_builder.get_data()
         
         placeholders = []
         for row in range(self.placeholders_table.rowCount()):

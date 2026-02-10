@@ -1,5 +1,7 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QLineEdit, QPushButton, QFrame, QGridLayout, QCheckBox, QAbstractItemView, QGraphicsOpacityEffect)
+                             QLineEdit, QPushButton, QFrame, QGridLayout, QCheckBox, 
+                             QAbstractItemView, QGraphicsOpacityEffect, QTableWidget, 
+                             QTableWidgetItem, QSizePolicy)
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QFont
 import copy
@@ -570,9 +572,11 @@ class IssueCard(QFrame):
              # Normalize on the fly (should have been done in init, but safe fallback)
              canonical_data = self.GridAdapter.normalize_to_schema(raw_source)
 
-        # 2. Structure (Idempotent Widget Creation)
+        # [PHASE A] Mandatory Skeleton Rendering
+        # DRAFTING RULE: Always render structural skeleton, even if values empty
+        
+        # 3. Structure (Idempotent Widget Creation)
         if not hasattr(self, "table"):
-            from PyQt6.QtWidgets import QTableWidget
             self.table = QTableWidget()
             self.table.setMinimumHeight(200)
             self.table.setMaximumHeight(800)
@@ -586,15 +590,14 @@ class IssueCard(QFrame):
             elif hasattr(layout, 'addLayout'):
                 layout.addLayout(self.table)
 
-        # 3. Reversible Skeleton Mode -> Bind Logic
-        rows = canonical_data.get('rows', [])
-        if not rows:
-             print(f"[IssueCard DIAG] init_grid_ui: SKELETON MODE - No rows yet for {grid_id}")
-             self.table.hide()
-             return
-
-        # 4. Bind (Pass CANONICAL data)
-        self.bind_grid_data(canonical_data, layout, data)
+        # 4. Mandatory Bind
+        # Remove guards that hid table on empty rows. Data might be empty but structure exists.
+        if canonical_data:
+            self.bind_grid_data(canonical_data)
+            self.table.show()
+        else:
+            # Should not happen given step 1, but safety fallback
+            print("[IssueCard] No canonical data to bind")
 
     def bind_grid_data(self, grid_data, layout=None, sub_data=None):
         """Strictly UI-only binding. Idempotent and reversible. Expects CANONICAL data."""
@@ -694,11 +697,101 @@ class IssueCard(QFrame):
                            asmt_id = source.get("asmt_id", "N/A")
                            dt = source.get("converted_on", "")
                            if dt and "T" in dt: dt = dt.split("T")[0]
-                  
+                           
                            note = QLabel(f"<i>Source: Adopted from {origin} (Case: {asmt_id}) | Date: {dt}</i>")
                            note.setStyleSheet("color: #7f8c8d; font-size: 10px; padding-left: 5px;")
-                           layout.addWidget(note)
+                           if layout and hasattr(layout, 'addWidget'):
+                               layout.addWidget(note)
                            break # Only show once
+
+        # [DYNAMIC ROW SUPPORT]
+        # Check policy from schema
+        policy = grid_data.get('row_policy', 'fixed')
+        
+        if policy == 'dynamic':
+            # 1. Create Toolbar if missing
+            # We treat this as part of the grid lifecycle
+            if not hasattr(self, 'row_controls'):
+                self.row_controls = QFrame()
+                h_layout = QHBoxLayout(self.row_controls)
+                h_layout.setContentsMargins(0, 5, 0, 5)
+                
+                self.add_btn = QPushButton("+ Add Row")
+                self.add_btn.setStyleSheet("text-align: left; color: #1a73e8; border: none; font-weight: bold; padding: 4px;")
+                self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                self.add_btn.clicked.connect(self.add_dynamic_row)
+                
+                self.del_btn = QPushButton("Delete Selected Row")
+                self.del_btn.setStyleSheet("color: #e74c3c; border: none; margin-left: 10px; padding: 4px;")
+                self.del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                self.del_btn.clicked.connect(self.delete_dynamic_row)
+                
+                h_layout.addWidget(self.add_btn)
+                h_layout.addWidget(self.del_btn)
+                h_layout.addStretch()
+                
+                # Add to layout immediately after table
+                # We need to find where table is
+                if layout:
+                     if hasattr(layout, 'addWidget'):
+                          layout.addWidget(self.row_controls)
+                     elif hasattr(layout, 'addLayout'):
+                          layout.addWidget(self.row_controls)
+            
+            self.row_controls.show()
+        else:
+            # Fixed Mode: Hide controls if they exist
+            if hasattr(self, 'row_controls'):
+                self.row_controls.hide()
+
+    def add_dynamic_row(self):
+        """Adds a new row to the dynamic grid and refreshes UI."""
+        if not self.grid_data: return
+        
+        columns = self.grid_data.get('columns', [])
+        if not columns: return
+        
+        # 1. Create New Row
+        import time
+        new_id = f"r_dyn_{int(time.time()*1000)}" 
+        row_obj = {"id": new_id}
+        
+        for col in columns:
+            # Default to input type
+            row_obj[col['id']] = {"value": "", "type": "input"}
+            
+        # 2. Update Data
+        if 'rows' not in self.grid_data: self.grid_data['rows'] = []
+        self.grid_data['rows'].append(row_obj)
+        
+        # 3. Refresh UI (Full Re-bind to ensure consistency)
+        # This is safe because bind_grid_data is idempotent-ish
+        # We assume self.table already exists
+        self.bind_grid_data(self.grid_data)
+        
+        # 4. Scroll to bottom
+        self.table.scrollToBottom()
+
+    def delete_dynamic_row(self):
+        """Deletes the currently selected row."""
+        if not self.grid_data: return
+        
+        rows = self.grid_data.get('rows', [])
+        if not rows: return
+        
+        # 1. Get Selection
+        current_row = self.table.currentRow()
+        if current_row < 0: return # No selection
+        
+        # 2. Safety Check (Don't allow deleting header/magic rows? 
+        # GridAdapter renders headers as QTableWidget headers, so row 0 is data row 0.
+        if current_row >= len(rows): return
+        
+        # 3. Update Data
+        del rows[current_row]
+        
+        # 4. Refresh UI
+        self.bind_grid_data(self.grid_data)
 
     def on_grid_data_adopted(self):
         """
@@ -1497,48 +1590,160 @@ class IssueCard(QFrame):
             if cess: breakdown['Cess'] = {'tax': cess, 'interest': get_v('interest_cess'), 'penalty': get_v('penalty_cess')}
             return breakdown
 
+        # [FIX] Canonical-First Logic: Strict Adherence to tax_demand_mapping
+        if self.tax_mapping:
+            has_mapped_data = False
+            for act in ['IGST', 'CGST', 'SGST', 'Cess']:
+                var_name = self.tax_mapping.get(act)
+                if var_name:
+                    # Mapped variable exists in template contract
+                    val = get_v(var_name)
+                    # We populate the breakdown even if 0, to respect the contract
+                    # But we only flag has_mapped_data if we found a valid mapping instruction
+                    has_mapped_data = True
+                    
+                    if act not in breakdown:
+                        breakdown[act] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
+                    
+                    breakdown[act]['tax'] = val
+                    
+                    # Optional: Look for sibling interest/penalty variables if conventional names used
+                    # (This part remains heuristic or requires extended mapping, but tax is the priority)
+            
+            if has_mapped_data:
+                return breakdown
+
         # 2. Smart Detection for Grid Tables (if mapping is missing)
+        # Support both Legacy 'tables' and Modern 'grid_data'
+        target_tables = []
         if isinstance(self.template.get('tables'), dict) and self.template['tables'].get('rows', 0) > 0:
+            target_tables.append(('legacy', self.template['tables']))
+        
+        # [FIX] Add grid_data support for heuristics
+        # We look at self.grid_data which is the runtime state, or template default
+        current_grid = self.grid_data if hasattr(self, 'grid_data') and self.grid_data else self.template.get('grid_data')
+        if current_grid and isinstance(current_grid, dict) and 'rows' in current_grid:
+            target_tables.append(('grid', current_grid))
+
+        if target_tables:
             try:
-                table_data = self.template['tables']
-                rows = table_data.get('rows', 0)
-                cols = table_data.get('cols', 0)
-                cells = table_data.get('cells', [])
-                
-                # Find Header Row (usually row 0)
-                header_map = {} # 'CGST': col_index
-                if rows > 0 and len(cells) > 0:
-                    for c, val in enumerate(cells[0]):
-                        val_str = str(val).upper()
-                        if 'CGST' in val_str: header_map['CGST'] = c
-                        elif 'SGST' in val_str: header_map['SGST'] = c
-                        elif 'IGST' in val_str: header_map['IGST'] = c
-                        elif 'CESS' in val_str: header_map['Cess'] = c
-                
-                # Find Data Row (Difference, Tax, Total)
-                # We search from bottom up as totals are usually at the bottom
-                for r in range(rows - 1, 0, -1):
-                    row_label = str(cells[r][0]).upper() if len(cells[r]) > 0 else ""
-                    if 'DIFFERENCE' in row_label or 'TAX' in row_label or 'TOTAL' in row_label:
-                        # Found a candidate row
-                        # Extract values based on header map
-                        for act, col_idx in header_map.items():
-                            # Reconstruct address (e.g., B4)
-                            col_label = ""
-                            temp = col_idx
-                            while temp >= 0:
-                                col_label = chr(ord('A') + (temp % 26)) + col_label
-                                temp = (temp // 26) - 1
-                            addr = f"{col_label}{r+1}"
-                            
-                            val = get_v(addr)
-                            if val > 0:
-                                if act not in breakdown:
-                                    breakdown[act] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
-                                breakdown[act]['tax'] = val
+                for t_type, table_data in target_tables:
+                    if t_type == 'legacy':
+                        # ... Existing Legacy Logic (Preserved) ...
+                        rows = table_data.get('rows', 0)
+                        cols = table_data.get('cols', 0)
+                        cells = table_data.get('cells', [])
                         
-                        if breakdown:
-                            return breakdown
+                        # Find Header Row (usually row 0)
+                        header_map = {} # 'CGST': col_index
+                        if rows > 0 and len(cells) > 0:
+                            for c, val in enumerate(cells[0]):
+                                val_str = str(val).upper()
+                                if 'CGST' in val_str: header_map['CGST'] = c
+                                elif 'SGST' in val_str: header_map['SGST'] = c
+                                elif 'IGST' in val_str: header_map['IGST'] = c
+                                elif 'CESS' in val_str: header_map['Cess'] = c
+                        
+                        # Find Data Row (Difference, Tax, Total)
+                        for r in range(rows - 1, 0, -1):
+                            row_label = str(cells[r][0]).upper() if len(cells[r]) > 0 else ""
+                            if 'DIFFERENCE' in row_label or 'TAX' in row_label or 'TOTAL' in row_label:
+                                for act, col_idx in header_map.items():
+                                    col_label = ""
+                                    temp = col_idx
+                                    while temp >= 0:
+                                        col_label = chr(ord('A') + (temp % 26)) + col_label
+                                        temp = (temp // 26) - 1
+                                    addr = f"{col_label}{r+1}"
+                                    
+                                    val = get_v(addr)
+                                    if val > 0:
+                                        if act not in breakdown:
+                                            breakdown[act] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
+                                        breakdown[act]['tax'] = val
+                                if breakdown: return breakdown
+
+                    elif t_type == 'grid':
+                        # [NEW] Grid Data Heuristic
+                        # 1. Map Columns by Label
+                        columns = table_data.get('columns', [])
+                        col_map = {} # 'CGST': 'col2'
+                        
+                        for col in columns:
+                            if isinstance(col, dict):
+                                label = str(col.get('label', '')).upper()
+                                cid = col.get('id')
+                                if 'CGST' in label: col_map['CGST'] = cid
+                                elif 'SGST' in label: col_map['SGST'] = cid
+                                elif 'IGST' in label: col_map['IGST'] = cid
+                                elif 'CESS' in label: col_map['Cess'] = cid
+                        
+                        if not col_map: continue
+                        
+                        # 2. Iterate Rows and Sum (Assumption: All rows contribute to liability unless labeled otherwise?)
+                        # Or should we look for Total row?
+                        # Start by Summing ALL numeric values in these columns (Safe for simple lists)
+                        # If we find a "Total" row, we might double count? 
+                        # GridAdapter usually doesn't have "Total" rows unless static.
+                        
+                        temp_totals = {k: 0.0 for k in col_map.keys()}
+                        
+                        rows = table_data.get('rows', [])
+                        for row in rows:
+                            # Skip Header-like rows if any (usually handled by columns)
+                            # Check Row Label if exists
+                            # In GridAdapter, row is dict: {col_id: cell_obj}
+                            
+                            is_total_row = False
+                            # Heuristic: Check ALL string cells for "Total" or "Difference"
+                            # This is safer than assuming first col is always the label (e.g. checkbox cols)
+                            for cell in row.values():
+                                if isinstance(cell, dict) and 'value' in cell:
+                                    val_str = str(cell['value']).strip().upper()
+                                    if val_str == "TOTAL" or "TOTAL " in val_str or " TOTAL" in val_str:
+                                        is_total_row = True
+                                        break
+                                    if "DIFFERENCE" in val_str:
+                                        is_total_row = True 
+                                        break
+                            
+                            if is_total_row: continue
+
+                            for act, cid in col_map.items():
+                                cell = row.get(cid)
+                                if isinstance(cell, dict):
+                                    # Try 'var' first (bound value)
+                                    val = 0.0
+                                    raw_val = None
+                                    if 'var' in cell and cell['var']:
+                                         raw_val = get_v(cell['var'])
+                                         val = raw_val
+                                    else:
+                                         # Try static/input value
+                                         try: 
+                                             raw_val = cell.get('value', 0)
+                                             # Handle "Rs. 1,000" or "1000.00"
+                                             if isinstance(raw_val, str):
+                                                 clean_val = raw_val.replace(',', '').replace('Rs.', '').strip()
+                                                 if clean_val:
+                                                     val = float(clean_val)
+                                             else:
+                                                 val = float(raw_val)
+                                         except: val = 0.0
+                                    
+                                    if val > 0:
+                                        temp_totals[act] += val
+                        
+                        # Transfer to breakdown
+                        has_val = False
+                        for act, total in temp_totals.items():
+                            if total > 0:
+                                if act not in breakdown: breakdown[act] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
+                                breakdown[act]['tax'] = total
+                                has_val = True
+                        
+                        if has_val: return breakdown
+
             except Exception as e:
                 print(f"Smart Tax Detection Error: {e}")
 

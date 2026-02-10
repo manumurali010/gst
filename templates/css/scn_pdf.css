@@ -1,0 +1,43 @@
+/* PDF Specific Rules */
+@page {
+    size: A4;
+    margin: 20mm;
+
+    /* Printer margins */
+    @bottom-center {
+        content: "Page " counter(page);
+        font-family: 'Bookman Old Style', serif;
+        font-size: 10pt;
+    }
+}
+
+body {
+    margin: 0;
+    /* Let @page handle margins */
+    padding: 0;
+}
+
+.page-container {
+    width: 100%;
+    padding: 0;
+    /* No internal padding needed for print */
+    margin: 0;
+}
+
+/* Ensure tables break cleanly */
+tr {
+    page-break-inside: avoid;
+}
+
+table {
+    page-break-inside: auto;
+}
+
+/* Improve header repeating if supported */
+thead {
+    display: table-header-group;
+}
+
+tfoot {
+    display: table-footer-group;
+}

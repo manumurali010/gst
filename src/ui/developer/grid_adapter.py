@@ -165,3 +165,103 @@ class GridAdapter:
         table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         table_widget.verticalHeader().setVisible(False)
         table_widget.setAlternatingRowColors(True)
+
+    @staticmethod
+    def hydrate_from_grid_schema(grid_data):
+        """
+        [PHASE A] Read-Only Hydration (Hardened)
+        Converts Semantic Grid Schema -> 2D Array for TableBuilder.
+        
+        Rules:
+        1. [Fix Duplication] If 'columns' contains a description field, map it to Col 0 ONLY.
+           Do not render it again in the data columns.
+        2. [UX] Row 0 is Headers, Col 0 is Row Labels (Description).
+        3. [Safety] Assert single description column.
+        """
+        if not grid_data:
+            return None
+            
+        columns = grid_data.get('columns', [])
+        rows = grid_data.get('rows', [])
+        
+        if not columns and not rows:
+            return None
+            
+        # --- Rule 1: Smart Column Deduping ---
+        # Identify if we have an explicit description column
+        desc_col_candidates = ['desc', 'description', 'particulars', 'gstin']
+        
+        found_desc_col = None
+        data_columns = []
+        
+        for col in columns:
+            col_id = col.get('id', '').lower()
+            if not found_desc_col and col_id in desc_col_candidates:
+                found_desc_col = col
+                # print(f"[GridAdapter] Found Description Column: {col_id} -> Mapping to Col 0") # Diagnostic
+            else:
+                data_columns.append(col)
+        
+        if found_desc_col:
+            # Use the explicit column's label for Col 0 header
+            row_label_header = found_desc_col.get('label', 'Description')
+        else:
+            # Fallback
+            row_label_header = "(Row Label)"
+            # print("[GridAdapter] No explicit description column found. Using fallback.")
+            
+        # 1. Prepare Header Row (Row 0)
+        # Col 0 = Row Label Header
+        header_row = [row_label_header] + [c.get('label', c.get('id', '')) for c in data_columns]
+        
+        # 2. Prepare Data Rows
+        data_rows = []
+        for r_dict in rows:
+            # Resolve Row Label (Col 0)
+            # If we found a desc column, use its ID. Otherwise try common keys.
+            row_label_val = ""
+            
+            if found_desc_col:
+                # Strict: Use the ID of the identified column
+                target_id = found_desc_col.get('id')
+                val = r_dict.get(target_id, "")
+                if isinstance(val, dict): val = val.get('value', '')
+                row_label_val = str(val or "")
+            else:
+                # Loose: Try to find a label
+                for key in ['desc', 'description', 'label', 'id', 'particulars']:
+                   if key in r_dict:
+                       val = r_dict[key]
+                       if isinstance(val, dict): val = val.get('value', '')
+                       if val:
+                           row_label_val = str(val)
+                           break
+            
+            row_cells = [row_label_val] 
+            
+            # Map remaining data columns
+            for col in data_columns:
+                col_id = col.get('id')
+                cell = r_dict.get(col_id, {})
+                val = ""
+                if isinstance(cell, dict):
+                    val = cell.get('value', '')
+                else:
+                    val = str(cell)
+                row_cells.append(str(val))
+            
+            data_rows.append(row_cells)
+            
+        # 3. Assemble 2D Grid
+        grid_2d = {
+            "rows": len(data_rows) + 1,
+            "cols": len(header_row),
+            "cells": [header_row] + data_rows,
+            "is_semantic_view": True,
+            "_meta": { 
+                "type": "semantic_grid_snapshot",
+                "original_desc_col": found_desc_col.get('id') if found_desc_col else None
+            }
+        }
+        
+        return grid_2d

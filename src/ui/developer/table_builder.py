@@ -1,8 +1,9 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
                              QTableWidgetItem, QPushButton, QHeaderView, QMenu, 
-                             QMessageBox, QInputDialog, QLabel, QStyledItemDelegate, QLineEdit)
+                             QMessageBox, QInputDialog, QLabel, QStyledItemDelegate, QLineEdit,
+                             QAbstractItemView)
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent
-from PyQt6.QtGui import QAction, QColor
+from PyQt6.QtGui import QAction, QColor, QFont
 
 class FormulaDelegate(QStyledItemDelegate):
     def __init__(self, parent=None):
@@ -386,9 +387,53 @@ class TableBuilderWidget(QWidget):
             
         return data
 
+        return super().eventFilter(source, event)
+
+    def set_read_only(self, read_only):
+        """
+        [PHASE A] Enforce Read-Only Mode for Semantic Tables.
+        - Disables editing triggers.
+        - Disables toolbar buttons.
+        - Disables context menu.
+        - [SAFEGUARD] Blocks signals to preventing accidental mutation events during setup.
+        """
+        self.table.blockSignals(True) # [SAFEGUARD]
+        
+        if read_only:
+            # Disable Editing
+            self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+            self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+            
+            # Disable Toolbar Buttons
+            for i in range(self.layout().itemAt(0).layout().count()):
+                widget = self.layout().itemAt(0).layout().itemAt(i).widget()
+                if isinstance(widget, QPushButton) and widget.text() != "?":
+                    widget.setEnabled(False)
+                    
+            # Visual Indicator
+            self.status_lbl.setText("🔒 Read-Only: Semantic Table (Edit in Codebase)")
+            self.status_lbl.setStyleSheet("color: #e67e22; font-weight: bold;")
+        else:
+            # Re-enable Editing
+            self.table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.EditKeyPressed | QAbstractItemView.EditTrigger.AnyKeyPressed)
+            self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            
+            # Re-enable Toolbar
+            for i in range(self.layout().itemAt(0).layout().count()):
+                widget = self.layout().itemAt(0).layout().itemAt(i).widget()
+                if isinstance(widget, QPushButton):
+                    widget.setEnabled(True)
+            
+            self.status_lbl.setText("Tip: Enter formulas starting with '=' (e.g., =A2*B2)")
+            self.status_lbl.setStyleSheet("color: gray; font-style: italic;")
+            
+        self.table.blockSignals(False) # [SAFEGUARD]
+
     def set_data(self, data):
-        """Load data from JSON"""
+        """Load data from JSON. Handles both simple (Spreadsheet) and Semantic (Read-Only) formats."""
         if not data: return
+        
+        is_semantic = data.get("is_semantic_view", False)
         
         rows = data.get("rows", 4)
         cols = data.get("cols", 4)
@@ -398,11 +443,83 @@ class TableBuilderWidget(QWidget):
         self.update_headers()
         
         cells = data.get("cells", [])
+        
+        # [PHASE A] UX Hardening
+        if is_semantic:
+            # 1. Container Constraints
+            self.table.setMaximumWidth(950) # Approx 850-900px + padding
+            self.table.setSizePolicy(self.table.sizePolicy().horizontalPolicy(), 
+                                   self.table.sizePolicy().verticalPolicy().Expanding)
+            
+            # 2. visual polish
+            self.table.setShowGrid(True)
+            self.table.setWordWrap(True)
+            self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        else:
+            self.table.setMaximumWidth(16777215) # Reset to max
+            
+        header_font = QFont()
+        header_font.setBold(True)
+        header_bg = QColor("#f0f0f0")
+        
         for r, row_data in enumerate(cells):
             if r >= rows: break
             for c, txt in enumerate(row_data):
                 if c >= cols: break
-                self.table.setItem(r, c, QTableWidgetItem(txt))
+                
+                item = QTableWidgetItem(txt)
+                
+                if is_semantic:
+                    # Generic Semantic Styling
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+                    
+                    # Row 0 (Headers)
+                    if r == 0:
+                        item.setFont(header_font)
+                        item.setBackground(header_bg)
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    
+                    # Col 0 (Row Labels / Description)
+                    if c == 0:
+                        item.setFont(header_font)
+                        item.setBackground(header_bg)
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+                        # Min width handled by header interaction below loop? 
+                        # Actually set strictly here if possible, but easier on the column
+                        
+                self.table.setItem(r, c, item)
+        
+            # 3. Column Sizing
+            # Col 0 needs min width for readability
+            self.table.setColumnWidth(0, 300) # Minimum width for description
+            self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive) # Allow resize but start wide
+            
+            # Other columns stretch
+            for i in range(1, cols):
+                 self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+
+            # [PHASE A] Full-Height Rendering (Mandatory)
+            # Must be visible without vertical scrolling whenever possible.
+            self.table.resizeRowsToContents()
+            
+            total_height = self.table.horizontalHeader().height() + (self.table.frameWidth() * 2)
+            for r in range(self.table.rowCount()):
+                total_height += self.table.rowHeight(r)
+            
+            # Add small buffer for borders/grid
+            total_height += 2 
+            
+            # Apply Height & Scroll Policy
+            self.table.setFixedHeight(total_height)
+            self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        
+        else:
+            # Spreadsheet Mode: Reset to default sizing behavior
+            self.table.setMaximumHeight(16777215) # Max
+            self.table.setMinimumHeight(0)
+            self.table.setSizePolicy(self.table.sizePolicy().horizontalPolicy(), 
+                                   self.table.sizePolicy().verticalPolicy().Expanding)
+            self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
     def eventFilter(self, source, event):
         # Check if we are currently editing a cell using our tracked editor

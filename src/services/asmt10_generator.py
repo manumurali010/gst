@@ -362,11 +362,22 @@ class ASMT10Generator:
         return html
 
     @staticmethod
-    def generate_html(data, issues, for_preview=True, show_letterhead=True):
-        """Generates the HTML content for ASMT-10 with specific layout and formatting."""
+    def generate_html(data, issues, for_preview=True, show_letterhead=True, style_mode="legacy"):
+        """
+        Generates the HTML content for ASMT-10 with specific layout and formatting.
+        
+        Args:
+            data (dict): Case data
+            issues (list): List of selected issues
+            for_preview (bool): Optimized for screen preview if True
+            show_letterhead (bool): Whether to include letterhead image
+            style_mode (str): "legacy" (Scrutiny Tab default) or "professional" (Adjudication Tab)
+        """
         from src.utils.config_manager import ConfigManager
         import re
         import os
+        import base64
+        from datetime import datetime
         
         config = ConfigManager()
         
@@ -398,117 +409,183 @@ class ASMT10Generator:
         # 2. Fetch Letterhead
         lh_content = ""
         try:
-            lh_path = config.get_letterhead_path('pdf')
-            if os.path.exists(lh_path):
-                with open(lh_path, 'r', encoding='utf-8') as f:
-                    lh_full = f.read()
-                    match = re.search(r"<body[^>]*>(.*?)</body>", lh_full, re.DOTALL | re.IGNORECASE)
-                    if match:
-                        lh_content = match.group(1)
-                        lh_content = lh_content.replace('<div id="form-header-placeholder"></div>', '')
-                        lh_content = lh_content.replace('<div id="content-placeholder"></div>', '')
-                        lh_content = lh_content.replace('margin: 10px auto;', 'margin: 0 auto;')
-                        lh_content = lh_content.replace('margin-bottom: 20px;', 'margin-bottom: 5px;')
-                        lh_content = lh_content.replace('padding-top: 0px;', 'padding-top: 0;')
+            if show_letterhead:
+                lh_filename = config.get_pdf_letterhead()
+                lh_path = os.path.join(config.letterheads_dir, lh_filename)
+                
+                if lh_path and os.path.exists(lh_path):
+                    ext = os.path.splitext(lh_path)[1][1:].lower()
+                    
+                    # Fetch visual adjustments for this specific letterhead
+                    adj = config.get_letterhead_adjustments(lh_filename)
+                    # [RENDER-TIME CAP] Prevent extreme width adjustments (e.g. 623%) from breaking layout
+                    width_val = adj.get('width', 100)
+                    if width_val > 100: width_val = 100
+                    
+                    lh_style = f"width: {width_val}%; padding-top: {adj.get('padding_top', 0)}px; margin-bottom: {adj.get('margin_bottom', 20)}px;"
+                    
+                    if ext == "html":
+                        # Case 1: HTML letterhead - read as text
+                        with open(lh_path, 'r', encoding='utf-8') as f:
+                            lh_full = f.read()
+                            # Extract body content if present, otherwise use full content
+                            import re
+                            match = re.search(r"<body[^>]*>(.*?)</body>", lh_full, re.DOTALL | re.IGNORECASE)
+                            inner_html = match.group(1) if match else lh_full
+                            lh_content = f'<div style="{lh_style} text-align: center;">{inner_html}</div>'
                     else:
-                        lh_content = lh_full
+                        # Case 2: Image letterhead - read as binary and base64 encode
+                        with open(lh_path, "rb") as image_file:
+                            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+                        if ext == "jpg": ext = "jpeg"
+                        lh_content = f'<div style="{lh_style} text-align: center;"><img src="data:image/{ext};base64,{encoded_string}" alt="Letterhead" style="max-width: 100%; height: auto;"></div>'
+                else:
+                    print(f"Letterhead file not found: {lh_path}")
         except Exception as e:
-            print(f"Error loading letterhead: {e}")
-            lh_content = "<div style='text-align:center;'><h3>GST DEPARTMENT</h3></div>"
-
-        # 3. Preparation of Metadata & Formatting
-        def fmt_date(d_str):
-            if not d_str or str(d_str).upper() == "N/A": return "N/A"
-            try:
-                from datetime import datetime
-                d_str = str(d_str).split()[0] if ' ' in str(d_str) else str(d_str)
-                dt = datetime.strptime(d_str, '%Y-%m-%d')
-                return dt.strftime('%d/%m/%Y')
-            except:
-                return str(d_str)
-
-        # Map keys from snapshot or direct data
-        n_date = data.get('notice_date') or data.get('issue_date') or data.get('created_at', '')
-        notice_date = fmt_date(n_date)
-        reply_date = fmt_date(data.get('last_date_to_reply', ''))
-        oc_number = data.get('oc_number', 'N/A')
-
-        issue_sections = ""
-        for idx, issue in enumerate(active_issues, 1):
-            raw_name = issue.get('category') or issue.get('issue_name') or "Unknown Issue"
-            issue_name = re.sub(r'^Point \d+- ?', '', raw_name, flags=re.IGNORECASE)
+            print(f"Letterhead Error: {e}")
             
-            section_html = f"""
+        # Fallback if image load failed but letterhead matching requested
+        if show_letterhead and not lh_content:
+             lh_content = """
+             <div style="text-align: center; margin-bottom: 20px;">
+                <h3 style="margin:0; padding:0;">GOVERNMENT OF INDIA</h3>
+                <h4 style="margin:5px 0 0 0; padding:0;">GOODS AND SERVICES TAX DEPARTMENT</h4>
+             </div>
+             """
+
+        display_lh = lh_content if show_letterhead else '<div style="height: 100px;"></div>'
+
+        # 3. Helpers
+        def format_date(dt_str):
+            if not dt_str: return "-"
+            try:
+                # Handle YYYY-MM-DD
+                d = datetime.strptime(str(dt_str)[:10], "%Y-%m-%d")
+                return d.strftime("%d/%m/%Y")
+            except:
+                return str(dt_str)
+
+        oc_number = data.get('oc_number', 'DRAFT')
+        notice_date = format_date(data.get('notice_date') or datetime.now().date())
+        reply_date = data.get('last_date_to_reply', 'Within 30 Days')
+        
+        legal_name = data.get('taxpayer_details', {}).get('legal_name', data.get('legal_name', 'N/A'))
+        gstin = data.get('taxpayer_details', {}).get('gstin', data.get('gstin', 'N/A'))
+        addr = data.get('taxpayer_details', {}).get('address', 'Address not available')
+        addr_clean = addr.replace('\n', '<br>')
+        
+        # 4. Generate Body
+        issue_sections = ""
+        issue_intro_parts = []
+        
+        for idx, issue in enumerate(active_issues, 1):
+            shortfall = robust_float(issue.get('total_shortfall', 0))
+            name = issue.get('category') or issue.get('issue_name') or "Unknown Discrepancy"
+            desc = issue.get('brief_facts') or issue.get('description') or "Details as per attached calculation sheet."
+            
+            # Intro text builder
+            issue_intro_parts.append(f"{idx} discrepancies") # Just a placeholder count really
+            
+            # Issue Table
+            table_html = ASMT10Generator.generate_issue_table_html(issue)
+            
+            issue_sections += f"""
             <div class="issue-block">
-                <p><strong>Issue {idx} – {issue_name}</strong></p>
+                <div style="font-weight: bold; margin-bottom: 5px; font-size: 11pt;">Issue {idx} – {name}</div>
+                <div style="font-weight: bold; color: #b91c1c; margin-bottom: 10px;">Estimated Tax: ₹ {format_indian_number(shortfall, prefix_rs=False)}</div>
                 
-                <p style="margin-top: 2px; margin-bottom: 5px; font-weight: bold;">
-                    Estimated Tax: ₹ {format_indian_number(robust_float(issue.get('total_shortfall', 0)), prefix_rs=False)}
-                </p>
+                <div style="margin-bottom: 10px; text-align: justify;">{desc}</div>
                 
-                <div class="justify-text" style="margin-bottom: 10px;">
-                    {issue.get('detailed_narration') or issue.get('brief_facts') or issue.get('description') or issue.get('scn_narration') or ''}
-                </div>
+                {table_html}
+            </div>
             """
-            section_html += ASMT10Generator.generate_issue_table_html(issue)
-            section_html += "</div>"
-            issue_sections += section_html
+            
+        intro_text = f"the following {len(active_issues)} discrepancies"
 
-        # Dynamic intro text using count
-        intro_text = f"the {issues_count} discrepancies" if issues_count > 0 else "discrepancies"
-
-
-        # 3. Recipient Details & Address Wrapping
-        raw_address = (data.get('address') or data.get('Address of Principal Place of Business') or 
-                       data.get('taxpayer_details', {}).get('Address') or 
-                       data.get('taxpayer_details', {}).get('Address of Principal Place of Business') or '')
+        # 5. CSS Styling Selection
+        padding = "40px" if for_preview else "25mm 15mm"
         
-        # Clean address for professional wrapping: ensure one space after commas and no double spaces
-        if raw_address:
-            addr_clean = ' '.join(str(raw_address).replace(',', ', ').split()).replace('  ', ' ').strip()
-        else:
-            addr_clean = "Address not found"
-        
-        gstin = data.get('gstin') or data.get('taxpayer_details', {}).get('GSTIN') or 'N/A'
-        legal_name = data.get('legal_name') or data.get('taxpayer_details', {}).get('Legal Name') or 'Unknown'
-
-        # Apply Letterhead suppression
-        display_lh = lh_content if show_letterhead else ""
-
-        # [STABILIZATION] Pre-calculate styles for f-string safety
-        bg_color = "#f1f5f9" if for_preview else "#525659"
-        page_width = "820px" if for_preview else "210mm" 
-        page_margin = "30px auto"
-        page_border = "1px solid #e2e8f0" if for_preview else "none"
-        page_shadow = "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)" if for_preview else "0 0 10px rgba(0,0,0,0.5)"
-        page_padding = "60px" if for_preview else "25mm 15mm"
-
-        html = f"""
-        <html>
-        <head>
-            <style>
-                /* Print-Ready CSS */
-                @media print {{
-                    @page {{ size: A4 portrait; margin: 0mm; }}
-                    body {{ 
-                        background-color: white !important; 
-                        width: 100%;
-                        margin: 0 !important;
-                        padding: 0 !important;
-                    }}
-                    .page-container {{
-                        width: 100%;
-                        margin: 0 !important;
-                        padding: 25mm 15mm !important;
-                        border: none !important;
-                        box-shadow: none !important;
-                        background-color: white !important;
-                        display: block !important;
-                    }}
-                    .footer-sign {{ page-break-inside: avoid; }}
-                    thead {{ display: table-header-group; }}
+        if style_mode == "professional":
+            # --- PROFESSIONAL STYLE (Adjudication Tab) ---
+            # Used for the read-only view in Proceedings Workspace
+            page_width = "794px" # A4 width approx at 96dpi
+            
+            css = f"""
+                body {{ 
+                    font-family: 'Times New Roman', serif; 
+                    background-color: #525659; 
+                    color: black;
+                    margin: 0;
+                    padding: 20px;
                 }}
+                .page-wrapper {{
+                    width: 100%;
+                    text-align: center;
+                }}
+                .page-container {{
+                    display: inline-block;
+                    text-align: left;
+                    width: {page_width}; 
+                    min-height: {"1000px" if for_preview else "297mm"}; 
+                    padding: {padding}; 
+                    background-color: white; 
+                    border: 1px solid #ccc;
+                    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+                }}
+                .letterhead-area {{ margin-bottom: 20px; width: 100%; text-align: center; }}
+                .letterhead-area img {{ width: 100%; max-height: 120px; object-fit: contain; }}
+                .oc-header {{ width: 100%; margin-bottom: 15px; font-weight: bold; font-size: 11pt; }}
+                .form-title-area {{ text-align: center; margin-bottom: 25px; }}
+                .form-title {{ font-size: 14pt; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }}
+                .form-rule {{ font-size: 10pt; font-style: italic; }}
+                .recipient {{ margin-bottom: 25px; font-size: 12pt; text-align: left; line-height: 1.4; }}
+                .tax-period {{ margin-bottom: 15px; font-size: 12pt; font-weight: bold; }}
+                .subject {{ text-align: center; font-weight: bold; margin-bottom: 20px; font-size: 12pt; text-decoration: underline; }}
+                .content-main {{ font-size: 12pt; line-height: 1.5; }}
+                .justify-text {{ text-align: justify; }}
+                .issue-block {{ margin-bottom: 30px; border-bottom: 1px dashed #ccc; padding-bottom: 20px; }}
+                .data-table {{ width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 15px; border: 1px solid black; }}
+                .data-table th, .data-table td {{ border: 1px solid black; padding: 5px; font-size: 10pt; text-align: center; }}
+                .data-table th {{ background-color: #f2f2f2; font-weight: bold; }}
+                .footer-sign {{ margin-top: 60px; text-align: right; font-size: 12pt; font-weight: bold; }}
+            """
+            
+            body_content = f"""
+            <div class="page-wrapper">
+                <div class="page-container">
+                    <div class="letterhead-area">{display_lh}</div>
+                    <table class="oc-header" width="100%">
+                        <tr><td align="left">O.C. No.: {oc_number}</td><td align="right">Date: {notice_date}</td></tr>
+                    </table>
+                    <div class="form-title-area">
+                        <div class="form-title">FORM GST ASMT-10</div>
+                        <div class="form-rule">[See rule 99(1)]</div>
+                    </div>
+                    <div class="recipient">To,<br><strong>{legal_name}</strong><br>GSTIN: {gstin}<br>{addr_clean}</div>
+                    <div class="tax-period">Tax period: {data.get('financial_year', 'N/A')}</div>
+                    <div class="subject">Sub: Notice for intimating discrepancies in the return after scrutiny</div>
+                    <div class="content-main">
+                        <p class="justify-text">This is to inform that during the scrutiny of the returns for the financial year {data.get('financial_year')}, {intro_text} have been noticed:</p>
+                        {issue_sections}
+                        <p style="margin-top: 20px; font-size: 13pt;"><strong>Total Tax Liability Identified: ₹ {format_indian_number(total_tax, prefix_rs=False)}</strong></p>
+                        <p class="justify-text">You are hereby directed to explain the reasons for the aforesaid discrepancies by <strong>{reply_date}</strong>.</p>
+                        <p class="justify-text">Failing which, proceedings in accordance with law may be initiated against you without further reference.</p>
+                        <div class="footer-sign"><br><br>Signature of Proper Officer<br>(Name)<br>Designation</div>
+                </div>
+            </div>
+            """
 
+        else:
+            # --- LEGACY STYLE (Original Scrutiny Tab) ---
+            # Restored to exact previous configuration
+            bg_color = "#f1f5f9" if for_preview else "#525659"
+            page_width = "820px" if for_preview else "210mm" 
+            page_margin = "30px auto"
+            page_border = "1px solid #e2e8f0" if for_preview else "none"
+            page_shadow = "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)" if for_preview else "0 0 10px rgba(0,0,0,0.5)"
+            old_padding = "60px" if for_preview else "25mm 15mm"
+
+            css = f"""
                 body {{ 
                     font-family: 'Bookman Old Style', 'Times New Roman', serif; 
                     margin: 0; 
@@ -518,26 +595,32 @@ class ASMT10Generator:
                     background-color: {bg_color}; 
                     -webkit-font-smoothing: antialiased;
                 }}
+                .page-wrapper {{
+                    width: 100%;
+                    text-align: center;
+                }}
                 .page-container {{
                     width: {page_width}; 
                     min-height: {"1000px" if for_preview else "297mm"}; 
-                    padding: {page_padding}; 
-                    margin: {page_margin}; 
+                    padding: {old_padding}; 
+                    margin: 30px auto !important; 
                     background: white; 
                     border: {page_border};
                     box-shadow: {page_shadow}; 
                     box-sizing: border-box;
-                    display: block;
+                    display: inline-block; /* Support margin:auto and text-align:center fallback */
+                    text-align: left;
                 }}
                 .letterhead-area {{ margin-bottom: 20px; width: 100%; text-align: center; }}
                 .letterhead-area img {{ max-width: 100%; height: auto; object-fit: contain; }}
-                .oc-header {{ width: 100%; margin-bottom: 15px; font-weight: bold; font-size: 11pt; border-collapse: collapse; }}
-                .oc-header td {{ border: none; padding: 0; }}
+                .oc-header {{ width: 100% !important; margin-bottom: 15px; font-weight: bold; font-size: 11pt; border-collapse: collapse; }}
+                .oc-header td {{ border: none !important; padding: 0 !important; }}
                 .form-title-area {{ text-align: center; margin-bottom: 25px; }}
                 .form-title {{ font-size: 12pt; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }}
                 .form-rule {{ font-size: 10pt; font-style: italic; }}
                 .recipient {{ margin-bottom: 25px; font-size: 11pt; text-align: left; line-height: 1.3; max-width: 100%; }}
                 .recipient p {{ margin: 0; padding: 0; }}
+                .recipient td {{ border: none !important; padding: 0 !important; }}
                 .tax-period {{ margin-bottom: 15px; font-size: 11pt; font-weight: bold; }}
                 .subject {{ text-align: center; font-weight: bold; margin-bottom: 30px; font-size: 11pt; margin-top: 20px; text-decoration: underline; width: 100%; }}
                 .content-main {{ font-size: 11pt; line-height: 1.5; width: 100%; }}
@@ -545,65 +628,78 @@ class ASMT10Generator:
                 .issue-block {{ margin-bottom: 30px; width: 100%; }}
                 .data-table {{ width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 15px; margin-left: 0; margin-right: 0; table-layout: fixed; border: 1px solid black; }}
                 /* Reduced font and padding to fit 9 columns */
-                .data-table th, .data-table td {{ border: 1px solid black; padding: 3px 2px; font-size: 8pt; text-align: center; word-wrap: break-word; overflow-wrap: break-word; }}
-                .data-table th {{ background-color: #f2f2f2; font-weight: bold; font-size: 8pt; vertical-align: middle; }}
+                .data-table th, .data-table td {{ border: 1px solid black !important; padding: 3px 2px !important; font-size: 8pt; text-align: center; word-wrap: break-word; overflow-wrap: break-word; }}
+                .data-table th {{ background-color: #f2f2f2 !important; font-weight: bold; font-size: 8pt; vertical-align: middle; }}
                 .footer-sign {{ margin-top: 50px; text-align: right; font-size: 11pt; }}
-            </style>
-        </head>
-        <body>
-            <div class="page-container">
-                <div class="letterhead-area">
-                {display_lh}
-            </div>
-
-            <table class="oc-header" style="border: none;">
-                <tr style="border: none;">
-                    <td align="left" style="border: none; width: 50%;">O.C. No.: {oc_number}</td>
-                    <td align="right" style="border: none; width: 50%;">Date: {notice_date}</td>
-                </tr>
-            </table>
-
-            <div class="form-title-area">
-                <div class="form-title">FORM GST ASMT-10</div>
-                <div class="form-rule">[See rule 99(1)]</div>
-            </div>
+            """
             
-            <table class="recipient" style="width: 65%; border: none;">
-                <tr style="border: none;">
-                    <td style="border: none; text-align: left; padding: 0;">
-                        To,<br>
-                        <strong>{legal_name}</strong><br>
-                        GSTIN: {gstin}<br>
-                        {addr_clean}
-                    </td>
-                </tr>
-            </table>
+            body_content = f"""
+            <div class="page-wrapper">
+                <div class="page-container">
+                    <div class="letterhead-area">
+                        {display_lh}
+                    </div>
 
-            <div class="tax-period">
-                Tax period: {data.get('financial_year', 'N/A')}
-            </div>
-            
-            <div class="subject">
-                Sub: Notice for intimating discrepancies in the return after scrutiny
-            </div>
+                    <table class="oc-header" style="border: none;">
+                        <tr style="border: none;">
+                            <td align="left" style="border: none; width: 50%;">O.C. No.: {oc_number}</td>
+                            <td align="right" style="border: none; width: 50%;">Date: {notice_date}</td>
+                        </tr>
+                    </table>
 
-            <div class="content-main">
-                <p class="justify-text">This is to inform that during the scrutiny of the returns for the financial year {data.get('financial_year')}, {intro_text} have been noticed:</p>
-                
-                {issue_sections}
-                
-                <p style="margin-top: 20px;"><strong>Total Tax Liability Identified: ₹ {format_indian_number(total_tax, prefix_rs=False)}</strong></p>
-                
-                <p class="justify-text">You are hereby directed to explain the reasons for the aforesaid discrepancies by <strong>{reply_date}</strong>.</p>
-                <p class="justify-text">Failing which, proceedings in accordance with law may be initiated against you without further reference.</p>
-                
-                <div class="footer-sign">
-                    Signature of Proper Officer<br>
-                    (Name)<br>
-                    Designation
+                    <div class="form-title-area">
+                        <div class="form-title">FORM GST ASMT-10</div>
+                        <div class="form-rule">[See rule 99(1)]</div>
+                    </div>
+                    
+                    <table class="recipient" style="width: 65%; border: none;">
+                        <tr style="border: none;">
+                            <td style="border: none; text-align: left; padding: 0;">
+                                To,<br>
+                                <strong>{legal_name}</strong><br>
+                                GSTIN: {gstin}<br>
+                                {addr_clean}
+                            </td>
+                        </tr>
+                    </table>
+
+                    <div class="tax-period">
+                        Tax period: {data.get('financial_year', 'N/A')}
+                    </div>
+                    
+                    <div class="subject">
+                        Sub: Notice for intimating discrepancies in the return after scrutiny
+                    </div>
+
+                    <div class="content-main">
+                        <p class="justify-text">This is to inform that during the scrutiny of the returns for the financial year {data.get('financial_year')}, {intro_text} have been noticed:</p>
+                        
+                        {issue_sections}
+                        
+                        <p style="margin-top: 20px;"><strong>Total Tax Liability Identified: ₹ {format_indian_number(total_tax, prefix_rs=False)}</strong></p>
+                        
+                        <p class="justify-text">You are hereby directed to explain the reasons for the aforesaid discrepancies by <strong>{reply_date}</strong>.</p>
+                        <p class="justify-text">Failing which, proceedings in accordance with law may be initiated against you without further reference.</p>
+                        
+                        <div class="footer-sign">
+                            Signature of Proper Officer<br>
+                            (Name)<br>
+                            Designation
+                        </div>
+                    </div>
                 </div>
             </div>
-            </div>
+            """
+        
+        html = f"""
+        <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <style>{css}</style>
+        </head>
+        <body>
+            {body_content}
         </body>
         </html>
         """

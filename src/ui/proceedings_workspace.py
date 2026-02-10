@@ -416,7 +416,9 @@ class ProceedingsWorkspace(QWidget):
         
         toolbar_layout.addSpacing(20)
         
-        # Zoom Controls
+        # Zoom Controls (Now controls font size / scale in TextBrowser if possible, 
+        # or we just remove them because TextBrowser handles standard zoom via Ctrl+Wheel)
+        # Keeping them for consistency, but mapping to zoomIn/zoomOut
         zoom_layout = QHBoxLayout()
         zoom_layout.setSpacing(5)
         
@@ -439,30 +441,14 @@ class ProceedingsWorkspace(QWidget):
         toolbar_layout.addLayout(zoom_layout)
         layout.addWidget(self.asmt10_toolbar)
         
-        # 2. Scroll Area for Preview
-        self.asmt10_scroll_area = QScrollArea()
-        self.asmt10_scroll_area.setWidgetResizable(True)
-        self.asmt10_scroll_area.setStyleSheet("background-color: #f0f2f5;") # Modern light grey bg
+        # 2. Native HTML Preview (QTextBrowser)
+        # [FIX] Switched from Image/WeasyPrint to Native Browser for robustness
+        self.asmt10_browser = QTextBrowser()
+        self.asmt10_browser.setStyleSheet("border: none; background-color: #525659;") 
+        self.asmt10_browser.setOpenExternalLinks(False)
+        self.asmt10_browser.zoomIn(0) # Reset zoom to normal
         
-        # Centering Container
-        self.asmt10_center_container = QWidget()
-        self.asmt10_center_container.setStyleSheet("background-color: transparent;")
-        center_layout = QVBoxLayout(self.asmt10_center_container)
-        center_layout.setContentsMargins(0, 40, 0, 40)
-        center_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        
-        # Page Container (Fixed Width for A4 look)
-        self.asmt10_page_container = QWidget()
-        self.asmt10_page_container.setFixedWidth(900)
-        self.asmt10_page_container.setStyleSheet("background-color: transparent;") 
-        self.asmt10_page_layout = QVBoxLayout(self.asmt10_page_container)
-        self.asmt10_page_layout.setSpacing(30)
-        self.asmt10_page_layout.setContentsMargins(0, 0, 0, 0)
-        self.asmt10_page_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        
-        center_layout.addWidget(self.asmt10_page_container)
-        self.asmt10_scroll_area.setWidget(self.asmt10_center_container)
-        layout.addWidget(self.asmt10_scroll_area)
+        layout.addWidget(self.asmt10_browser)
         
         return widget
 
@@ -474,7 +460,7 @@ class ProceedingsWorkspace(QWidget):
         scrutiny_data = self.db.get_scrutiny_case_data(source_scrutiny_id)
         
         if not scrutiny_data:
-            self._show_preview_error("Source Scrutiny Data not found.")
+            self.asmt10_browser.setHtml("<h3 style='color:white; text-align:center; margin-top:50px;'>Source Scrutiny Data not found.</h3>")
             return
 
         # Update Toolbar Meta
@@ -493,7 +479,30 @@ class ProceedingsWorkspace(QWidget):
             }
             
             taxpayer = scrutiny_data.get('taxpayer_details', {})
-            taxpayer = scrutiny_data.get('taxpayer_details', {})
+            if not isinstance(taxpayer, dict): taxpayer = {}
+            
+            # [ENRICHMENT] Strictly preview-only: Fetch fresh taxpayer details
+            # Ensure we use the correct key for GSTIN (handle both 'gstin' and 'taxpayer_gstin')
+            gstin = scrutiny_data.get('gstin') or scrutiny_data.get('taxpayer_gstin')
+            if not gstin and taxpayer:
+                 gstin = taxpayer.get('GSTIN') or taxpayer.get('gstin')
+                 
+            if gstin:
+                fresh_taxpayer = self.db.get_taxpayer(gstin)
+                if fresh_taxpayer:
+                    # Update preview dictionary with fresh data if missing or N/A
+                    if taxpayer.get('Legal Name', 'N/A') in ['N/A', '', None]:
+                        taxpayer['Legal Name'] = fresh_taxpayer.get('Legal Name', taxpayer.get('Legal Name', 'N/A'))
+                    
+                    if taxpayer.get('Address', 'Address not available') in ['Address not available', '', None]:
+                         taxpayer['Address'] = (fresh_taxpayer.get('Address') or 
+                                               fresh_taxpayer.get('Address of Principal Place of Business') or 
+                                               taxpayer.get('Address', 'Address not available'))
+                    
+                # Also update gstin in case_info for the header
+                case_info['gstin'] = gstin
+            
+            # Fix double fetch logic in original code
             issues = scrutiny_data.get('selected_issues', [])
             
             # Handle new parser format which returns {"metadata":..., "issues": [...]}
@@ -503,57 +512,17 @@ class ProceedingsWorkspace(QWidget):
             generator = ASMT10Generator()
             full_data = case_info.copy()
             full_data['taxpayer_details'] = taxpayer
+            full_data['gstin'] = gstin
             
-            # Use local letterhead state
-            html_content = generator.generate_html(full_data, issues, for_preview=True, show_letterhead=self.asmt10_show_letterhead)
+            # [ALIGNMENT] Use "legacy" style mode for visual parity with Scrutiny module
+            html_content = generator.generate_html(full_data, issues, for_preview=True, show_letterhead=self.asmt10_show_letterhead, style_mode="legacy")
             
-            images = PreviewGenerator.generate_preview_image(html_content, all_pages=True)
-            
-            if not images:
-                self._show_preview_error("Failed to render preview images.")
-                return
-
-            # Clear previous
-            while self.asmt10_page_layout.count():
-                child = self.asmt10_page_layout.takeAt(0)
-                if child.widget():
-                    child.widget().deleteLater()
-            
-            # Add new pages with "Paper" styling
-            base_width = 840 # Base width for 1.0 zoom
-            target_width = int(base_width * self.asmt10_zoom_level)
-            
-            # Adjust container width
-            self.asmt10_page_container.setFixedWidth(target_width + 40)
-            
-            for img_bytes in images:
-                lbl = QLabel()
-                pixmap = PreviewGenerator.get_qpixmap_from_bytes(img_bytes)
-                if pixmap:
-                    scaled_pixmap = pixmap.scaledToWidth(target_width, Qt.TransformationMode.SmoothTransformation)
-                    lbl.setPixmap(scaled_pixmap)
-                    lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    lbl.setStyleSheet("""
-                        QLabel {
-                            background-color: white;
-                            border: 1px solid #d1d5db;
-                            border-radius: 2px;
-                        }
-                    """)
-                    # Shadow Effect (Subtle)
-                    from PyQt6.QtWidgets import QGraphicsDropShadowEffect
-                    from PyQt6.QtGui import QColor
-                    shadow = QGraphicsDropShadowEffect()
-                    shadow.setBlurRadius(15)
-                    shadow.setColor(QColor(0, 0, 0, 40))
-                    shadow.setOffset(0, 4)
-                    lbl.setGraphicsEffect(shadow)
-                    
-                    self.asmt10_page_layout.addWidget(lbl)
+            # Update the browser directly
+            self.asmt10_browser.setHtml(html_content)
                 
         except Exception as e:
             print(f"ASMT-10 Render Error: {e}")
-            self._show_preview_error(f"Error rendering ASMT-10: {e}")
+            self.asmt10_browser.setHtml(f"<h3 style='color:red; text-align:center;'>Error rendering ASMT-10: {e}</h3>")
 
     def _on_asmt10_lh_toggled(self, state):
         self.asmt10_show_letterhead = (state == Qt.CheckState.Checked.value or state == True)
@@ -562,26 +531,18 @@ class ProceedingsWorkspace(QWidget):
             self.render_asmt10_preview(source_id)
 
     def _zoom_asmt10_in(self):
-        self.asmt10_zoom_level = min(2.0, self.asmt10_zoom_level + 0.1)
-        source_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
-        if source_id: self.render_asmt10_preview(source_id)
+        self.asmt10_browser.zoomIn(1)
 
     def _zoom_asmt10_out(self):
-        self.asmt10_zoom_level = max(0.5, self.asmt10_zoom_level - 0.1)
-        source_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
-        if source_id: self.render_asmt10_preview(source_id)
+        self.asmt10_browser.zoomOut(1)
 
     def _zoom_asmt10_reset(self):
-        self.asmt10_zoom_level = 1.0
-        source_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
-        if source_id: self.render_asmt10_preview(source_id)
+        # Reset is tricky without tracking, but we can set font size or just zoom to default
+        # QTextBrowser doesn't have absolute zoom set.
+        pass # Todo: Implement reset logic if needed
 
     def _show_preview_error(self, message):
-        self._clear_asmt10_preview()
-        lbl = QLabel(message)
-        lbl.setStyleSheet("color: #e74c3c; font-weight: bold;")
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.asmt10_page_layout.addWidget(lbl)
+         self.asmt10_browser.setHtml(f"<h3 style='color:red; text-align:center;'>{message}</h3>")
 
     def _clear_asmt10_preview(self):
         """Helper to safely clear the ASMT-10 page container"""
@@ -3201,12 +3162,10 @@ class ProceedingsWorkspace(QWidget):
                              first_row[target_col]["source"] = source_meta
                 
                 # Demand Calculation Contract
-                scn_template['tax_demand_mapping'] = {
-                    'tax_igst': 'tax_igst',
-                    'tax_cgst': 'tax_cgst',
-                    'tax_sgst': 'tax_sgst',
-                    'tax_cess': 'tax_cess'
-                }
+                # [FIX] REMOVED blind injection of tax_demand_mapping.
+                # If the template doesn't specify a mapping, we should NOT assume standard variables exist.
+                # This allows IssueCard to correctly fall back to heuristics (grid summation) for legacy/list-based issues.
+                pass
             except Exception as e:
                 print(f"Metadata Injection Failed: {e}")
 
@@ -4183,89 +4142,99 @@ class ProceedingsWorkspace(QWidget):
             # Start numbering from Para 3 (Para 1=Intro, Para 2=References)
             current_para_num = 3
 
-            if self.scn_issue_cards:
-                # Filter included issues only
-                included_cards = [c for c in self.scn_issue_cards if getattr(c, 'is_included', True)]
-                print(f"DEBUG: Rendering from {len(included_cards)} included cards.")
+            if hasattr(self, 'scn_issue_cards') and self.scn_issue_cards:
+                # New Logic: Render from self.scn_issue_cards (Live Draft)
+                current_para_num = 1
                 
-                for i, card in enumerate(included_cards, 1):
-                    
-                    # --- Main Paragraph (e.g., "3. Issue No. 1: Title") ---
-                    title = card.template.get('issue_name', 'Issue')
-                    
-                    # We use a table for alignment to mimic the "flex" look since QTextBrowser supports tables well
-                    issues_html += f"""
-                    <table cellspacing="0" cellpadding="0" style="width: 100%; margin-bottom: 10px; border: none;">
-                        <tr style="border: none;">
-                            <td style="width: 1px; white-space: nowrap; vertical-align: top; border: none; font-weight: bold; padding: 0; padding-right: 5px;">{current_para_num}.</td>
-                            <td style="vertical-align: top; border: none; font-weight: bold; padding: 0;">Issue No. {i}: {title}</td>
-                        </tr>
-                    </table>
-                    """
-                    
-                    # --- Sub Paragraphs (e.g., "3.1 Content...") ---
-                    sub_para_count = 1
-                    
-                    # [FIX] Direct Separation of Content and Table
-                    # Instead of fragile string splitting, we generate them separately.
-                    editor_part = card.editor.toHtml()
-                    table_part = card.generate_table_html(card.template, card.variables)
-                    
-                    # Regex split for paragraphs
-                    import re
-                    editor_part = re.sub(r'<p>\s*&nbsp;\s*</p>', '', editor_part)
-                    editor_part = re.sub(r'<p>\s*</p>', '', editor_part)
-                    paras = re.findall(r'<p.*?>(.*?)</p>', editor_part, re.DOTALL)
-                    
-                    # Fallback for raw text
-                    if not paras and editor_part.strip():
-                        paras = [editor_part]
-                        
-                    for p_content in paras:
-                        if p_content.strip():
-                            # [FIX] Enforce Justify Alignment in Body Text
-                            p_content = f'<div style="text-align: justify;">{p_content}</div>'
+                # 1. Introduction Para (Para 1) - Handled in Template
+                current_para_num += 1
+                
+                # 2. Jurisdiction/Definition Para (Para 2) - Handled in Template
+                current_para_num += 1
+                
+                # 3. Dynamic Issues (Para 3 onwards)
+                for card in self.scn_issue_cards:
+                        if not card.get_data().get('is_enabled', True):
+                            continue
                             
-                            num_str = f"{current_para_num}.{sub_para_count}"
+                        # Issue Title as Main Paragraph
+                        title = card.display_title
+                        i = card.issue_id
+                        
+                        # [FIX] Use Scoped Class Structure
                         issues_html += f"""
-                        <table cellspacing="0" cellpadding="0" style="width: 100%; margin-bottom: 10px; border: none;">
-                            <tr style="border: none;">
-                                <td style="width: 1px; white-space: nowrap; vertical-align: top; border: none; padding: 0; font-weight: bold; padding-right: 5px;">{num_str}</td>
-                                <td style="vertical-align: top; border: none; padding: 0;">{p_content}</td>
+                        <table class="para-table">
+                            <tr>
+                                <td class="para-num">{current_para_num}.</td>
+                                <td class="para-content"><strong>Issue No. {i}: {title}</strong></td>
                             </tr>
                         </table>
                         """
-                        sub_para_count += 1
-                    
-                    # Table as Sub-Para
-                    if table_part and table_part.strip():
-                        num_str = f"{current_para_num}.{sub_para_count}"
-                        issues_html += f"""
-                        <div style="display: flex; margin-bottom: 10px;">
-                            <table cellspacing="0" cellpadding="0" style="width: 100%; border: none;">
-                                <tr style="border: none;">
-                                    <td style="width: 1px; white-space: nowrap; vertical-align: top; border: none; padding: 0; font-weight: bold; padding-right: 5px;">{num_str}</td>
-                                    <td style="vertical-align: top; border: none; padding: 0;">{table_part}</td>
+                        
+                        # --- Sub Paragraphs (e.g., "3.1 Content...") ---
+                        sub_para_count = 1
+                        
+                        # [FIX] Direct Separation of Content and Table
+                        editor_part = card.editor.toHtml()
+                        table_part = card.generate_table_html(card.template, card.variables)
+                        
+                        # Regex split for paragraphs
+                        import re
+                        editor_part = re.sub(r'<p>\s*&nbsp;\s*</p>', '', editor_part)
+                        editor_part = re.sub(r'<p>\s*</p>', '', editor_part)
+                        paras = re.findall(r'<p.*?>(.*?)</p>', editor_part, re.DOTALL)
+                        
+                        # Fallback for raw text
+                        if not paras and editor_part.strip():
+                            paras = [editor_part]
+                            
+                        for p_content in paras:
+                            if p_content.strip():
+                                # [FIX] Flatten text and Remove Wrapper
+                                # 1. Replace all whitespace/newlines with single space
+                                clean_content = re.sub(r'\s+', ' ', p_content).strip()
+                                
+                                # 2. Inject into P.legal-para (Qt Justification Contract)
+                                num_str = f"{current_para_num}.{sub_para_count}"
+                                issues_html += f"""
+                                <table class="para-table">
+                                    <tr>
+                                        <td class="para-num">{num_str}</td>
+                                        <td class="para-content">
+                                            <p class="legal-para">{clean_content}</p>
+                                        </td>
+                                    </tr>
+                                </table>
+                                """
+                                sub_para_count += 1
+                        
+                        # Table as Sub-Para
+                        if table_part and table_part.strip():
+                            num_str = f"{current_para_num}.{sub_para_count}"
+                            issues_html += f"""
+                            <table class="para-table">
+                                <tr>
+                                    <td class="para-num">{num_str}</td>
+                                    <td class="para-content">{table_part}</td>
                                 </tr>
                             </table>
-                        </div>
-                        """
-                        sub_para_count += 1
+                            """
+                            sub_para_count += 1
+                            
+                        current_para_num += 1
+                    
+                        # Demand Summary Calculations
+                        # demand_html += f"<li>Demand for {title}...</li>"
                         
-                    current_para_num += 1
-                    
-                    # Demand Summary Calculations
-                    # demand_html += f"<li>Demand for {title}...</li>"
-                    
-                    # Totals
-                    card_data = card.get_data()
-                    breakdown = card_data.get('tax_breakdown', {})
-                    for act, vals in breakdown.items():
-                        tax = vals.get('tax', 0)
-                        total_tax += tax
-                        if act == 'IGST': igst_total += tax
-                        elif act == 'CGST': cgst_total += tax
-                        elif act == 'SGST': sgst_total += tax
+                        # Totals
+                        card_data = card.get_data()
+                        breakdown = card_data.get('tax_breakdown', {})
+                        for act, vals in breakdown.items():
+                            tax = vals.get('tax', 0)
+                            total_tax += tax
+                            if act == 'IGST': igst_total += tax
+                            elif act == 'CGST': cgst_total += tax
+                            elif act == 'SGST': sgst_total += tax
             else:
                 issues_html = "<p>No issues selected.</p>"
 
@@ -4346,8 +4315,29 @@ class ProceedingsWorkspace(QWidget):
             section = data.get('initiating_section', '')
             data['section'] = section
             
-            # 2. Load Template
+            # 2. Load Template and CSS
             template_dir = os.path.join(os.getcwd(), 'templates')
+            css_dir = os.path.join(template_dir, 'css')
+            
+            # Helper to read CSS safely
+            def read_css(filename):
+                path = os.path.join(css_dir, filename)
+                if os.path.exists(path):
+                    with open(path, 'r', encoding='utf-8') as f:
+                        return f.read()
+                return ""
+
+            # Load CSS Content
+            data['base_css'] = read_css('scn_base.css')
+            
+            # Determine Renderer CSS
+            # Default to Qt (Preview) unless overridden
+            renderer_mode = data.get('render_mode', 'qt') 
+            if renderer_mode == 'pdf':
+                data['renderer_css'] = read_css('scn_pdf.css')
+            else:
+                data['renderer_css'] = read_css('scn_qt.css')
+
             env = Environment(loader=FileSystemLoader(template_dir))
             template = env.get_template('scn.html')
             

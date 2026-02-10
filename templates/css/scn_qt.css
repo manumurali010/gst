@@ -1,0 +1,41 @@
+/* Qt Specific Fixes */
+* {
+    box-sizing: border-box;
+    /* Global box sizing */
+}
+
+html,
+body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+    /* Prevent horizontal scroll */
+    margin: 0;
+    padding: 0;
+    background-color: white;
+}
+
+.page-container {
+    padding: 10mm;
+    /* Visual padding for screen, mimics A4 margins */
+    max-width: 100%;
+    min-height: 297mm;
+    /* A4 Height simulation */
+}
+
+/* [FIX] Removed forced global table-layout: fixed */
+table {
+    max-width: 100%;
+}
+
+td,
+th {
+    word-wrap: break-word;
+    /* Allow wrapping */
+}
+
+/* Numbering Column Fix for Qt */
+/* Explicitly support .para-num in case of specificity issues */
+.para-num {
+    white-space: nowrap;
+}

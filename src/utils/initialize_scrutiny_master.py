@@ -312,7 +312,7 @@ def get_grid_schema_sop7_cancelled():
         for col in columns:
              row_obj[col["id"]] = {"value": "", "type": "input"}
         rows.append(row_obj)
-    return {"columns": columns, "rows": rows}
+    return {"columns": columns, "rows": rows, "row_policy": "dynamic"}
 
 def get_grid_schema_sop8_non_filer():
     """SOP 8: Non-Filer (User Req: GSTR 2A Period, Taxable Value)"""
@@ -333,7 +333,7 @@ def get_grid_schema_sop8_non_filer():
         for col in columns:
              row_obj[col["id"]] = {"value": "", "type": "input"}
         rows.append(row_obj)
-    return {"columns": columns, "rows": rows}
+    return {"columns": columns, "rows": rows, "row_policy": "dynamic"}
 
 def get_grid_schema_sop9_sec16_4():
     """SOP 9: Sec 16(4) (User Req: Cut off Date)"""
@@ -351,7 +351,7 @@ def get_grid_schema_sop9_sec16_4():
         for col in columns:
              row_obj[col["id"]] = {"value": "", "type": "input"}
         rows.append(row_obj)
-    return {"columns": columns, "rows": rows}
+    return {"columns": columns, "rows": rows, "row_policy": "dynamic"}
 
 issues = [
     {"issue_id": "LIABILITY_3B_R1", "issue_name": "Outward Liability Mismatch (GSTR 3B vs GSTR 1)", "sop_point": 1, "grid_data": get_grid_schema_sop1(), 
