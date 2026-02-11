@@ -9,6 +9,52 @@ from src.ui.rich_text_editor import RichTextEditor
 from src.ui.components.modern_card import ModernCard
 from src.ui.ui_helpers import render_grid_to_table_widget
 from src.utils.formatting import format_indian_number
+from src.ui.styles import Theme
+
+class CollapsibleSection(QWidget):
+    def __init__(self, title, content_widget, parent=None):
+        super().__init__(parent)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+        
+        # Header
+        self.header = QFrame()
+        self.header.setStyleSheet("background-color: transparent;") 
+        self.header.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.header_layout = QHBoxLayout(self.header)
+        self.header_layout.setContentsMargins(0, 5, 0, 5)
+        self.header_layout.setSpacing(8)
+        
+        self.toggle_btn = QLabel("▼") # Simple text label for chevron
+        self.toggle_btn.setStyleSheet(f"color: {Theme.NEUTRAL_500}; font-size: 10px;")
+        
+        self.title_lbl = QLabel(title)
+        self.title_lbl.setStyleSheet(f"font-size: {Theme.FONT_BODY}; font-weight: {Theme.WEIGHT_SEMIBOLD}; color: {Theme.NEUTRAL_500}; text-transform: uppercase; letter-spacing: 0.5px;")
+        
+        self.header_layout.addWidget(self.toggle_btn)
+        self.header_layout.addWidget(self.title_lbl)
+        self.header_layout.addStretch()
+        
+        # Click event on header
+        self.header.mousePressEvent = self.toggle_content
+        
+        self.layout.addWidget(self.header)
+        
+        # Content
+        self.content_area = content_widget
+        self.layout.addWidget(self.content_area)
+        
+        # Separator (Optional)
+        self.line = QFrame()
+        self.line.setFrameShape(QFrame.Shape.HLine)
+        self.line.setStyleSheet(f"color: {Theme.NEUTRAL_200};")
+        self.layout.addWidget(self.line)
+
+    def toggle_content(self, event=None):
+        visible = self.content_area.isVisible()
+        self.content_area.setVisible(not visible)
+        self.toggle_btn.setText("▶" if visible else "▼")
 
 class IssueCard(QFrame):
     # Signal emitted when any value changes, passing the calculated totals
@@ -22,6 +68,186 @@ class IssueCard(QFrame):
     
     # [CONST] Idempotency Contract
     CANONICAL_PLACEHOLDER = "[Enter Brief Facts here]"
+
+    def init_ui(self):
+        """
+        Refactored UI: Clean minimal design with right-aligned actions and no heavy nesting.
+        """
+        # Base container styling (Clean Card)
+        self.setObjectName("IssueCard")
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setLineWidth(1)
+        self.setStyleSheet(f"""
+            #IssueCard {{
+                background-color: {Theme.SURFACE};
+                border: 1px solid {Theme.NEUTRAL_200};
+                border-radius: {Theme.RADIUS_MD};
+            }}
+        """)
+        
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0,0,0,0)
+        self.main_layout.setSpacing(0)
+        
+        # --- 1. Header Section ---
+        self.header_frame = QFrame()
+        self.header_frame.setStyleSheet(f"border-bottom: 1px solid {Theme.NEUTRAL_200}; background-color: {Theme.NEUTRAL_100}; border-top-left-radius: {Theme.RADIUS_MD}; border-top-right-radius: {Theme.RADIUS_MD};")
+        header_layout = QHBoxLayout(self.header_frame)
+        header_layout.setContentsMargins(15, 10, 15, 10)
+        header_layout.setSpacing(10)
+        
+        # Toggle Button (Chevron)
+        self.toggle_btn = QPushButton("▼")
+        self.toggle_btn.setFixedSize(28, 28)
+        self.toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.NEUTRAL_200};
+                color: {Theme.NEUTRAL_900};
+                border: none;
+                border-radius: 14px;
+                font-size: 12px;
+                font-weight: bold;
+                padding-bottom: 2px;
+            }}
+            QPushButton:hover {{
+                background-color: {Theme.NEUTRAL_500};
+                color: {Theme.SURFACE};
+            }}
+        """)
+        self.toggle_btn.clicked.connect(self.toggle_content)
+        header_layout.addWidget(self.toggle_btn)
+
+        # Title Column
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        
+        # Title
+        title_text = self.display_title
+        if self.issue_number:
+            title_text = f"{self.issue_number}. {title_text}"
+            
+        self.title_lbl = QLabel(title_text)
+        self.title_lbl.setStyleSheet(f"font-size: {Theme.FONT_CARD}; font-weight: {Theme.WEIGHT_SEMIBOLD}; color: {Theme.NEUTRAL_900}; border: none;")
+        title_col.addWidget(self.title_lbl)
+        
+        # Metadata Row (Source badge + text)
+        meta_row = QHBoxLayout()
+        meta_row.setSpacing(8)
+        
+        self.source_badge = QLabel("")
+        self.source_badge.hide()
+        # Badge style handled in set_classification
+        meta_row.addWidget(self.source_badge)
+        
+        self.meta_lbl = QLabel("Origin: SCN") # Placeholder
+        self.meta_lbl.setStyleSheet(f"font-size: {Theme.FONT_META}; color: {Theme.NEUTRAL_500}; border: none;")
+        meta_row.addWidget(self.meta_lbl)
+        
+        meta_row.addStretch()
+        title_col.addLayout(meta_row)
+        
+        header_layout.addLayout(title_col, stretch=1)
+        
+        # Actions Column (Right Aligned)
+        from src.ui.ui_helpers import create_secondary_button, create_danger_button
+        
+        # Remove Button
+        self.remove_btn = create_danger_button("Remove", self.handle_remove_or_drop)
+        # Compact Danger Button
+        self.remove_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.SURFACE};
+                color: {Theme.DANGER};
+                border: 1px solid {Theme.NEUTRAL_200};
+                border-radius: {Theme.RADIUS_MD};
+                padding: 4px 12px;
+                font-weight: 600;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{
+                background-color: #fee2e2;
+                border-color: {Theme.DANGER};
+                color: {Theme.DANGER_HOVER};
+            }}
+        """)
+        header_layout.addWidget(self.remove_btn)
+        
+        self.main_layout.addWidget(self.header_frame)
+        
+        # --- 2. Body Section ---
+        self.body_container = QWidget()
+        self.body_container.setObjectName("BodyContainer")
+        body_layout = QVBoxLayout(self.body_container)
+        body_layout.setContentsMargins(20, 20, 20, 20)
+        body_layout.setSpacing(20)
+        
+        # 2.1 Calculated Totals (Mini Dashboard)
+        totals_panel = QFrame()
+        totals_panel.setStyleSheet(f"background-color: {Theme.NEUTRAL_100}; border-radius: {Theme.RADIUS_MD};")
+        t_layout = QHBoxLayout(totals_panel)
+        t_layout.setContentsMargins(15, 10, 15, 10)
+        
+        self.lbl_igst = QLabel("IGST: ₹ 0")
+        self.lbl_cgst = QLabel("CGST: ₹ 0")
+        self.lbl_sgst = QLabel("SGST: ₹ 0")
+        
+        for lbl in [self.lbl_igst, self.lbl_cgst, self.lbl_sgst]:
+            lbl.setStyleSheet(f"font-weight: {Theme.WEIGHT_SEMIBOLD}; color: {Theme.NEUTRAL_900}; border: none;")
+            t_layout.addWidget(lbl)
+            t_layout.addSpacing(20)
+            
+        t_layout.addStretch()
+        body_layout.addWidget(totals_panel)
+        
+        # 2.2 Issue Data (Grid)
+        self.grid_container = QWidget()
+        g_layout = QVBoxLayout(self.grid_container)
+        g_layout.setContentsMargins(0, 10, 0, 10)
+        
+        # Loading Logic
+        if 'grid_data' in self.template:
+             self.init_grid_ui(g_layout)
+        elif self.template.get('summary_table'):
+             self.init_grid_ui(g_layout, data=self.template['summary_table'])
+        elif 'tables' in self.template and isinstance(self.template['tables'], list):
+            for tbl in self.template['tables']:
+                if tbl.get('title'):
+                    t_lbl = QLabel(f"{tbl.get('title')}")
+                    t_lbl.setStyleSheet(f"color: {Theme.NEUTRAL_900}; font-weight: bold; margin-top: 5px;")
+                    g_layout.addWidget(t_lbl)
+                self.init_grid_ui(g_layout, data=tbl)
+        elif isinstance(self.template.get('tables'), dict):
+            self.init_excel_table_ui(g_layout)
+        
+        if self.template.get('placeholders'):
+            self.init_legacy_ui(g_layout)
+            
+        # Wrap Grid
+        self.grid_section = CollapsibleSection("Issue Details", self.grid_container)
+        body_layout.addWidget(self.grid_section)
+        
+        # 2.3 Draft Content (Editor)
+        self.editor = RichTextEditor()
+        self.editor.setMinimumHeight(200)
+        # [UI POLISH] Remove toolbar for cleaner look (safe mode)
+        self.editor.set_toolbar_visible(False) 
+        
+        self.update_editor_content()
+        self.editor.textChanged.connect(self.contentChanged.emit)
+        
+        self.draft_section = CollapsibleSection("Brief Facts & Content", self.editor)
+        body_layout.addWidget(self.draft_section)
+        
+        self.main_layout.addWidget(self.body_container)
+
+    def toggle_content(self):
+        """Toggles the visibility of the body content."""
+        is_visible = self.body_container.isVisible()
+        self.body_container.setVisible(not is_visible)
+        # Update chevron
+        self.toggle_btn.setText("▶" if not is_visible else "▼")
+
 
     def __init__(self, template, data=None, parent=None, mode="DRC-01A", content_key="content", save_template_callback=None, issue_number=None):
         super().__init__(parent)
@@ -145,167 +371,11 @@ class IssueCard(QFrame):
         self.sync_ui_with_variables()
 
 
-    def init_ui(self):
-        """
-        Structural Restoration (STRICT)
-        - Top-Level: ModernCard (Collapsed by default)
-        - Nested: Issue Data Card + Draft Content Card
-        - Persistence: Create once, show/hide only
-        """
-        # Base container styling
-        self.setFrameStyle(QFrame.Shape.NoFrame)
-        self.setStyleSheet("background: transparent;")
-        
-        # [FIX] Layout Safety: Check existing before creating
-        if self.layout():
-            self.main_layout = self.layout()
-        else:
-            self.main_layout = QVBoxLayout(self)
-            self.main_layout.setContentsMargins(0,0,0,0)
-        
-        # 1. Top-Level Card (Host)
-        # [FIX] UI Header Title logic
-        # Constraint: init_ui must NOT compute title, only decorate it.
-        title_text = self.display_title
-        
-        if self.mode == "SCN":
-             # Ensure we don't duplicate if title already has it (unlikely but safe)
-             if "(SCN Draft)" not in title_text:
-                 title_text += " (SCN Draft)"
-        
-        if self.issue_number:
-            title_text = f"Issue {self.issue_number} – {title_text}"
-
-        self.card = ModernCard(title_text, collapsible=True)
-        self.card.toggle_btn.setChecked(False) # Default Collapsed
-        self.card.content_widget.setVisible(False)
-        self.card.line.setVisible(False)
-        
-        # 2. Header Components (Moved to Card Header)
-        # We access the card's header layout directly to inject controls
-        header_layout = self.card.header_layout
-        
-        # Insert Badge after title
-        self.source_badge = QLabel("")
-        self.source_badge.hide()
-        self.source_badge.setStyleSheet("""
-            QLabel {
-                background-color: #e8f0fe;
-                color: #1a73e8;
-                padding: 2px 8px;
-                border-radius: 10px;
-                font-size: 8pt;
-                font-weight: bold;
-                border: 1px solid #d2e3fc;
-            }
-        """)
-        header_layout.insertWidget(2, self.source_badge)
-
-        self.card.header_layout.addStretch()
-
-        # Inclusion Checkbox
-        self.include_cb = QCheckBox("Include in SCN")
-        self.include_cb.setChecked(True)
-        self.include_cb.hide()
-        self.include_cb.stateChanged.connect(self._on_inclusion_changed)
-        header_layout.addWidget(self.include_cb)
-        
-        self.remove_btn = QPushButton("Remove")
-        self.remove_btn.setStyleSheet("background-color: #e74c3c; color: white; border: none; padding: 5px 10px; border-radius: 3px;")
-        self.remove_btn.clicked.connect(self.handle_remove_or_drop)
-        header_layout.addWidget(self.remove_btn)
-        
-        # 3. Body Structure (Nested Cards)
-        # [FIX] Simplified Layout (No StackAll)
-        # Directly use the ModernCard's content layout (Strict API usage)
-        
-        main_card_layout = self.card.content_layout
-        
-        # 3.1 Issue Data Card
-        self.data_card = ModernCard("Issue Data", collapsible=True)
-        
-        # [PART B DIAG] LOG: UI Branch Selection
-        issue_id = self.template.get('issue_id')
-        if issue_id == 'IMPORT_ITC_MISMATCH':
-             print(f"[SOP-10 UI DIAG] init_ui: Issue ID={issue_id}")
-             # ... (keep logs)
 
 
-        self.grid_container = self.data_card # Store for late-binding
-        
-        # Check if we have grid_data...
-        if 'grid_data' in self.template:
-             # ... (init_grid_ui calls)
-             self.init_grid_ui(self.grid_container)
-        elif self.template.get('summary_table'):
-             self.init_grid_ui(self.data_card, data=self.template['summary_table'])
-        elif 'tables' in self.template and isinstance(self.template['tables'], list):
-            for tbl in self.template['tables']:
-                if tbl.get('title'):
-                    t_lbl = QLabel(f"<b>{tbl.get('title')}</b>")
-                    t_lbl.setStyleSheet("color: #34495e; margin-top: 10px; margin-bottom: 5px;")
-                    self.data_card.addWidget(t_lbl)
-                self.init_grid_ui(self.data_card, data=tbl)
-        elif isinstance(self.template.get('tables'), dict):
-            self.init_excel_table_ui(self.data_card)
-        
-        if self.template.get('placeholders'):
-            self.init_legacy_ui(self.data_card)
-            
-        main_card_layout.addWidget(self.data_card)
-            
-        # 3.2 Draft Content Card
-        self.draft_card = ModernCard("Draft Content", collapsible=True)
-        self.editor = RichTextEditor()
-        self.editor.setMinimumHeight(200)
-        self.update_editor_content()
-        self.editor.textChanged.connect(self.contentChanged.emit)
-        self.draft_card.addWidget(self.editor)
-        
-        # Connect Draft Focus Mode
-        # [FIX] Removed Focus Mode (Opacity) as it caused visual artifacts ("Grey" card) 
-        # and potential z-order compositing errors.
-        # self.draft_card.toggle_btn.clicked.connect(self._on_draft_focus_changed)
-        
-        # Mini Totals (Inside Data Card)
-        totals_layout = QHBoxLayout()
-        self.lbl_tax = QLabel("Tax: Rs. 0")
-        self.lbl_interest = QLabel("Interest: Rs. 0")
-        self.lbl_penalty = QLabel("Penalty: Rs. 0")
-        
-        for lbl in [self.lbl_tax, self.lbl_interest, self.lbl_penalty]:
-            lbl.setStyleSheet("background-color: #f8f9fa; padding: 5px; border-radius: 3px; border: 1px solid #e9ecef; color: #555;")
-            totals_layout.addWidget(lbl)
-        totals_layout.addStretch()
-        self.data_card.addLayout(totals_layout)
-        
-        # Sync Warning
-        self.sync_warning = QLabel("⚠️ Narration out of sync with Table (Manual edits detected)")
-        self.sync_warning.setStyleSheet("color: #e67e22; font-size: 9pt; font-weight: bold; margin-bottom: 5px;")
-        self.sync_warning.hide()
-        self.draft_card.addWidget(self.sync_warning)
-        
-        main_card_layout.addWidget(self.draft_card)
-        
-        # Add Main Card to Layout
-        self.main_layout.addWidget(self.card)
-        
-    def _on_inclusion_changed(self, state):
-        if self.origin == "ASMT10":
-            # RE-ENFORCE: Include/Exclude forbidden for derived issues
-            self.include_cb.setChecked(True)
-            return
 
-        self.is_included = (state == 2) # Qt.CheckState.Checked
         
-        # GUARD: Visual Muting Only (No blocking overlay)
-        # self.overlay.setVisible(not self.is_included) 
-        
-        # [FIX] Simplified Inclusion Feedback (No Opacity)
-        # opacity = 1.0 if self.is_included else 0.5
-        # self._set_opacity(self.card, opacity)
-            
-        self.valuesChanged.emit(self.get_tax_breakdown())
+
         
     def _on_draft_focus_changed(self):
         """Focus Mode: Deprecated to prevent layout/z-order artifacts."""
@@ -325,32 +395,65 @@ class IssueCard(QFrame):
         
         if canonical_origin == "SCRUTINY":
             self.set_source("Adopted from ASMT-10")
-            # Style: Muted Blue
-            self.source_badge.setStyleSheet("""
-                QLabel { background-color: #e8f0fe; color: #1a73e8; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: bold; border: 1px solid #d2e3fc; }
+            # Style: Primary Blue
+            self.source_badge.setStyleSheet(f"""
+                QLabel {{ 
+                    background-color: {Theme.NEUTRAL_100}; 
+                    color: {Theme.PRIMARY}; 
+                    padding: 2px 8px; 
+                    border-radius: {Theme.RADIUS_MD}; 
+                    font-size: {Theme.FONT_META}; 
+                    font-weight: 600; 
+                    border: 1px solid {Theme.NEUTRAL_200}; 
+                }}
             """)
         elif canonical_origin == "MANUAL_SOP":
             self.set_source("Manual – SOP")
-            # Style: Muted Grey
-            self.source_badge.setStyleSheet("""
-                QLabel { background-color: #f1f3f4; color: #5f6368; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: bold; border: 1px solid #dadce0; }
+            # Style: Muted Gray
+            self.source_badge.setStyleSheet(f"""
+                QLabel {{ 
+                    background-color: {Theme.NEUTRAL_100}; 
+                    color: {Theme.NEUTRAL_500}; 
+                    padding: 2px 8px; 
+                    border-radius: {Theme.RADIUS_MD}; 
+                    font-size: {Theme.FONT_META}; 
+                    font-weight: 600; 
+                    border: 1px solid {Theme.NEUTRAL_200}; 
+                }}
             """)
         else:
             self.set_source("New Issue (SCN)")
-            # Default Style: Red
-            self.source_badge.setStyleSheet("""
-                QLabel { background-color: #fce8e6; color: #c5221f; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: bold; border: 1px solid #fad2cf; }
+            # Default Style: Danger/Red
+            self.source_badge.setStyleSheet(f"""
+                QLabel {{ 
+                    background-color: #fee2e2; 
+                    color: {Theme.DANGER}; 
+                    padding: 2px 8px; 
+                    border-radius: {Theme.RADIUS_MD}; 
+                    font-size: {Theme.FONT_META}; 
+                    font-weight: 600; 
+                    border: 1px solid #fecaca; 
+                }}
             """)
+            
+        # [FIX] Visual Consistency: Update the text label too
+        if hasattr(self, 'meta_lbl'):
+            display_text = "SCN"
+            if canonical_origin == "SCRUTINY":
+                display_text = "ASMT-10"
+            elif canonical_origin == "MANUAL_SOP":
+                 display_text = "SOP"
+            self.meta_lbl.setText(f"Origin: {display_text}")
 
         # 2. Universal Flexibility
-        self.include_cb.show()
-        self.remove_btn.setText("Remove")
-        self.remove_btn.setStyleSheet("background-color: #e74c3c; color: white; border: none; padding: 5px 10px; border-radius: 3px;")
+        # 2. Universal Flexibility
+        # self.include_cb.show()  <-- REMOVED to fix AttributeError
+        
+        # Ensure interactive state
+        # self.remove_btn style is set in init_ui, no need to reset here unless changing state
         
         # Reset visual styles to standard
-        self.setStyleSheet("IssueCard { background-color: #ffffff; border: 1px solid #bdc3c7; border-radius: 5px; margin-bottom: 10px; }")
-        if hasattr(self.card, 'title_label'):
-             self.card.title_label.setStyleSheet("color: #2c3e50; font-weight: bold;")
+        # self.setStyleSheet(...) - Handled in init_ui with ID selector
         
         # Ensure interactive state
         if hasattr(self, 'editor'):
@@ -358,16 +461,93 @@ class IssueCard(QFrame):
             self.editor.setStyleSheet("") # Clear any custom dashed borders
  
     def handle_remove_or_drop(self):
-        """Handle issue removal with optional confirmation for derived issues"""
-        if self.origin == "ASMT10":
+        """Handle issue removal based on Origin:
+           - SCN/Manual: Hard Delete (Emit removeClicked)
+           - Scrutiny/ASMT-10: Soft Delete (Toggle Include/Exclude)
+        """
+        # Normalize origin check
+        canonical_origin = self.origin.upper() if self.origin else "SCN"
+        is_manual = canonical_origin in ["SCN", "MANUAL_SOP"]
+
+        if is_manual:
+            # HARD DELETE PATH
             from PyQt6.QtWidgets import QMessageBox
-            reply = QMessageBox.question(self, "Confirm Removal", 
-                                       "This issue was derived from ASMT-10. Are you sure you want to remove it from the SCN proposal?",
-                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            reply = QMessageBox.question(
+                self, 
+                "Confirm Delete", 
+                "Are you sure you want to permanently delete this issue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                QMessageBox.StandardButton.No
+            )
             if reply == QMessageBox.StandardButton.Yes:
                 self.removeClicked.emit()
+            return
+
+        # SOFT DELETE PATH (Hydrated Issues)
+        # Toggle state
+        self.is_included = not self.is_included
+        
+        # Update Visuals
+        self.update_visual_state()
+        
+        # Notifying Parent to recalculate (Excluded items return 0 tax)
+        self.valuesChanged.emit(self.get_tax_breakdown())
+
+    def update_visual_state(self):
+        """Updates visual appearance based on inclusion state (Soft Delete)"""
+        if self.is_included:
+            # Active State
+            self.body_container.setEnabled(True)
+            self.setGraphicsEffect(None) # Remove opacity effect
+            
+            # Button: Action to Remove
+            canonical_origin = self.origin.upper() if self.origin else "SCN"
+            is_manual = canonical_origin in ["SCN", "MANUAL_SOP"]
+            
+            self.remove_btn.setText("Delete" if is_manual else "Exclude")
+            self.remove_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Theme.SURFACE};
+                    color: {Theme.DANGER};
+                    border: 1px solid {Theme.NEUTRAL_200};
+                    border-radius: {Theme.RADIUS_MD};
+                    padding: 4px 12px;
+                    font-weight: 600;
+                    font-size: 13px;
+                }}
+                QPushButton:hover {{
+                    background-color: #fee2e2;
+                    border-color: {Theme.DANGER};
+                    color: {Theme.DANGER_HOVER};
+                }}
+            """)
         else:
-            self.removeClicked.emit()
+            # Soft Deleted State
+            self.body_container.setEnabled(False) 
+            
+            # Visual Greying Out
+            opacity = QGraphicsOpacityEffect(self)
+            opacity.setOpacity(0.6)
+            self.setGraphicsEffect(opacity)
+            
+            # Button: Action to Restore
+            self.remove_btn.setText("Restore")
+            self.remove_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Theme.SURFACE};
+                    color: {Theme.SUCCESS};
+                    border: 1px solid {Theme.NEUTRAL_200};
+                    border-radius: {Theme.RADIUS_MD};
+                    padding: 4px 12px;
+                    font-weight: 600;
+                    font-size: 13px;
+                }}
+                QPushButton:hover {{
+                    background-color: #dcfce7;
+                    border-color: {Theme.SUCCESS};
+                    color: {Theme.SUCCESS_HOVER};
+                }}
+            """)
  
     def set_source(self, source_text):
         """Set source badge text (e.g., 'From ASMT-10')"""
@@ -639,29 +819,74 @@ class IssueCard(QFrame):
         # Define layout_to_check early to avoid NameError in branches
         layout_to_check = layout.content_layout if hasattr(layout, 'content_layout') else layout
         
-        if grid_id in ['EXPANDED_TABLE', 'IMPORT_ITC_MISMATCH']:
-            self.table.setMinimumHeight(400)
-            self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        # Modern Table Styling
+        self.table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {Theme.SURFACE};
+                border: 1px solid {Theme.NEUTRAL_200};
+                gridline-color: {Theme.NEUTRAL_200};
+                font-size: {Theme.FONT_BODY};
+                color: {Theme.NEUTRAL_900};
+            }}
+            QHeaderView::section {{
+                background-color: {Theme.NEUTRAL_100};
+                color: {Theme.NEUTRAL_900};
+                font-weight: {Theme.WEIGHT_SEMIBOLD};
+                border: none;
+                border-bottom: 2px solid {Theme.NEUTRAL_200};
+                padding: 6px;
+                font-size: 13px;
+            }}
+            QTableWidget::item {{
+                padding: 4px;
+                border-bottom: 1px solid {Theme.NEUTRAL_100};
+            }}
+            QTableWidget::item:selected {{
+                background-color: {Theme.PRIMARY};
+                color: white;
+            }}
+        """)
+        
+        self.table.verticalHeader().setVisible(False)
+        # Ensure header text is visible and wraps if needed, but primarily legible
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        
+        # Adaptive Column Sizing
+        col_count = self.table.columnCount()
+        if col_count > 5:
+             self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+             self.table.horizontalHeader().setStretchLastSection(True)
         else:
-            self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-            self.table.verticalHeader().setVisible(False)
-            self.table.setAlternatingRowColors(True)
-            self.table.setShowGrid(True)
+             self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
             
         # [FIX] SOP-5/SOP-7 UI WIDTH & LAYOUT
         # Determine if this is a 'tables' payload (SOP-5/7) or legacy grid_data
         # 'sub_data' argument is populated only when iterating over 'tables'
-        is_expanded_table = (sub_data is not None) or (grid_id in ['TDS_TCS_MISMATCH', 'CANCELLED_SUPPLIERS'])
+        is_expanded_table = (sub_data is not None) or (grid_id in ['TDS_TCS_MISMATCH', 'CANCELLED_SUPPLIERS', 'ITC_3B_2B_OTHER', 'ITC_3B_2B_9X4', 'NON_FILER_SUPPLIERS'])
         
         if is_expanded_table and layout:
              # Force expansion for Detailed Tables
              self.table.setMinimumWidth(850)
-             self.table.setMaximumWidth(900)
-             self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+             self.table.setMaximumWidth(16777215) # MAX_WIDGET_SIZE
+             self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
+             self.table.setMinimumHeight(400) # Give it height
              
-             # Force Header Stretch
+             
+             # Force Header Stretch logic override for big tables
              header = self.table.horizontalHeader()
-             header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+             
+             # [FIX] PROFESSIONAL VISIBILITY: Auto-size first, then allow interaction
+             # This ensures full headers ("GSTR 2A Period", "Invoice Number") are visible by default.
+             self.table.resizeColumnsToContents()
+             
+             # Add buffer to columns for breathing room
+             for c in range(self.table.columnCount()):
+                 w = self.table.columnWidth(c)
+                 self.table.setColumnWidth(c, w + 20)
+
+             header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+             header.setStretchLastSection(True)
              
              # Apply layout stretch
              # Check if already in layout to avoid double adding
@@ -672,6 +897,11 @@ class IssueCard(QFrame):
              # Legacy Behavior for SOP-2/3/4/etc
              self.table.setMaximumWidth(850)
              self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+             # Adjust height to content
+             row_h = self.table.rowHeight(0) if self.table.rowCount() > 0 else 30
+             total_h = (row_h * self.table.rowCount()) + self.table.horizontalHeader().height() + 20
+             self.table.setMinimumHeight(min(total_h, 400))
+             
              if hasattr(layout_to_check, 'indexOf') and layout_to_check.indexOf(self.table) == -1:
                   if hasattr(layout_to_check, 'addWidget'):
                        layout_to_check.addWidget(self.table)
@@ -711,37 +941,85 @@ class IssueCard(QFrame):
         # Check policy from schema
         policy = grid_data.get('row_policy', 'fixed')
         
-        if policy == 'dynamic':
-            # 1. Create Toolbar if missing
-            # We treat this as part of the grid lifecycle
+        issue_id = self.template.get('issue_id', '')
+        is_sop_dynamic = issue_id.startswith('SOP-07') or issue_id.startswith('SOP-08') or issue_id.startswith('SOP-09')
+
+        if policy == 'dynamic' or is_sop_dynamic:
+            # [FIX] Integrated Toolbar (Word-like)
             if not hasattr(self, 'row_controls'):
-                self.row_controls = QFrame()
+                self.row_controls = QFrame(self) # Parented to self to avoid floating
                 h_layout = QHBoxLayout(self.row_controls)
-                h_layout.setContentsMargins(0, 5, 0, 5)
+                h_layout.setContentsMargins(0, 0, 0, 0)
+                h_layout.setSpacing(10)
                 
+                # Add Row Action
                 self.add_btn = QPushButton("+ Add Row")
-                self.add_btn.setStyleSheet("text-align: left; color: #1a73e8; border: none; font-weight: bold; padding: 4px;")
                 self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                self.add_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        color: {Theme.PRIMARY};
+                        border: 1px solid {Theme.NEUTRAL_200};
+                        border-radius: 4px;
+                        padding: 4px 8px;
+                        background-color: {Theme.SURFACE};
+                        font-weight: 600;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {Theme.NEUTRAL_100};
+                        border-color: {Theme.PRIMARY};
+                    }}
+                """)
                 self.add_btn.clicked.connect(self.add_dynamic_row)
                 
-                self.del_btn = QPushButton("Delete Selected Row")
-                self.del_btn.setStyleSheet("color: #e74c3c; border: none; margin-left: 10px; padding: 4px;")
+                # Delete Row Action
+                self.del_btn = QPushButton("Delete Row")
                 self.del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                self.del_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        color: {Theme.DANGER};
+                        border: 1px solid {Theme.NEUTRAL_200};
+                        border-radius: 4px;
+                        padding: 4px 8px;
+                        background-color: {Theme.SURFACE};
+                        font-weight: 600;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #fee2e2;
+                        border-color: {Theme.DANGER};
+                    }}
+                """)
                 self.del_btn.clicked.connect(self.delete_dynamic_row)
                 
                 h_layout.addWidget(self.add_btn)
                 h_layout.addWidget(self.del_btn)
                 h_layout.addStretch()
                 
-                # Add to layout immediately after table
-                # We need to find where table is
-                if layout:
-                     if hasattr(layout, 'addWidget'):
-                          layout.addWidget(self.row_controls)
-                     elif hasattr(layout, 'addLayout'):
-                          layout.addWidget(self.row_controls)
+                h_layout.addStretch()
+                
+                # [FIX] Resolve Layout dynamically if not provided
+                if not layout and hasattr(self, 'table') and self.table.parentWidget():
+                    layout = self.table.parentWidget().layout()
+
+                # Insert toolbar BELOW table
+                # We need to find the table's index in the layout and insert after it
+                if layout and hasattr(layout, 'indexOf'):
+                    idx = layout.indexOf(self.table)
+                    if idx != -1 and hasattr(layout, 'insertWidget'):
+                        layout.insertWidget(idx + 1, self.row_controls)
+                    else:
+                        layout.addWidget(self.row_controls) # Fallback
+                elif layout and hasattr(layout, 'addWidget'):
+                     layout.addWidget(self.row_controls)
             
             self.row_controls.show()
+            
+            # [FIX] Context Menu for Table
+            self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            try:
+                self.table.customContextMenuRequested.disconnect() # Avoid duplicates
+            except: pass
+            self.table.customContextMenuRequested.connect(self.show_table_context_menu)
+            
         else:
             # Fixed Mode: Hide controls if they exist
             if hasattr(self, 'row_controls'):
@@ -774,6 +1052,30 @@ class IssueCard(QFrame):
         
         # 4. Scroll to bottom
         self.table.scrollToBottom()
+
+    def show_table_context_menu(self, pos):
+        """Show context menu for table interactions (Word-like)"""
+        if not self.grid_data: return
+        
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QAction
+        
+        menu = QMenu(self)
+        
+        add_action = QAction("Add Row", self)
+        add_action.triggered.connect(self.add_dynamic_row)
+        menu.addAction(add_action)
+        
+        del_action = QAction("Delete Row", self)
+        del_action.triggered.connect(self.delete_dynamic_row)
+        menu.addAction(del_action)
+        
+        # Only enable delete if a row is selected or clicked
+        item = self.table.itemAt(pos)
+        if not item:
+            del_action.setEnabled(False)
+            
+        menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def delete_dynamic_row(self):
         """Deletes the currently selected row."""
@@ -941,42 +1243,44 @@ class IssueCard(QFrame):
         self.refresh_totals_ui()
 
     def refresh_totals_ui(self):
-        """Update Tax/Interest/Penalty labels and signals based on current variables"""
-        tax = 0
-        interest = 0
-        penalty = 0
+        """Update IGST/CGST/SGST labels and signals based on current breakdown"""
+        breakdown = self.get_tax_breakdown()
         
-        mapping = self.tax_mapping or {}
+        # 1. Update Dashboard Labels
+        igst = 0
+        cgst = 0
+        sgst = 0
         
-        # Helper to get value from mapping
-        def get_val(key):
-            ref_var = mapping.get(key)
-            if not ref_var: return 0
-            val = self.variables.get(ref_var, 0)
-            try: return float(val)
-            except: return 0
-                
-        if 'grid_data' in self.template or isinstance(self.template.get('tables'), list):
-            tax = get_val('tax_cgst') + get_val('tax_sgst') + get_val('tax_igst') + get_val('tax_cess')
-            if not tax: tax = get_val('tax')
-            interest = get_val('interest')
-            penalty = get_val('penalty')
-        else:
-            tax = self.variables.get(mapping.get('tax', 'calculated_tax'), 0)
-            interest = self.variables.get(mapping.get('interest', 'calculated_interest'), 0)
-            penalty = self.variables.get(mapping.get('penalty', 'calculated_penalty'), 0)
+        for act, values in breakdown.items():
+            tax_val = values.get('tax', 0)
+            if act == 'IGST': igst += tax_val
+            elif act == 'CGST': cgst += tax_val
+            elif act == 'SGST': sgst += tax_val
+            
+        if hasattr(self, 'lbl_igst'):
+            self.lbl_igst.setText(f"IGST: {format_indian_number(igst, prefix_rs=True)}")
+        if hasattr(self, 'lbl_cgst'):
+            self.lbl_cgst.setText(f"CGST: {format_indian_number(cgst, prefix_rs=True)}")
+        if hasattr(self, 'lbl_sgst'):
+            self.lbl_sgst.setText(f"SGST: {format_indian_number(sgst, prefix_rs=True)}")
 
-        # Update header badge
+        # 2. Update header badge (Total Tax)
+        total_tax = sum(v.get('tax', 0) for v in breakdown.values())
         if hasattr(self, 'tax_badge'):
-            formatted_tax = format_indian_number(tax, prefix_rs=True)
+            formatted_tax = format_indian_number(total_tax, prefix_rs=True)
             self.tax_badge.setText(f"Tax: {formatted_tax}")
             self.tax_badge.show()
 
+        # 3. Emit signals for summary persistence
+        total_interest = sum(v.get('interest', 0) for v in breakdown.values())
+        total_penalty = sum(v.get('penalty', 0) for v in breakdown.values())
+
         self.valuesChanged.emit({
-            'tax': tax,
-            'interest': interest,
-            'penalty': penalty
+            'tax': total_tax,
+            'interest': total_interest,
+            'penalty': total_penalty
         })
+        
 
     def calculate_grid(self, data=None):
         """Evaluate formulas in the grid with explicit variable binding precedence"""
@@ -1464,15 +1768,19 @@ class IssueCard(QFrame):
             
         return html
 
+    # Authoritative get_data follows
+
     def get_data(self):
         """Return current state for saving using the authoritative schema"""
-        data = self.data_snapshot.copy()
+        import copy
+        # Deepcopy to break any accidental references to self or UI objects
+        data = copy.deepcopy(self.data_snapshot)
         
         # 1. Base Issue Data
         data.update({
             'issue_id': self.template.get('issue_id', 'unknown'),
             'issue': self.template.get('issue_name', ''),
-            'variables': self.variables,
+            'variables': copy.deepcopy(self.variables), # Ensure clean copy
             self.content_key: self.editor.toHtml() if hasattr(self, 'editor') else "",
             'tax_breakdown': self.get_tax_breakdown(),
             'is_included': self.is_included,
@@ -1486,18 +1794,22 @@ class IssueCard(QFrame):
         })
         
         # 3. Data slots (Flexible Schema)
-        data['facts'] = self.variables.copy()
+        data['facts'] = copy.deepcopy(self.variables)
         data['scn_narration'] = data.get(self.content_key, "")
         
         # 4. Table Data Persistence (CRITICAL for ad-hoc conversions)
-        if self.grid_data:
-             data['table_data'] = self.grid_data
-        elif 'grid_data' in self.template:
-             data['table_data'] = self.template['grid_data']
+        # Ensure we don't accidentally link to the template dict itself if it's mutable
+        td = None
+        if hasattr(self, 'grid_data') and self.grid_data:
+             td = copy.deepcopy(self.grid_data)
+        elif 'grid_data' in self.template and self.template['grid_data']:
+             td = copy.deepcopy(self.template['grid_data'])
+        
+        data['table_data'] = td
 
         # Legacy compatibility (optional)
         if self.origin == "ASMT10":
-            data['frozen_facts'] = self.variables.copy()
+            data['frozen_facts'] = copy.deepcopy(self.variables)
 
         return data
 
@@ -1562,6 +1874,9 @@ class IssueCard(QFrame):
         self._is_bootstrapping = False
         self.sync_ui_with_variables()
         self.calculate_values()
+        
+        # [VISUAL SYNC] Restore Soft Delete state
+        self.update_visual_state()
 
     def sync_ui_with_variables(self):
         """Helper to sync UI widgets with self.variables"""
@@ -1613,7 +1928,12 @@ class IssueCard(QFrame):
     def get_tax_breakdown(self):
         """Return tax breakdown by Act"""
         # [DIAGNOSTIC]
-        print("ISSUE:", getattr(self, "issue_id", "Unknown"))
+        # print("ISSUE:", getattr(self, "issue_id", "Unknown"))
+        
+        # [SOFT DELETE] Excluded issues contribute 0 to tax
+        if not self.is_included:
+            return {}
+            
         print("LIABILITY CONFIG:", self.template.get("liability_config", None))
         print("VARIABLES SAMPLE:", list(self.variables.items())[:10])
 

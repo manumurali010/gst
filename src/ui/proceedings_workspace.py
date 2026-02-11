@@ -16,11 +16,13 @@ from src.ui.adjudication_setup_dialog import AdjudicationSetupDialog
 from src.ui.components.side_nav_card import SideNavCard # Canonical import
 from src.ui.components.finalization_panel import FinalizationPanel
 from src.services.asmt10_generator import ASMT10Generator
+from src.services.ph_intimation_generator import PHIntimationGenerator
 import os
 import json
 import copy
 from jinja2 import Template, Environment, FileSystemLoader
 import datetime
+import traceback
 import base64
 import re
 
@@ -99,6 +101,11 @@ class ProceedingsWorkspace(QWidget):
         self.active_scn_step = 0
         self.preview_initialized = False
         self.scn_workflow_phase = "METADATA" # Authority state: METADATA | DRAFTING
+        
+        # [NEW] PH Generator & State
+        self.ph_generator = PHIntimationGenerator()
+        self.ph_entries = [] # List of dicts
+        self.ph_editing_index = -1
         
         print("ProceedingsWorkspace: calling init_ui")
         self.init_ui()
@@ -1843,90 +1850,146 @@ class ProceedingsWorkspace(QWidget):
 
     def create_ph_intimation_tab(self):
         print("ProceedingsWorkspace: create_ph_intimation_tab start")
-        """Create Personal Hearing Intimation tab"""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(10)
+        """Create Personal Hearing Intimation tab with structured form & preview"""
+        main_widget = QWidget()
+        main_layout = QVBoxLayout(main_widget)
+        main_layout.setContentsMargins(0,0,0,0)
         
-        # Title
-        title = QLabel("<b>Drafting Personal Hearing Intimation</b>")
-        title.setStyleSheet("font-size: 10pt; margin-bottom: 10px;")
-        layout.addWidget(title)
+        # Splitter for Form (Left) and Preview (Right)
+        self.ph_splitter = QSplitter(Qt.Orientation.Horizontal)
         
-        # Reference Details (OC)
-        ref_layout = QHBoxLayout()
-        oc_label = QLabel("OC No:")
-        self.ph_oc_input = QLineEdit()
-        self.ph_oc_input.setPlaceholderText("Format: No./Year")
+        # --- LEFT PANE: FORM ---
+        form_scroll = QScrollArea()
+        form_scroll.setWidgetResizable(True)
+        form_container = QWidget()
+        form_layout = QVBoxLayout(form_container)
+        form_layout.setSpacing(15)
         
+        # 1. Header & Entries List
+        header_layout = QHBoxLayout()
+        header_label = QLabel("<b>Personal Hearing Intimations</b>")
+        header_label.setStyleSheet("font-size: 11pt;")
+        self.ph_add_btn = QPushButton("+ Add New Entry")
+        self.ph_add_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 5px 15px; font-weight: bold; border-radius: 4px;")
+        self.ph_add_btn.clicked.connect(self.add_new_ph_entry)
         
-        ph_oc_suggest_btn = QPushButton("Get Next")
-        ph_oc_suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 8pt;")
-        ph_oc_suggest_btn.clicked.connect(lambda: self.suggest_next_oc(self.ph_oc_input))
+        header_layout.addWidget(header_label)
+        header_layout.addStretch()
+        header_layout.addWidget(self.ph_add_btn)
+        form_layout.addLayout(header_layout)
         
-        oc_date_label = QLabel("OC Date:")
-        self.ph_oc_date = QDateEdit()
-        self.ph_oc_date.setCalendarPopup(True)
-        self.ph_oc_date.setDate(QDate.currentDate())
+        # List of Entries (Cards)
+        self.ph_list_container = QWidget()
+        self.ph_list_layout = QVBoxLayout(self.ph_list_container)
+        self.ph_list_layout.setContentsMargins(0,0,0,0)
+        form_layout.addWidget(self.ph_list_container)
         
+        # 2. Entry Editor (Form) - Hidden by default until "Add" or "Edit"
+        self.ph_editor_card = QFrame()
+        self.ph_editor_card.setStyleSheet("background-color: #2c3e50; border-radius: 8px; border: 1px solid #34495e;")
+        self.ph_editor_card.setVisible(False)
+        editor_layout = QVBoxLayout(self.ph_editor_card)
         
-        ref_layout.addWidget(oc_label)
-        ref_layout.addWidget(self.ph_oc_input)
-        ref_layout.addWidget(ph_oc_suggest_btn)
-        ref_layout.addSpacing(10)
-        ref_layout.addWidget(oc_date_label)
-        ref_layout.addWidget(self.ph_oc_date)
-        ref_layout.addStretch()
-        layout.addLayout(ref_layout)
+        editor_title = QLabel("<b>Edit PH Details</b>")
+        editor_title.setStyleSheet("color: #ecf0f1; font-size: 10pt; border: none;")
+        editor_layout.addWidget(editor_title)
         
-        # Rich Text Editor
-        print("ProceedingsWorkspace: creating ph_editor")
-        self.ph_editor = RichTextEditor("Enter the Personal Hearing Intimation content here...")
-        print("ProceedingsWorkspace: ph_editor created")
-        self.ph_editor.setMinimumHeight(400)
+        grid = QGridLayout()
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
         
-        layout.addWidget(self.ph_editor)
-        print("ProceedingsWorkspace: ph_editor added")
+        # Row 1: OC Details
+        grid.addWidget(QLabel("<font color='white'>OC No:</font>"), 0, 0)
+        self.ph_edit_oc = QLineEdit()
+        grid.addWidget(self.ph_edit_oc, 0, 1)
         
-        # Action Buttons
-        buttons_layout = QHBoxLayout()
+        grid.addWidget(QLabel("<font color='white'>OC Date:</font>"), 0, 2)
+        self.ph_edit_oc_date = QDateEdit()
+        self.ph_edit_oc_date.setCalendarPopup(True)
+        self.ph_edit_oc_date.setDate(QDate.currentDate())
+        grid.addWidget(self.ph_edit_oc_date, 0, 3)
         
-        save_btn = QPushButton("Save Draft")
-        save_btn.setStyleSheet("background-color: #95a5a6; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
-        save_btn.clicked.connect(lambda: self.save_document("PH"))
-        buttons_layout.addWidget(save_btn)
+        # Row 2: PH Details
+        grid.addWidget(QLabel("<font color='white'>PH Date:</font>"), 1, 0)
+        self.ph_edit_date = QDateEdit()
+        self.ph_edit_date.setCalendarPopup(True)
+        self.ph_edit_date.setDate(QDate.currentDate().addDays(7))
+        grid.addWidget(self.ph_edit_date, 1, 1)
+        
+        grid.addWidget(QLabel("<font color='white'>PH Time:</font>"), 1, 2)
+        self.ph_edit_time = QLineEdit("11:00 AM")
+        grid.addWidget(self.ph_edit_time, 1, 3)
+        
+        # Row 3: Venue & Copy To
+        grid.addWidget(QLabel("<font color='white'>Venue:</font>"), 2, 0)
+        self.ph_edit_venue = QLineEdit("Paravur Range Office")
+        grid.addWidget(self.ph_edit_venue, 2, 1, 1, 3)
+        
+        grid.addWidget(QLabel("<font color='white'>Copy To:</font>"), 3, 0)
+        self.ph_edit_copy_to = QLineEdit("The Assistant Commissioner, Central Tax, Paravur Division")
+        grid.addWidget(self.ph_edit_copy_to, 3, 1, 1, 3)
+        
+        editor_layout.addLayout(grid)
+        
+        # Editor Buttons
+        editor_btn_layout = QHBoxLayout()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(lambda: self.ph_editor_card.setVisible(False))
+        
+        save_entry_btn = QPushButton("Save Draft")
+        save_entry_btn.clicked.connect(self.save_ph_entry)
+        
+        finalize_reg_btn = QPushButton("Finalize & Register")
+        finalize_reg_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 5px 15px; font-weight: bold;")
+        finalize_reg_btn.clicked.connect(self.register_ph_entry)
+        
+        editor_btn_layout.addStretch()
+        editor_btn_layout.addWidget(cancel_btn)
+        editor_btn_layout.addWidget(save_entry_btn)
+        editor_btn_layout.addWidget(finalize_reg_btn)
+        editor_layout.addLayout(editor_btn_layout)
+        
+        form_layout.addWidget(self.ph_editor_card)
+        form_layout.addStretch()
+        
+        form_scroll.setWidget(form_container)
+        self.ph_splitter.addWidget(form_scroll)
+        
+        # --- RIGHT PANE: PREVIEW ---
+        preview_container = QWidget()
+        preview_layout = QVBoxLayout(preview_container)
+        preview_layout.setContentsMargins(5,5,5,5)
+        
+        # Preview Toolbar
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(QLabel("<b>Live Preview</b>"))
+        toolbar.addStretch()
+        
+        lh_cb = QCheckBox("Show Letterhead")
+        lh_cb.setChecked(True)
+        lh_cb.stateChanged.connect(self.render_ph_preview)
+        self.ph_show_lh = lh_cb
+        toolbar.addWidget(lh_cb)
         
         pdf_btn = QPushButton("Generate PDF")
-        pdf_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
-        pdf_btn.clicked.connect(self.generate_pdf)
-        buttons_layout.addWidget(pdf_btn)
+        pdf_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 4px 10px;")
+        pdf_btn.clicked.connect(self.generate_ph_pdf)
+        toolbar.addWidget(pdf_btn)
         
-        docx_btn = QPushButton("Generate DOCX")
-        docx_btn.setStyleSheet("background-color: #3498db; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
-        docx_btn.clicked.connect(self.generate_docx)
-        buttons_layout.addWidget(docx_btn)
+        preview_layout.addLayout(toolbar)
         
-        finalize_btn = QPushButton("Finalize & Register")
-        finalize_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
-        finalize_btn.clicked.connect(self.confirm_ph_finalization)
-        buttons_layout.addWidget(finalize_btn)
+        self.ph_browser = QWebEngineView()
+        self.ph_browser.setStyleSheet("background: #f0f0f0; border: 1px solid #ccc;")
+        preview_layout.addWidget(self.ph_browser)
         
-        buttons_layout.addStretch()
-        layout.addLayout(buttons_layout)
+        self.ph_splitter.addWidget(preview_container)
+        self.ph_splitter.setStretchFactor(0, 1)
+        self.ph_splitter.setStretchFactor(1, 2)
         
-        # Wrap in a centered container to constrain width
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        container_layout.addWidget(widget)
+        main_layout.addWidget(self.ph_splitter)
         
-        # Set max width for the form content
-        widget.setMaximumWidth(850) 
-        
-        # Wrap in Scroll Area
-        main_scroll = QScrollArea()
-        main_scroll.setWidgetResizable(True)
-        main_scroll.setWidget(container)
+        print("ProceedingsWorkspace: create_ph_intimation_tab done")
+        return main_widget
         
         print("ProceedingsWorkspace: create_ph_intimation_tab done")
         return main_scroll
@@ -2278,24 +2341,22 @@ class ProceedingsWorkspace(QWidget):
             issue_name = payload.get('issue_name', issue_id)
             
             # Resolve Template
-            # 1. If payload has full template (ASMT10 / Custom SCN cache)
-            if 'template' in payload:
-                template = payload['template']
-                data = payload.get('data') # Pre-filled data
-                source_id = issue_id if origin == 'ASMT10' else None
-                
-            # 2. If Manual SOP, we need to fetch master
-            elif origin == "MANUAL_SOP":
-                # Fetch full template now (Lazy Load)
-                full_template = self.db.get_issue(issue_id)
-                if not full_template:
+            # 1. Fresh Canonical Fetch for Manual / SCN Templates
+            if origin in ["SCN", "MANUAL_SOP"]:
+                # Fetch full authoritative JSON from Master DB (JIT)
+                template = self.db.get_issue(issue_id)
+                if not template:
                     QMessageBox.warning(self, "Integration Error", 
-                                      f"Could not load template schema for issue '{issue_id}'.\nCheck Issue Master integrity.")
+                                      f"Could not load authoritative schema for issue '{issue_id}'.\nCheck Issue Master integrity.")
                     return
-                    
-                template = full_template
-                data = None # Fresh issue
+                data = payload.get('data') # Fresh or pre-filled
                 source_id = None
+                
+            # 2. Adoption from ASMT-10 (Pre-adapted via build_scn_issue_from_asmt10)
+            elif origin == "ASMT10" and 'template' in payload:
+                template = payload['template']
+                data = payload.get('data')
+                source_id = issue_id
             
             # 3. Blank/Generic
             elif issue_id == "BLANK_SCN_ISSUE":
@@ -2533,9 +2594,9 @@ class ProceedingsWorkspace(QWidget):
                      'status': getattr(card, 'status', 'ACTIVE')
                 }
                 
-                print(f"[BRIDGE DIAG] persist_scn: Card {card.template.get('issue_id')} table_data type: {type(data_payload['table_data'])}")
                 if data_payload['template_snapshot']:
-                    print(f"  - Snapshot has grid_data? {'grid_data' in data_payload['template_snapshot']}")
+                    # print(f"  - Snapshot has grid_data? {'grid_data' in data_payload['template_snapshot']}")
+                    pass
 
                 snapshot_item = {
                     'issue_id': card.template.get('issue_id'),
@@ -2547,14 +2608,36 @@ class ProceedingsWorkspace(QWidget):
                 current_snapshot.append(snapshot_item)
             
             # Save to DB
-            success = self.db.save_scn_issue_snapshot(self.proceeding_id, current_snapshot)
-            if success:
-                print(f"SCN Persistence: Saved {len(current_snapshot)} issues with snapshot templates.")
-            else:
-                print("SCN Persistence: Failed to save to DB.")
-                
+            try:
+                import json
+                # [DEBUG] Pre-flight serialization check to catch Circular References
+                for i, item in enumerate(current_snapshot):
+                    try:
+                        # Test dump to catch cycles early
+                        json.dumps(item) 
+                    except ValueError as ve:
+                        print(f"[CRITICAL] Serialization Failed for Card {i} ({item.get('issue_id')}): {ve}")
+                        # Analyze keys
+                        for k, v in item.get('data', {}).items():
+                            try:
+                                json.dumps(v)
+                            except ValueError:
+                                print(f"  -> BAD KEY: {k} maps to {type(v)}")
+                        # Fail unsafe to prevent corrupt save
+                        raise ve
+
+                success = self.db.save_scn_issue_snapshot(self.proceeding_id, current_snapshot)
+                if success:
+                    print(f"SCN Persistence: Saved {len(current_snapshot)} issues with snapshot templates.")
+                else:
+                    print("SCN Persistence: Failed to save to DB.")
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"Error persisting SCN issues (Serialization/DB): {e}")
+
         except Exception as e:
-            print(f"Error persisting SCN issues: {e}")
+            print(f"Error persisting SCN issues (Outer): {e}")
 
     def is_stub_grid(self, grid_data):
         """Authoritative check: Is the grid data empty or just a placeholder stub?
@@ -3003,7 +3086,8 @@ class ProceedingsWorkspace(QWidget):
                          if var and 'value' in cell:
                              variables[var] = cell['value']
         
-        # 5. Output Payload (The Authoritative SCN Adoption JSON)
+        # [BRIDGE DIAG] Confirm return payload integrity
+        
         return {
             'template': scn_template,
             'data': {
@@ -3420,7 +3504,6 @@ class ProceedingsWorkspace(QWidget):
             
         except Exception as e:
             print(f"Error syncing demand tiles: {e}")
-            import traceback
             traceback.print_exc()
                 
 
@@ -3859,6 +3942,14 @@ class ProceedingsWorkspace(QWidget):
 
         # 1. Base Metadata
         model = self.proceeding_data.copy()
+        
+        # [FIX] Break Circular Reference: scn_model_snapshot -> additional_details -> scn_model_snapshot
+        if 'additional_details' in model:
+            # Shallow copy the inner dict so we can modify it without affecting self.proceeding_data
+            details_copy = model['additional_details'].copy() if isinstance(model['additional_details'], dict) else {}
+            # Remove the self-referential snapshot
+            details_copy.pop('scn_model_snapshot', None)
+            model['additional_details'] = details_copy
         
         # Format Dates
         scn_date = self.scn_date_input.date()
@@ -4789,7 +4880,6 @@ class ProceedingsWorkspace(QWidget):
                          self.db.update_case_issue_origin(issue_row_id, 'SCRUTINY')
                          try:
                              # Also update internal JSON blob to prevent regressive sync
-                             import json
                              updated_json = json.dumps(data)
                              self.db.update_case_issue(issue_row_id, {'data_json': updated_json})
                          except: pass
@@ -4854,6 +4944,13 @@ class ProceedingsWorkspace(QWidget):
                 self.scn_oc_input.blockSignals(False)
                 self.scn_date_input.blockSignals(False)
                 
+                # PH Intimation Restoration
+                if 'ph_entries' in add_details:
+                    self.ph_entries = add_details['ph_entries']
+                    self.refresh_ph_list()
+                    if self.ph_entries:
+                        self.render_ph_preview()
+                
                 # Phase-2/3 Restoration: BLOCKED during Phase-1
                 if not self.is_scn_phase1():
                     if 'reliance_documents' in add_details: self.reliance_editor.setHtml(add_details['reliance_documents'])
@@ -4901,6 +4998,262 @@ class ProceedingsWorkspace(QWidget):
             QMessageBox.information(self, "Success", "PH Intimation Finalized and OC Registered.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to finalize PH: {e}")
+
+    def add_new_ph_entry(self):
+        """Add a new PH entry slot (Max 3)"""
+        if self.is_scn_finalized():
+            QMessageBox.warning(self, "Locked", "Case finalized. Cannot add new PH Intimations.")
+            return
+            
+        if len(self.ph_entries) >= 3:
+            QMessageBox.warning(self, "Limit Reached", "Maximum 3 Personal Hearing Intimations allowed per case.")
+            return
+
+        # Prepare default data
+        next_val = "DRAFT"
+        self.ph_edit_oc.setText(next_val)
+        self.ph_edit_oc_date.setDate(QDate.currentDate())
+        self.ph_edit_date.setDate(QDate.currentDate().addDays(7))
+        self.ph_edit_time.setText("11:00 AM")
+        self.ph_edit_venue.setText("Paravur Range Office")
+        self.ph_edit_copy_to.setText("The Assistant Commissioner, Central Tax, Paravur Division")
+        
+        # Track that we are adding a NEW entry (index = -1)
+        self.ph_editing_index = -1
+        self.ph_editor_card.setVisible(True)
+
+    def save_ph_entry(self):
+        """Save form data into ph_entries list and persist"""
+        entry = {
+            "oc_no": self.ph_edit_oc.text(),
+            "issue_date": self.ph_edit_oc_date.date().toString("yyyy-MM-dd"),
+            "ph_date": self.ph_edit_date.date().toString("yyyy-MM-dd"),
+            "ph_time": self.ph_edit_time.text(),
+            "venue": self.ph_edit_venue.text(),
+            "copy_to": self.ph_edit_copy_to.text(),
+            "show_letterhead": self.ph_show_lh.isChecked()
+        }
+        
+        if self.ph_editing_index == -1:
+            self.ph_entries.append(entry)
+        else:
+            self.ph_entries[self.ph_editing_index] = entry
+            
+        self.ph_editor_card.setVisible(False)
+        self.refresh_ph_list()
+        self.render_ph_preview()
+        
+        # Persist to additional_details
+        self.save_ph_data()
+
+    def register_ph_entry(self):
+        """Finalize, Register OC, and Save entry"""
+        if self.is_scn_finalized(): return
+        
+        oc_no = self.ph_edit_oc.text().strip()
+        if not oc_no or oc_no == "DRAFT":
+            QMessageBox.warning(self, "Validation Error", "Please enter a valid OC Number for registration.")
+            return
+            
+        try:
+            # 1. Register in OC Register
+            oc_data = {
+                'OC_Number': oc_no,
+                'OC_Date': self.ph_edit_oc_date.date().toString("yyyy-MM-dd"),
+                'OC_Content': f"Personal Hearing Intimation for Case {self.proceeding_id}",
+                'OC_To': self.proceeding_data.get('legal_name', '')
+            }
+            self.db.add_oc_entry(self.proceeding_id, oc_data)
+            
+            # 2. Mark entry as registered
+            entry = {
+                "oc_no": oc_no,
+                "issue_date": self.ph_edit_oc_date.date().toString("yyyy-MM-dd"),
+                "ph_date": self.ph_edit_date.date().toString("yyyy-MM-dd"),
+                "ph_time": self.ph_edit_time.text(),
+                "venue": self.ph_edit_venue.text(),
+                "copy_to": self.ph_edit_copy_to.text(),
+                "show_letterhead": self.ph_show_lh.isChecked(),
+                "is_registered": True
+            }
+            
+            if self.ph_editing_index == -1:
+                self.ph_entries.append(entry)
+            else:
+                self.ph_entries[self.ph_editing_index] = entry
+                
+            # 3. Update status (cumulative)
+            self.db.update_proceeding(self.proceeding_id, {"status": "PH Intimated"})
+            
+            self.ph_editor_card.setVisible(False)
+            self.refresh_ph_list()
+            self.render_ph_preview()
+            self.save_ph_data()
+            
+            QMessageBox.information(self, "Success", f"PH Intimation registered successfully with OC {oc_no}.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to register PH: {e}")
+
+    def refresh_ph_list(self):
+        """Rebuild the list of PH entry cards"""
+        # Clear existing
+        while self.ph_list_layout.count():
+            item = self.ph_list_layout.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+            
+        is_scn_fin = self.is_scn_finalized()
+        
+        for idx, entry in enumerate(self.ph_entries):
+            card = QFrame()
+            is_reg = entry.get('is_registered', False)
+            color = "#f9f9f9" if is_reg else "white"
+            card.setStyleSheet(f"background-color: {color}; border-radius: 6px; border: 1px solid #ddd; margin-bottom: 5px;")
+            l = QHBoxLayout(card)
+            
+            reg_status = " [REGISTERED]" if is_reg else " [DRAFT]"
+            info = QLabel(f"<b>PH {idx+1}:</b> {entry['ph_date']} @ {entry['ph_time']}<br><small>OC: {entry['oc_no']}{reg_status}</small>")
+            l.addWidget(info)
+            l.addStretch()
+            
+            edit_btn = QPushButton("View" if (is_scn_fin or is_reg) else "Edit")
+            edit_btn.setFixedWidth(60)
+            edit_btn.clicked.connect(lambda _, i=idx: self.edit_ph_entry(i))
+            l.addWidget(edit_btn)
+            
+            del_btn = QPushButton("Delete")
+            del_btn.setFixedWidth(60)
+            del_btn.setStyleSheet("color: #e74c3c;")
+            del_btn.clicked.connect(lambda _, i=idx: self.delete_ph_entry(i))
+            # Disallow deletion after SCN finalization OR if registered
+            if is_scn_fin or is_reg: del_btn.setEnabled(False)
+            l.addWidget(del_btn)
+            
+            self.ph_list_layout.addWidget(card)
+        
+        # Disable "Add" button if 3 entries exist OR SCN is finalized
+        if len(self.ph_entries) >= 3 or is_scn_fin:
+            self.ph_add_btn.setEnabled(False)
+            self.ph_add_btn.setToolTip("Maximum entries reached or Case Finalized")
+        else:
+            self.ph_add_btn.setEnabled(True)
+
+    def edit_ph_entry(self, index):
+        """Load entry into form for editing"""
+        entry = self.ph_entries[index]
+        self.ph_editing_index = index
+        is_reg = entry.get('is_registered', False)
+        is_scn_fin = self.is_scn_finalized()
+        
+        self.ph_edit_oc.setText(entry['oc_no'])
+        self.ph_edit_oc_date.setDate(QDate.fromString(entry['issue_date'], "yyyy-MM-dd"))
+        self.ph_edit_date.setDate(QDate.fromString(entry['ph_date'], "yyyy-MM-dd"))
+        self.ph_edit_time.setText(entry['ph_time'])
+        self.ph_edit_venue.setText(entry['venue'])
+        self.ph_edit_copy_to.setText(entry['copy_to'])
+        
+        # Lock fields if registered or SCN finalized
+        locked = is_reg or is_scn_fin
+        self.ph_edit_oc.setReadOnly(locked)
+        self.ph_edit_oc_date.setReadOnly(locked)
+        self.ph_edit_date.setReadOnly(locked)
+        self.ph_edit_time.setReadOnly(locked)
+        self.ph_edit_venue.setReadOnly(locked)
+        self.ph_edit_copy_to.setReadOnly(locked)
+        
+        # Find buttons in editor card layout and toggle
+        for i in range(self.ph_editor_card.layout().count()):
+            item = self.ph_editor_card.layout().itemAt(i)
+            if isinstance(item.layout(), QHBoxLayout):
+                # This is the button layout
+                for j in range(item.layout().count()):
+                    w = item.layout().itemAt(j).widget()
+                    if isinstance(w, QPushButton) and w.text() != "Cancel":
+                        w.setEnabled(not locked)
+        
+        self.ph_editor_card.setVisible(True)
+        self.render_ph_preview()
+
+    def delete_ph_entry(self, index):
+        """Remove a PH entry"""
+        if self.is_scn_finalized(): return
+        
+        res = QMessageBox.question(self, "Confirm Delete", "Delete this Personal Hearing Intimation permanentely?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if res == QMessageBox.StandardButton.Yes:
+            self.ph_entries.pop(index)
+            self.refresh_ph_list()
+            self.save_ph_data()
+            if self.ph_browser: self.ph_browser.setHtml("<h3>Select or Add a PH Entry to Preview</h3>")
+
+    def render_ph_preview(self):
+        """Render the highlighted/active PH entry into WebEngine"""
+        if not self.ph_entries:
+            self.ph_browser.setHtml("<h3>No PH Intimation Data</h3>")
+            return
+            
+        # Preview the current entry being edited OR the last one
+        idx = self.ph_editing_index if self.ph_editing_index != -1 else (len(self.ph_entries) - 1)
+        entry = self.ph_entries[idx]
+        
+        # Gather case data
+        case_data = {
+            'gstin': self.proceeding_data.get('gstin', ''),
+            'legal_name': self.proceeding_data.get('legal_name', ''),
+            'address': self.proceeding_data.get('address', ''),
+            'scn_no': self.scn_no_input.text() or "____",
+            'scn_date': self.scn_date_input.date().toString("dd/MM/yyyy")
+        }
+        
+        html = self.ph_generator.generate_html(case_data, entry, for_preview=True)
+        self.ph_browser.setHtml(html)
+
+    def save_ph_data(self):
+        """Persist ph_entries to additional_details"""
+        current_details = self.proceeding_data.get('additional_details', {})
+        if isinstance(current_details, str):
+            try: current_details = json.loads(current_details)
+            except: current_details = {}
+            
+        current_details['ph_entries'] = self.ph_entries
+        
+        self.db.update_proceeding(self.proceeding_id, {
+            "additional_details": json.dumps(current_details)
+        })
+        self.proceeding_data['additional_details'] = current_details
+
+    def generate_ph_pdf(self):
+        """Finalize and Generate PDF for active PH entry"""
+        if not self.ph_entries: return
+        
+        idx = self.ph_editing_index if self.ph_editing_index != -1 else (len(self.ph_entries) - 1)
+        entry = self.ph_entries[idx]
+        
+        case_data = {
+            'gstin': self.proceeding_data.get('gstin', ''),
+            'legal_name': self.proceeding_data.get('legal_name', ''),
+            'address': self.proceeding_data.get('address', ''),
+            'scn_no': self.scn_no_input.text() or "____",
+            'scn_date': self.scn_date_input.date().toString("dd/MM/yyyy")
+        }
+        
+        html = self.ph_generator.generate_html(case_data, entry, for_preview=False)
+        
+        safe_oc = "".join([c for c in entry['oc_no'] if c.isalnum() or c in ('-','_')])
+        default_filename = f"PH_Intimation_{safe_oc}.pdf"
+        
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save PH Intimation PDF", default_filename, "PDF Files (*.pdf)")
+        if file_path:
+            from src.utils.document_generator import DocumentGenerator
+            import shutil
+            import os
+            
+            filename_only = os.path.splitext(os.path.basename(file_path))[0]
+            doc_gen = DocumentGenerator()
+            generated_path = doc_gen.generate_pdf_from_html(html, filename_only)
+            
+            if generated_path and os.path.exists(generated_path):
+                shutil.move(generated_path, file_path)
+                QMessageBox.information(self, "Success", f"PH Intimation PDF saved to: {file_path}")
+                os.startfile(file_path)
 
     def confirm_order_finalization(self):
         """Finalize Order and Register OC"""

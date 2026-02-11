@@ -1,7 +1,8 @@
-from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QPushButton, QCheckBox, QWidget
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QFont, QCursor
 from src.utils.formatting import format_indian_number
+from src.ui.styles import Theme
 
 def render_grid_to_table_widget(table_widget: QTableWidget, grid_data: dict, interactive: bool = False) -> dict:
     """
@@ -178,4 +179,117 @@ def render_grid_to_table_widget(table_widget: QTableWidget, grid_data: dict, int
     # Resize rows
     table_widget.resizeRowsToContents()
     
+    
     return cell_widgets
+
+# --- Component Factories ---
+
+def create_primary_button(text: str, callback=None) -> QPushButton:
+    """Creates a standard Primary Button (Blue)."""
+    btn = QPushButton(text)
+    if callback:
+        btn.clicked.connect(callback)
+    btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    btn.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {Theme.PRIMARY};
+            color: {Theme.SURFACE};
+            border: 1px solid {Theme.PRIMARY};
+        }}
+        QPushButton:hover {{
+            background-color: {Theme.PRIMARY_HOVER};
+            border-color: {Theme.PRIMARY_HOVER};
+        }}
+        QPushButton:pressed {{
+            background-color: {Theme.PRIMARY_PRESSED};
+            border-color: {Theme.PRIMARY_PRESSED};
+        }}
+    """)
+    return btn
+
+def create_secondary_button(text: str, callback=None) -> QPushButton:
+    """Creates a standard Secondary Button (White/Bordered)."""
+    btn = QPushButton(text)
+    if callback:
+        btn.clicked.connect(callback)
+    btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    btn.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {Theme.SURFACE};
+            color: {Theme.NEUTRAL_900};
+            border: 1px solid {Theme.NEUTRAL_200};
+        }}
+        QPushButton:hover {{
+            background-color: {Theme.NEUTRAL_100};
+            border-color: {Theme.NEUTRAL_500};
+        }}
+        QPushButton:pressed {{
+            background-color: {Theme.NEUTRAL_200};
+        }}
+    """)
+    return btn
+
+def create_danger_button(text: str, callback=None) -> QPushButton:
+    """Creates a standard Danger Button (Red)."""
+    btn = QPushButton(text)
+    if callback:
+        btn.clicked.connect(callback)
+    btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    btn.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {Theme.DANGER};
+            color: {Theme.SURFACE};
+            border: 1px solid {Theme.DANGER};
+        }}
+        QPushButton:hover {{
+            background-color: {Theme.DANGER_HOVER};
+            border-color: {Theme.DANGER_HOVER};
+        }}
+        QPushButton:pressed {{
+            background-color: {Theme.DANGER_PRESSED};
+            border-color: {Theme.DANGER_PRESSED};
+        }}
+    """)
+    return btn
+
+def create_toggle_switch(text: str = "", callback=None) -> QCheckBox:
+    """Creates a modern toggle switch using QCheckBox styling."""
+    toggle = QCheckBox(text)
+    if callback:
+        toggle.stateChanged.connect(callback)
+    toggle.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+    
+    # Styled Indicator via QSS
+    toggle.setStyleSheet(f"""
+        QCheckBox {{
+            spacing: {Theme.SPACE_SM};
+            font-size: {Theme.FONT_BODY};
+            color: {Theme.NEUTRAL_900};
+        }}
+        QCheckBox::indicator {{
+            width: 36px;
+            height: 20px;
+            border-radius: 10px;
+        }}
+        QCheckBox::indicator:unchecked {{
+            background-color: {Theme.NEUTRAL_200};
+            image: none;
+        }}
+        QCheckBox::indicator:unchecked:hover {{
+            background-color: {Theme.NEUTRAL_500};
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {Theme.PRIMARY};
+        }}
+        QCheckBox::indicator:checked:hover {{
+            background-color: {Theme.PRIMARY_HOVER};
+        }}
+        /* Pseudo-element for the knob is harder in pure QSS without images, 
+           so we often use a background-image or simple color shift.
+           For high-fidelity, we use a simple circular handle logic if possible, 
+           but QSS doesn't support '::before/after' on indicators well. 
+           We will use the background color change as the primary cue 
+           plus a distinct border. 
+        */
+    """)
+    return toggle

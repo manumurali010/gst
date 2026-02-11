@@ -1,108 +1,121 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel
 from PyQt6.QtCore import Qt, pyqtSignal
+from src.ui.styles import Theme
 
-class SideNavCard(QWidget):
+class SideNavCard(QFrame):
     clicked = pyqtSignal(int)
     
     def __init__(self, index, icon, title, parent=None):
         super().__init__(parent)
         self.index = index
+        self.icon_char = icon
+        self.title_text = title
         self.is_active = False
+        self.is_enabled_flag = True
         
-        self.setObjectName("NavCard")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(75)
+        # Setup Layout
+        self.layout = QHBoxLayout(self)
+        self.layout.setContentsMargins(0, 8, 0, 8) # Compact vertical padding
+        self.layout.setSpacing(12)
         
-        # Main container for styling (since QWidget styling is limited without paintEvent)
-        self.frame = QFrame(self)
-        self.frame.setObjectName("NavFrame")
+        # Left Border Indicator (Active State)
+        self.indicator = QFrame()
+        self.indicator.setFixedWidth(4)
+        self.indicator.setStyleSheet("background-color: transparent;")
+        self.layout.addWidget(self.indicator)
         
-        outer_layout = QVBoxLayout(self)
-        outer_layout.setContentsMargins(0, 0, 0, 0)
-        outer_layout.addWidget(self.frame)
+        # Icon / Number Bubble
+        self.icon_lbl = QLabel(str(icon))
+        self.icon_lbl.setFixedSize(24, 24)
+        self.icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_lbl.setStyleSheet(f"""
+            background-color: {Theme.NEUTRAL_200}; 
+            color: {Theme.NEUTRAL_500}; 
+            border-radius: 12px; 
+            font-size: 10pt; font-weight: bold;
+        """)
+        self.layout.addWidget(self.icon_lbl)
         
-        layout = QVBoxLayout(self.frame)
-        layout.setContentsMargins(15, 12, 15, 12)
-        layout.setSpacing(4)
+        # Text Column (Title + Summary)
+        text_col = QFrame()
+        text_layout = QVBoxLayout(text_col)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
         
-        h_layout = QHBoxLayout()
-        h_layout.setSpacing(10)
-        self.icon_lbl = QLabel(icon)
-        self.icon_lbl.setStyleSheet("font-size: 18px;")
-        h_layout.addWidget(self.icon_lbl)
-        
+        # Title
         self.title_lbl = QLabel(title)
-        self.title_lbl.setStyleSheet("font-weight: 700; color: #1e293b; font-size: 13px; background: transparent;")
-        h_layout.addWidget(self.title_lbl)
-        h_layout.addStretch()
-        layout.addLayout(h_layout)
+        self.title_lbl.setStyleSheet(f"font-size: {Theme.FONT_BODY}; color: {Theme.NEUTRAL_900}; font-weight: {Theme.WEIGHT_REGULAR}; border: none;")
+        text_layout.addWidget(self.title_lbl)
         
+        # Summary (Metadata)
         self.summary_lbl = QLabel("")
-        self.summary_lbl.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 500; background: transparent;")
-        layout.addWidget(self.summary_lbl)
+        self.summary_lbl.setStyleSheet(f"font-size: {Theme.FONT_META}; color: {Theme.NEUTRAL_500}; border: none;")
+        self.summary_lbl.hide() # Hidden by default
+        text_layout.addWidget(self.summary_lbl)
         
-        self.update_style()
+        self.layout.addWidget(text_col, stretch=1)
+        
+        # Helper to set cursor
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        # Initial State
+        self.update_appearance()
+
+    def set_summary(self, text):
+        """Sets the summary text (e.g., '5 issues identified')."""
+        self.summary_lbl.setText(text)
+        if text:
+            self.summary_lbl.show()
+        else:
+            self.summary_lbl.hide()
 
     def set_active(self, active):
-        if not self.isEnabled(): return
         self.is_active = active
-        self.update_style()
+        self.update_appearance()
 
-    def set_enabled(self, enabled: bool):
-        """Canonical method for enabling/disabling nav card"""
-        self.setEnabled(enabled)
-        self.update_style()
-        if not enabled:
-            self.setCursor(Qt.CursorShape.ForbiddenCursor)
+    def set_completed(self, completed):
+        """Visual cue for completed step."""
+        if completed:
+            self.icon_lbl.setText("✓") # Checkmark
+            self.icon_lbl.setStyleSheet(f"background-color: {Theme.SUCCESS}; color: white; border-radius: 12px;")
+            self.title_lbl.setStyleSheet(f"color: {Theme.NEUTRAL_500}; text-decoration: none; border: none;") 
         else:
-            self.setCursor(Qt.CursorShape.PointingHandCursor)
-
-    def is_enabled(self) -> bool:
-        """Canonical method for checking enabled state"""
-        return self.isEnabled()
+            self.icon_lbl.setText(str(self.icon_char))
+            self.update_appearance()
 
     def update_style(self):
-        if not self.isEnabled():
-            # Disabled state
-            self.frame.setStyleSheet("""
-                #NavFrame { 
-                    background-color: #f8fafc; 
-                    border: 1px solid #e2e8f0; 
-                    border-radius: 8px; 
-                }
-            """)
-            self.title_lbl.setStyleSheet("font-weight: 700; color: #94a3b8; font-size: 13px; background: transparent;")
-            self.icon_lbl.setStyleSheet("font-size: 18px; opacity: 0.5;")
-            self.summary_lbl.setStyleSheet("color: #cbd5e1; font-size: 11px; font-weight: 500; background: transparent;")
-        elif self.is_active:
-            # Active state
-            self.frame.setStyleSheet("""
-                #NavFrame { 
-                    background-color: #eff6ff; 
-                    border: 1px solid #3b82f6; 
-                    border-left: 4px solid #3b82f6;
-                    border-radius: 8px; 
-                }
-            """)
-            self.title_lbl.setStyleSheet("font-weight: 700; color: #2563eb; font-size: 13px; background: transparent;")
-            self.summary_lbl.setStyleSheet("color: #60a5fa; font-size: 11px; font-weight: 500; background: transparent;")
+        """Backward compatibility alias."""
+        self.update_appearance()
+
+    def update_appearance(self):
+        """Unified style update."""
+        if not self.is_enabled_flag:
+            self.setCursor(Qt.CursorShape.ForbiddenCursor)
+            self.setStyleSheet("background-color: transparent;")
+            self.icon_lbl.setStyleSheet(f"background-color: {Theme.NEUTRAL_100}; color: {Theme.NEUTRAL_200}; border-radius: 12px;")
+            self.title_lbl.setStyleSheet(f"color: {Theme.NEUTRAL_200}; font-weight: {Theme.WEIGHT_REGULAR};")
+            return
+
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        
+        if self.is_active:
+            self.setStyleSheet(f"background-color: {Theme.NEUTRAL_100};")
+            self.indicator.setStyleSheet(f"background-color: {Theme.PRIMARY};")
+            self.title_lbl.setStyleSheet(f"font-size: {Theme.FONT_BODY}; color: {Theme.PRIMARY}; font-weight: {Theme.WEIGHT_SEMIBOLD}; border: none;")
+            self.icon_lbl.setStyleSheet(f"background-color: {Theme.PRIMARY}; color: {Theme.SURFACE}; border-radius: 12px;")
         else:
-            # Normal/Inactive state
-            self.frame.setStyleSheet("""
-                #NavFrame { 
-                    background-color: white; 
-                    border: 1px solid #e2e8f0; 
-                    border-radius: 8px; 
-                }
-                #NavFrame:hover { background-color: #f8fafc; border-color: #cbd5e1; }
-            """)
-            self.title_lbl.setStyleSheet("font-weight: 700; color: #1e293b; font-size: 13px; background: transparent;")
-            self.summary_lbl.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 500; background: transparent;")
+            self.setStyleSheet("background-color: transparent;")
+            self.indicator.setStyleSheet("background-color: transparent;")
+            self.title_lbl.setStyleSheet(f"font-size: {Theme.FONT_BODY}; color: {Theme.NEUTRAL_900}; font-weight: {Theme.WEIGHT_REGULAR}; border: none;")
+            self.icon_lbl.setStyleSheet(f"background-color: {Theme.NEUTRAL_200}; color: {Theme.NEUTRAL_500}; border-radius: 12px;")
+
+    def is_enabled(self):
+        return self.is_enabled_flag
+        
+    def set_enabled(self, enabled):
+        self.is_enabled_flag = enabled
+        self.update_appearance()
 
     def mousePressEvent(self, event):
-        if self.isEnabled():
+        if self.is_enabled_flag:
             self.clicked.emit(self.index)
-        super().mousePressEvent(event)
-        
-    def set_summary(self, text):
-        self.summary_lbl.setText(text)

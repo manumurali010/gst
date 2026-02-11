@@ -1717,10 +1717,13 @@ class DatabaseManager:
                 def parse_json_field(key):
                     if d.get(key):
                         if isinstance(d[key], str):
-                            try: d[key] = json.loads(d[key])
-                            except: d[key] = {} if key != 'grid_data' else []
+                            try: 
+                                d[key] = json.loads(d[key])
+                            except Exception as e: 
+                                print(f"[DB ERROR] JSON parse failed for issue '{d.get('issue_id')}' field '{key}': {e}")
+                                d[key] = {} # Default to dict for all schema fields
                     else:
-                         d[key] = {} if key != 'grid_data' else []
+                         d[key] = {}
 
                 parse_json_field('templates')
                 parse_json_field('grid_data')
@@ -1763,20 +1766,16 @@ class DatabaseManager:
         Fetch all available Issue Templates (SOPs, Custom SCN, etc.) from Master.
         Returns detailed list for the Template Selection Dialog.
         """
+        import json
+        import sqlite3
         try:
             conn = self._get_conn()
-            # conn.row_factory = sqlite3.Row # Helper uses this? No, self._get_conn might not set it. 
-            # We'll set it here to be safe, or just use indices if lazy.
-            # safe to set row_factory on private connection instance
             conn.row_factory = sqlite3.Row 
             cursor = conn.cursor()
             
-            # Fetch all active templates
-            # Join master and data to get descriptions/etc if needed?
-            # For selection list, issues_master is usually enough, but let's grab type/category
+            # Fetch all active templates with FULL DATA
             cursor.execute("""
-                SELECT issue_id, issue_name, category, sop_point, analysis_type 
-                FROM issues_master 
+                SELECT * FROM issues_master 
                 WHERE active = 1 
                 ORDER BY issue_id
             """)
@@ -1785,14 +1784,31 @@ class DatabaseManager:
             
             results = []
             for row in rows:
-                r = dict(row)
+                d = dict(row)
+                
+                # Helper to parse JSON safely
+                def parse_json_field(key):
+                    if d.get(key):
+                        if isinstance(d[key], str):
+                            try: 
+                                d[key] = json.loads(d[key])
+                            except: 
+                                d[key] = {}
+                    else:
+                         d[key] = {}
+
+                parse_json_field('templates')
+                parse_json_field('grid_data')
+                parse_json_field('table_definition')
+                parse_json_field('liability_config')
+                parse_json_field('tax_demand_mapping')
+                
                 # Determine Type (SOP vs Custom)
-                # Convention: SOP issues start with 'SOP-'
-                if r['issue_id'].startswith('SOP-'):
-                    r['type'] = 'SOP'
+                if d['issue_id'].startswith('SOP-'):
+                    d['type'] = 'SOP'
                 else:
-                    r['type'] = 'SCN' # or 'MANUAL'
-                results.append(r)
+                    d['type'] = 'SCN'
+                results.append(d)
                 
             return results
             

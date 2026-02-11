@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Personal Hearing Intimation</title>
+    {{ full_styles_html | safe }}
+    <style>
+        .header-line {
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+        }
+
+        .address-block p {
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        .subject {
+            text-align: justify;
+        }
+
+        .signature-block {
+            margin-left: 60%;
+            text-align: left;
+        }
+
+        .copy-block p {
+            margin: 2px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="scn-document"> <!-- Reuse SCN wrapper for styling hooks -->
+        <div id="letterhead-placeholder">{{ letter_head | safe }}</div>
+
+        <div class="page-container">
+            <div class="header-line">
+                <div>O.C. No. {{ oc_no }}</div>
+                <div>Date: {{ issue_date }}</div>
+            </div>
+
+            <br><br>
+
+            <div class="address-block">
+                <p>To,</p>
+                <p>{{ legal_name }}</p>
+                <p>GSTIN: {{ gstin }}</p>
+                <p>{{ address }}</p>
+            </div>
+
+            <br>
+
+            <p>Gentlemen/Sir/Madam,</p>
+
+            <br>
+
+            <p class="subject">
+                <strong>Subject: Intimation of Personal Hearing – reg</strong>
+            </p>
+
+            <br>
+
+            <p>
+                <strong>References:</strong>
+                1. SCN reference number: {{ scn_no }} dated {{ scn_date }}
+            </p>
+
+            <br>
+
+            <p>
+                1. Please refer to the above mentioned SCN number issued by Office of the Superintendent Paravur Range.
+            </p>
+
+            <p>
+                2. In this connection, it is to inform you that personal hearing in this case will be held at {{ ph_time
+                }} on {{ ph_date }} before the {{ officer_designation }} of Central Tax, {{ office_address }}.
+            </p>
+
+            <p>
+                3. You may therefore appear in person or through an authorized representative for the personal hearing
+                on the above mentioned date and time as per your convenience, at the above mentioned address, without
+                fail along with records/documents/evidences you wish to rely upon in support of your case.
+            </p>
+
+            <br><br><br>
+
+            <div class="signature-block">
+                <p>{{ officer_name }}</p>
+                <p>{{ officer_designation }}</p>
+            </div>
+
+            <br><br>
+
+            <div class="copy-block">
+                <p><strong>Copy submitted to:</strong></p>
+                <p>1. {{ copy_to }}</p>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

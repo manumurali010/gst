@@ -269,9 +269,15 @@ class RichTextEditor(QWidget):
         """Set focus to the editor"""
         self.editor.setFocus()
 
+    
     def set_read_only(self, read_only: bool):
         """Delegate read-only state to the internal text editor."""
         self.editor.setReadOnly(read_only)
         # Also disable toolbar to prevent formatting even if read-only
         if hasattr(self, 'toolbar'):
              self.toolbar.setEnabled(not read_only)
+
+    def set_toolbar_visible(self, visible: bool):
+        """Toggle visibility of formatting toolbar"""
+        if hasattr(self, 'toolbar'):
+            self.toolbar.setVisible(visible)

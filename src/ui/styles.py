@@ -1,96 +1,150 @@
 class Theme:
-    # Professional Blue/Slate Palette
-    PRIMARY = "#2c3e50"      # Dark Slate Blue (Header, Sidebar)
-    SECONDARY = "#3498db"    # Bright Blue (Primary Actions, Active State)
-    ACCENT = "#1abc9c"       # Teal (Highlights)
+    # --- Colors ---
+    # Primary Palette (Blue)
+    PRIMARY = "#2563EB"
+    PRIMARY_HOVER = "#1D4ED8"
+    PRIMARY_PRESSED = "#1E40AF"
     
-    SUCCESS = "#27ae60"      # Green
-    WARNING = "#f39c12"      # Orange
-    DANGER = "#c0392b"       # Red
+    # Danger Palette (Red)
+    DANGER = "#DC2626"
+    DANGER_HOVER = "#B91C1C"
+    DANGER_PRESSED = "#991B1B"
     
-    BACKGROUND = "#f5f6fa"   # Very Light Blue-Gray (App Background)
-    SURFACE = "#ffffff"      # White (Cards, Content Areas)
+    # Neutral Palette (Gray/Slate)
+    NEUTRAL_900 = "#111827"  # Main Text
+    NEUTRAL_500 = "#6B7280"  # Muted/Metadata
+    NEUTRAL_200 = "#E5E7EB"  # Borders
+    NEUTRAL_100 = "#F3F4F6"  # Backgrounds/Hovers
     
-    TEXT_PRIMARY = "#2c3e50" # Dark Slate
-    TEXT_SECONDARY = "#7f8c8d" # Gray
-    TEXT_LIGHT = "#ecf0f1"   # Light Gray/White
+    # Surface
+    SURFACE = "#FFFFFF"
     
-    BORDER = "#bdc3c7"       # Light Gray Border
+    # --- Typography ---
+    FONT_FAMILY = "'Segoe UI', 'Roboto', sans-serif"
+    
+    # Scale (Size / Weight)
+    FONT_PAGE = "22px"      # Weight 600
+    FONT_SECTION = "18px"   # Weight 600
+    FONT_CARD = "16px"      # Weight 600
+    FONT_BODY = "14px"      # Weight 400
+    FONT_META = "13px"      # Weight 400
+    
+    WEIGHT_REGULAR = "400"
+    WEIGHT_SEMIBOLD = "600"
+    
+    # --- Layout & Spacing ---
+    # Base Unit: 8px
+    SPACE_MICRO = "4px"     # Icons/Gaps only
+    SPACE_SM = "8px"
+    SPACE_MD = "16px"
+    SPACE_LG = "24px"
+    SPACE_XL = "32px"
+    SPACE_2XL = "40px"
+    
+    RADIUS_MD = "8px"
+    RADIUS_SM = "4px" # For inputs/small elements
+    
+    # --- Interaction ---
+    TRANSITION = "0.15s ease-in-out" # Note: QSS support for transitions is limited to specific widgets/properties
+    FOCUS_RING = f"2px solid {PRIMARY}"
+
+    # --- Backward Compatibility Layer (Legacy Token Mapping) ---
+    # Maps old variable names to new design tokens to prevent AttributeErrors
+    SECONDARY = PRIMARY           # Old "Bright Blue" -> New Primary
+    ACCENT = PRIMARY              # Old Teal -> New Primary
+    
+    SUCCESS = "#10B981"           # Emerald 500
+    SUCCESS_HOVER = "#059669"     # Emerald 600
+    SUCCESS_PRESSED = "#047857"   # Emerald 700
+    
+    WARNING = "#F59E0B"           # Amber 500
+    
+    BACKGROUND = NEUTRAL_100      # Old Light Blue-Gray -> New Neutral 100
+    
+    TEXT_PRIMARY = NEUTRAL_900    # Old Dark Slate -> New Neutral 900
+    TEXT_SECONDARY = NEUTRAL_500  # Old Gray -> New Neutral 500
+    TEXT_LIGHT = SURFACE          # Old Light Gray/White -> Surface
+    
+    BORDER = NEUTRAL_200          # Old Light Gray -> New Neutral 200
 
 class Styles:
     @staticmethod
     def get_main_stylesheet():
         return f"""
             QMainWindow {{
-                background-color: {Theme.BACKGROUND};
+                background-color: {Theme.NEUTRAL_100};
             }}
             QWidget {{
-                font-family: 'Segoe UI', 'Roboto', sans-serif;
-                font-size: 14px;
-                color: {Theme.TEXT_PRIMARY};
+                font-family: {Theme.FONT_FAMILY};
+                font-size: {Theme.FONT_BODY};
+                color: {Theme.NEUTRAL_900};
             }}
             
-            /* --- Buttons --- */
+            /* --- Buttons (Base Styles) --- */
             QPushButton {{
-                background-color: {Theme.SECONDARY};
-                color: {Theme.TEXT_LIGHT};
+                border-radius: {Theme.RADIUS_MD};
+                padding: {Theme.SPACE_SM} {Theme.SPACE_MD};
+                font-weight: {Theme.WEIGHT_SEMIBOLD};
                 border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: 600;
+                outline: none;
             }}
-            QPushButton:hover {{
-                background-color: #2980b9; /* Darker Blue */
-            }}
-            QPushButton:pressed {{
-                background-color: #1c5980;
+            QPushButton:focus {{
+                border: {Theme.FOCUS_RING};
             }}
             QPushButton:disabled {{
-                background-color: {Theme.BORDER};
-                color: {Theme.TEXT_SECONDARY};
+                opacity: 0.6;
+                background-color: {Theme.NEUTRAL_200};
+                color: {Theme.NEUTRAL_500};
             }}
             
             /* --- Inputs --- */
             QLineEdit, QTextEdit, QComboBox {{
                 background-color: {Theme.SURFACE};
-                border: 1px solid {Theme.BORDER};
-                border-radius: 4px;
-                padding: 6px;
-                selection-background-color: {Theme.SECONDARY};
+                border: 1px solid {Theme.NEUTRAL_200};
+                border-radius: {Theme.RADIUS_SM};
+                padding: 6px; /* Micro adjustment for input height alignment */
+                selection-background-color: {Theme.PRIMARY};
+                color: {Theme.NEUTRAL_900};
             }}
             QLineEdit:focus, QTextEdit:focus, QComboBox:focus {{
-                border: 2px solid {Theme.SECONDARY};
+                border: {Theme.FOCUS_RING};
             }}
             
             /* --- Lists/Tables --- */
             QListWidget, QTableWidget {{
                 background-color: {Theme.SURFACE};
-                border: 1px solid {Theme.BORDER};
-                border-radius: 4px;
+                border: 1px solid {Theme.NEUTRAL_200};
+                border-radius: {Theme.RADIUS_MD};
                 outline: none;
             }}
             QListWidget::item:selected, QTableWidget::item:selected {{
-                background-color: {Theme.SECONDARY};
-                color: {Theme.TEXT_LIGHT};
+                background-color: {Theme.NEUTRAL_100};
+                color: {Theme.PRIMARY};
+                border-left: 4px solid {Theme.PRIMARY}; 
             }}
             QHeaderView::section {{
-                background-color: {Theme.PRIMARY};
-                color: {Theme.TEXT_LIGHT};
-                padding: 6px;
+                background-color: {Theme.NEUTRAL_100};
+                color: {Theme.NEUTRAL_900};
+                font-weight: {Theme.WEIGHT_SEMIBOLD};
+                padding: {Theme.SPACE_SM};
                 border: none;
+                border-bottom: 1px solid {Theme.NEUTRAL_200};
             }}
             
             /* --- Scrollbars --- */
             QScrollBar:vertical {{
                 border: none;
-                background: {Theme.BACKGROUND};
+                background: {Theme.NEUTRAL_100};
                 width: 10px;
                 margin: 0px;
             }}
             QScrollBar::handle:vertical {{
-                background: {Theme.BORDER};
+                background: {Theme.NEUTRAL_200};
                 min-height: 20px;
                 border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {Theme.NEUTRAL_500};
             }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0px;
@@ -102,7 +156,7 @@ class Styles:
         return f"""
             QFrame {{
                 background-color: {Theme.SURFACE};
-                border-radius: 10px;
-                border: 1px solid {Theme.BORDER};
+                border-radius: {Theme.RADIUS_MD};
+                border: 1px solid {Theme.NEUTRAL_200};
             }}
         """
