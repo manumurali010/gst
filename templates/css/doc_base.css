@@ -1,4 +1,4 @@
-/* [A4 SIMULATION] Professional Workspace Aesthetics */
+/* [A4 SIMULATION] Professional Workspace Aesthetics - SHARED */
 body {
     background-color: #f1f5f9;
     /* Light Gray Workspace */
@@ -33,7 +33,7 @@ body {
 }
 
 /* Aggressive Containment */
-.scn-document,
+.doc-content,
 .letterhead-container,
 table {
     max-width: 100% !important;
@@ -52,7 +52,7 @@ table {
 }
 
 /* Base Document Styling */
-.scn-document {
+.doc-content {
     font-family: 'Bookman Old Style', serif;
     font-size: 11pt;
     line-height: 1.6;
@@ -60,7 +60,14 @@ table {
     text-align: justify;
 }
 
-.scn-document p,
+.issue-group,
+.issue-block {
+    page-break-inside: avoid !important;
+    margin-bottom: 25px;
+    width: 100%;
+}
+
+.doc-content p,
 .para-content p {
     text-align: justify;
     font-size: 11pt;
@@ -75,13 +82,8 @@ table {
     text-align: center;
 }
 
-.letterhead-container img {
-    max-width: 100%;
-    height: auto;
-}
-
 /* Heading Hierarchy */
-.scn-document h3 {
+.doc-content h3 {
     font-size: 11pt;
     font-weight: bold;
     text-decoration: underline;
@@ -90,7 +92,7 @@ table {
     margin-bottom: 10px;
 }
 
-.header {
+.doc-header {
     text-align: center;
     font-weight: bold;
     font-size: 11pt;
@@ -103,8 +105,13 @@ table {
     width: 100%;
     margin-bottom: 15px;
     font-size: 10pt;
-    /* Smaller font for tables per request */
+    /* Smaller font for tables */
     border: 1.2px solid black;
+    page-break-inside: avoid !important;
+}
+
+tr {
+    page-break-inside: avoid !important;
 }
 
 .para-table {
@@ -131,10 +138,13 @@ table {
 }
 
 /* Calculation Table Specifics */
+.data-table,
 .calc-table {
     border: 1.2px solid black;
 }
 
+.data-table th,
+.data-table td,
 .calc-table th,
 .calc-table td {
     border: 1px solid black;
@@ -143,18 +153,30 @@ table {
     word-break: break-word;
 }
 
+.data-table th,
 .calc-table th {
     background-color: #f8fafc;
     font-weight: bold;
 }
 
-/* Media Query for Print Parity */
+/* Media Query for Print Parity (PDF) */
 @media print {
+    @page {
+        size: A4;
+        margin: 20mm;
+
+        @bottom-center {
+            content: "Page " counter(page);
+            font-family: 'Bookman Old Style', serif;
+            font-size: 10pt;
+        }
+    }
 
     body,
     .page-wrapper {
         background: white !important;
         padding: 0 !important;
+        display: block !important;
     }
 
     .a4-page {
@@ -163,5 +185,32 @@ table {
         width: 100% !important;
         height: auto !important;
         padding: 0 !important;
+        /* Let @page handle margins */
+        page-break-after: always;
+        overflow: visible !important;
+    }
+
+    /* Improve header repeating for long tables */
+    thead {
+        display: table-header-group;
+    }
+
+    tfoot {
+        display: table-footer-group;
+    }
+
+    /* Hide the pagination injection wrapper if printing raw content */
+    #scn-preview-wrapper,
+    #asmt-preview-wrapper {
+        display: none !important;
+    }
+
+    /* Show the source content when printing */
+    #scn-source-content,
+    #asmt-source-content {
+        display: block !important;
+        visibility: visible !important;
+        position: static !important;
+        width: 100% !important;
     }
 }

@@ -1,13 +1,11 @@
-/* Qt WebEngine Specific Overrides for Paginated SCN Preview */
+/* Qt WebEngine Specific Overrides for Shared Document Preview */
 body {
     background-color: #f1f5f9 !important;
-    /* Force light gray workspace */
     margin: 0 !important;
     padding: 0 !important;
     -webkit-font-smoothing: antialiased;
 }
 
-/* Ensure pagination wrapper is visible and scrolls correctly in Qt */
 .page-wrapper {
     display: flex !important;
     flex-direction: column !important;
@@ -16,38 +14,28 @@ body {
     background-color: #f1f5f9 !important;
 }
 
-/* Page Aesthetics in Qt */
 .a4-page {
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05) !important;
     margin: 0 auto 30px auto !important;
 }
 
-/* Table Parity Fixes for Qt */
-.calc-table {
+table {
     border-collapse: collapse !important;
 }
 
-.calc-table td,
-.calc-table th {
-    border: 1px solid black !important;
-    /* Prevent rows from splitting in the middle in preview if possible */
+td,
+th {
     page-break-inside: avoid !important;
 }
 
-/* Alignment and Justification */
-.scn-document p,
+.doc-content p,
 .para-content p {
     text-align: justify !important;
     line-height: 1.6 !important;
 }
 
-/* Letterhead Fix: Ensure absolute top positioning in first page */
+/* Letterhead Fix */
 .page-wrapper .a4-page:first-child .letterhead-container {
     margin-top: -10px !important;
-    /* Offset for internal container margins if any */
     padding-top: 0 !important;
-}
-
-.page-wrapper .a4-page:first-child .letterhead-container img {
-    margin-top: 0 !important;
 }

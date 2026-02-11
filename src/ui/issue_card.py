@@ -27,7 +27,6 @@ class IssueCard(QFrame):
         super().__init__(parent)
         # [STATE OWNERSHIP] Enforce Immutability
         self.template = copy.deepcopy(template)
-        print(f"[IssueCard DIAG] __init__ start for {self.template.get('issue_id')}")
         
         self.mode = mode
         self.content_key = content_key
@@ -41,17 +40,17 @@ class IssueCard(QFrame):
         self.issue_id = self.template.get('issue_id', 'unknown')
         
         # [INVARIANT] 1. Header Title Derivation (Computed ONCE)
-        # Priority: issue_name > formatted(issue_id)
+        # Priority: issue_name > human-readable formatted string
         raw_name = self.template.get('issue_name', '')
         if not raw_name or raw_name == 'Issue':
-             # Fallback to ID title-cased (e.g. IMPORT_ITC_MISMATCH -> Import Itc Mismatch)
-             self.display_title = self.issue_id.replace('_', ' ').title()
+             # Clean human-readable fallback (No underscore IDs)
+             self.display_title = "Issue Concerning Tax Liability" 
         else:
              self.display_title = raw_name
              
         self.variables = self.template.get('variables', {}).copy()
         self.calc_logic = self.template.get('calc_logic', "")
-        self.tax_mapping = self.template.get('tax_demand_mapping', {})
+        self.tax_mapping = self.template.get('tax_demand_mapping') or {}
         
         # [STATE OWNERSHIP] Instance-Owned Content
         self.grid_data = None
@@ -77,10 +76,8 @@ class IssueCard(QFrame):
         raw_grid_data = None
         if data and 'table_data' in data and data['table_data']:
              raw_grid_data = data['table_data']
-             print(f"[IssueCard DIAG] Resolving grid_data from Runtime Identity (Adopted)")
         elif self.template.get('grid_data'):
              raw_grid_data = self.template['grid_data']
-             print(f"[IssueCard DIAG] Resolving grid_data from Template Default")
              
         if raw_grid_data:
              # Canonical Lock: Assert normalization happened upstream.
@@ -92,7 +89,15 @@ class IssueCard(QFrame):
                      # For now, print critical error but allow proceed if empty
 
              self.grid_data = raw_grid_data
-             print(f"[IssueCard DIAG] Canonical Grid Locked. Rows: {len(self.grid_data.get('rows', []))}")
+             
+             # [FIX] Canonical Column IDs
+             if isinstance(self.grid_data, dict) and 'columns' in self.grid_data:
+                 cols = self.grid_data['columns']
+                 for i, col in enumerate(cols):
+                     if not isinstance(col, dict):
+                         cols[i] = {"id": str(col).lower().replace(" ", "_"), "label": str(col)}
+
+
              
              # [BOOTSTRAP] Variable Extraction (Read-Only)
              for row in self.grid_data.get('rows', []):
@@ -117,7 +122,7 @@ class IssueCard(QFrame):
 
                   # [MANDATORY FIX] Unconditional Variable Bootstrap
                   # Override template defaults (0) with adopted grid values immediately.
-                  print(f"[IssueCard DIAG] Running Bootstrap for {self.template.get('issue_id')}")
+
                   normalized = self.GridAdapter.normalize_to_schema(self.template['grid_data'])
                   for row in normalized.get('rows', []):
                       for cell in row.values():
@@ -216,15 +221,6 @@ class IssueCard(QFrame):
         
         main_card_layout = self.card.content_layout
         
-        # [DEBUG] Hierarchy Check
-        print(f"[IssueCard DIAG] main_card_layout type: {type(main_card_layout)}")
-        print(f"[IssueCard DIAG] main_card_layout parent: {main_card_layout.parentWidget()}")
-        
-        p = main_card_layout.parentWidget()
-        while p:
-            print(f"[IssueCard DIAG] Ancestor: {p} | Layout: {type(p.layout()) if p.layout() else 'None'}")
-            p = p.parentWidget()
-
         # 3.1 Issue Data Card
         self.data_card = ModernCard("Issue Data", collapsible=True)
         
@@ -234,7 +230,7 @@ class IssueCard(QFrame):
              print(f"[SOP-10 UI DIAG] init_ui: Issue ID={issue_id}")
              # ... (keep logs)
 
-        print(f"[IssueCard DIAG] init_ui: Checking UI branches for {issue_id}")
+
         self.grid_container = self.data_card # Store for late-binding
         
         # Check if we have grid_data...
@@ -557,7 +553,7 @@ class IssueCard(QFrame):
     def init_grid_ui(self, layout, data=None):
         """Initialize structural QTableWidget. Supports idempotent setup and skeleton mode."""
         grid_id = self.template.get('issue_id')
-        print(f"[IssueCard DIAG] init_grid_ui: Start for {grid_id}")
+    
         
         # [STATE OWNERSHIP] 1. Resolve Data Source
         # Prefer instance-owned canonical data if available (Single Source of Truth)
@@ -567,7 +563,7 @@ class IssueCard(QFrame):
         if not canonical_data:
              raw_source = data if data else self.template.get('grid_data')
              if not raw_source:
-                 print("[IssueCard DIAG] init_grid_ui: ABORT - No grid_data available")
+    
                  return
              # Normalize on the fly (should have been done in init, but safe fallback)
              canonical_data = self.GridAdapter.normalize_to_schema(raw_source)
@@ -628,7 +624,7 @@ class IssueCard(QFrame):
             
         # REVERSIBILITY: Show table if it was hidden
         self.table.show()
-        print(f"[IssueCard DIAG] BINDING real grid_data. Rows={len(rows)}")
+    
         
         self.cell_widgets = {} # Reset for fresh bind
         new_widgets = render_grid_to_table_widget(self.table, normalized, interactive=True)
@@ -685,11 +681,18 @@ class IssueCard(QFrame):
         columns = grid_data.get('columns', [])
         
         if rows and columns:
-             for col in columns:
-                  col_id = col.get('id')
+             for i, col in enumerate(columns):
+                  col_id = col.get('id') if isinstance(col, dict) else str(col).lower().replace(" ", "_")
                   if not col_id: continue
                   
-                  first_cell = rows[0].get(col_id, {})
+                  # Support both Dict Rows (Modern) and List Rows (Legacy)
+                  first_row = rows[0]
+                  if isinstance(first_row, dict):
+                       first_cell = first_row.get(col_id, {})
+                  elif isinstance(first_row, list) and i < len(first_row):
+                       first_cell = first_row[i]
+                  else:
+                       first_cell = {}
                   if isinstance(first_cell, dict):
                        source = first_cell.get('source')
                        if source:
@@ -808,7 +811,6 @@ class IssueCard(QFrame):
         rows = normalized.get('rows', [])
         
         if rows:
-            print(f"[IssueCard DIAG] EXITING SKELETON MODE – binding real grid_data (Rows={len(rows)})")
             # Pass NORMALIZED data, not raw grid_data
             self.bind_grid_data(normalized, self.grid_container)
             if hasattr(self, 'table'):
@@ -871,16 +873,30 @@ class IssueCard(QFrame):
                 
                 if 0 <= row_idx < len(rows) and 0 <= col_idx < len(cols):
                     # Resolve Column ID from Schema Order
-                    col_id = cols[col_idx].get('id')
+                    col_obj = cols[col_idx]
+                    col_id = col_obj.get('id') if isinstance(col_obj, dict) else str(col_obj).lower().replace(" ", "_")
+                    
                     if col_id:
                         # Locate cell dict in canonical source
-                        row_dict = rows[row_idx]
-                        if col_id in row_dict:
-                            if isinstance(row_dict[col_id], dict):
-                                row_dict[col_id]['value'] = val
+                        row_raw = rows[row_idx]
+                        
+                        # Scenario A: Dict-based Row
+                        if isinstance(row_raw, dict):
+                            if col_id in row_raw:
+                                if isinstance(row_raw[col_id], dict):
+                                    row_raw[col_id]['value'] = val
+                                else:
+                                    row_raw[col_id] = {'value': val, 'type': 'static'}
                             else:
-                                # Auto-repair: convert raw value to cell dict if needed
-                                row_dict[col_id] = {'value': val, 'type': 'static'}
+                                # New Column in existing row
+                                row_raw[col_id] = {'value': val, 'type': 'input'}
+                                
+                        # Scenario B: List-based Row
+                        elif isinstance(row_raw, list) and col_idx < len(row_raw):
+                            if isinstance(row_raw[col_idx], dict):
+                                row_raw[col_idx]['value'] = val
+                            else:
+                                row_raw[col_idx] = val # Primitive storage
         except Exception as e:
             print(f"[IssueCard ERROR] Failed to sync grid edit: {e}")
             
@@ -930,7 +946,7 @@ class IssueCard(QFrame):
         interest = 0
         penalty = 0
         
-        mapping = self.tax_mapping
+        mapping = self.tax_mapping or {}
         
         # Helper to get value from mapping
         def get_val(key):
@@ -964,7 +980,11 @@ class IssueCard(QFrame):
 
     def calculate_grid(self, data=None):
         """Evaluate formulas in the grid with explicit variable binding precedence"""
-        grid_data = data if data else self.template.get('grid_data')
+        # [FIX] Prioritize Instance Grid State over Static Template
+        grid_data = data if data else self.grid_data
+        if not grid_data: 
+            grid_data = self.template.get('grid_data')
+        
         if not grid_data: return
         
         # [FIX] Normalize before calculation
@@ -1196,7 +1216,6 @@ class IssueCard(QFrame):
             
         if grid_source:
             grid_data = grid_source
-            print(f"[IssueCard DIAG] Found grid_source type: {type(grid_source)}")
             
             # [FIX] Robust Normalization for Canonical Grid (List vs Dict)
             # The new IssueCard enforces {'columns': ..., 'rows': ...} but legacy data might be List[List].
@@ -1207,10 +1226,6 @@ class IssueCard(QFrame):
             elif isinstance(grid_data, list):
                 rows_data = grid_data
             
-            print(f"[IssueCard DIAG] Normalized rows_data length: {len(rows_data)}")
-            if len(rows_data) > 0:
-                print(f"[IssueCard DIAG] Sample row_data[0] type: {type(rows_data[0])}")
-                print(f"[IssueCard DIAG] Sample row_data[0] keys/content: {rows_data[0]}")
             
             # [CRITICAL FIX] Overwrite variables context so downstream logic sees a List
             # This prevents KeyError: 0 when Jinja/Legacy logic tries to index it numerically
@@ -1229,41 +1244,64 @@ class IssueCard(QFrame):
             """
             
             # Attempt to get header columns if possible
+            skip_first_col = False
             if isinstance(grid_data, dict) and 'columns' in grid_data:
                 columns = grid_data['columns']
-                print(f"[IssueCard DIAG] columns data: {columns}")
+                
+                # [POLISH] Suppress index column if present
+                if columns:
+                    first_col = columns[0]
+                    first_label = ""
+                    if isinstance(first_col, dict):
+                        first_label = (first_col.get('label') or first_col.get('header') or first_col.get('name', '')).strip().lower()
+                    else:
+                        first_label = str(first_col).strip().lower()
+                    
+                    if first_label in ['sl no', 'sl no.', 'si no', 'si no.', 'sl.no', '#', 'no.']:
+                        skip_first_col = True
+
                 html += "<tr>"
-                for col in columns:
-                    col_name = col.get('name', 'Column') if isinstance(col, dict) else str(col)
-                    html += f'<th style="border: 1px solid black; padding: 5px; text-align: center; background-color: #f0f0f0;">{col_name}</th>'
+                for c, col in enumerate(columns):
+                    if c == 0 and skip_first_col: continue
+                    # [FIX] Prioritize 'label' (canonical), then 'header', then 'name'
+                    if isinstance(col, dict):
+                        col_name = col.get('label') or col.get('header') or col.get('name', 'Column')
+                    else:
+                        col_name = str(col)
+                    html += f'<th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">{col_name}</th>'
                 html += "</tr>"
             
             for r, row_data in enumerate(rows_data):
                 html += "<tr>"
                 
-                # Ensure row_data is iterable (List)
                 cells = []
                 if isinstance(row_data, list):
-                     cells = row_data
+                    cells = row_data
                 elif isinstance(row_data, dict):
                     if 'cells' in row_data:
-                         cells = row_data['cells']
+                        cells = row_data['cells']
+                    elif isinstance(grid_data, dict) and 'columns' in grid_data:
+                        columns = grid_data['columns']
+                        for col in columns:
+                            if isinstance(col, dict):
+                                col_key = col.get('key') or col.get('id') or col.get('name', '')
+                            else:
+                                col_key = str(col)
+                            cell_value = row_data.get(col_key, '')
+                            cells.append(cell_value)
                     else:
-                        # Fallback: maybe it's a direct dict of values? 
                         cells = list(row_data.values())
 
                 for c, cell_info in enumerate(cells):
+                    if c == 0 and skip_first_col: continue
                     val = ""
                     var_name = None
-                    ctype = 'empty'
                     
                     if isinstance(cell_info, dict):
                         val = cell_info.get('value', '')
                         var_name = cell_info.get('var')
-                        ctype = cell_info.get('type', 'empty')
                     else:
                         val = str(cell_info)
-                        ctype = 'static' # Assume static if just a value
                     
                     # Resolve Value
                     if var_name:
@@ -1273,16 +1311,20 @@ class IssueCard(QFrame):
                             # [DISPLAY FALLBACK] Unresolved variables default to 0 in HTML view
                             val = 0
                     
-                    # Styling
-                    style = "border: 1px solid #000; padding: 6px; word-wrap: break-word; vertical-align: top;"
+                    # [POLISH] Professional Table Cell Styling
+                    style = "border: 1px solid black; padding: 4px 6px; font-size: 10pt;"
                     
-                    if ctype == 'static':
-                        style += "background-color: #f2f2f2; font-weight: bold;"
+                    # Alignment logic
+                    if isinstance(val, (int, float)):
+                        style += "text-align: right;"
                     else:
-                        # Align numbers
                         try:
-                            float(str(val).replace(',', '').replace('₹', '').strip())
-                            style += "text-align: right;"
+                            clean_val = str(val).replace(',', '').replace('₹', '').strip()
+                            if clean_val and all(c in '0123456789.-' for c in clean_val):
+                                float(clean_val)
+                                style += "text-align: right;"
+                            else:
+                                style += "text-align: left;"
                         except:
                             style += "text-align: left;"
                             
@@ -1503,7 +1545,7 @@ class IssueCard(QFrame):
             
         # 4. Final Verification: Sync structural changes if real grid data just arrived
         if ('table_data' in data and data['table_data']):
-             print(f"[IssueCard DIAG] load_data: Final Bind check for {self.template.get('issue_id')}")
+
              # Ensure template has the structure
              if self.template.get('grid_data'):
                   self.bind_grid_data(self.template['grid_data'], self.grid_container)
@@ -1570,14 +1612,102 @@ class IssueCard(QFrame):
 
     def get_tax_breakdown(self):
         """Return tax breakdown by Act"""
+        # [DIAGNOSTIC]
+        print("ISSUE:", getattr(self, "issue_id", "Unknown"))
+        print("LIABILITY CONFIG:", self.template.get("liability_config", None))
+        print("VARIABLES SAMPLE:", list(self.variables.items())[:10])
+
         breakdown = {}
         
         # Helper to safely get float
-        def get_v(key):
-            try: return float(self.variables.get(key, 0))
+        def safe_float(val):
+            if isinstance(val, str):
+                val = val.replace(',', '').strip()
+            try: return float(val)
             except: return 0.0
 
-        # 1. Try explicit Act variables first (if defined in template/variables)
+        def get_v(key):
+            return safe_float(self.variables.get(key, 0))
+
+        # [REORDERED] PRIORITY 1: Canonical-First Logic (Strict Adherence to tax_demand_mapping)
+        if self.tax_mapping:
+            has_mapped_data = False
+            for act in ['IGST', 'CGST', 'SGST', 'Cess']:
+                var_name = self.tax_mapping.get(act)
+                if var_name:
+                    val = get_v(var_name)
+                    has_mapped_data = True
+                    if act not in breakdown:
+                        breakdown[act] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
+                    breakdown[act]['tax'] = val
+            
+            if has_mapped_data:
+                print("BREAKDOWN GENERATED:", breakdown)
+                return breakdown
+
+        # [REORDERED] PRIORITY 2: Structured Liability Config (Contract Mode)
+        liability_config = self.template.get('liability_config')
+        if liability_config:
+            model = liability_config.get('model')
+            heads = liability_config.get('column_heads', [])
+            indices = liability_config.get('row_indices', [])
+            
+            def get_row_var(idx, head):
+                return f"row{idx+1}_{head.lower()}"
+
+            if model in ['single_row', 'single_column', 'multiple_rows']:
+                for r_idx in indices:
+                    for head in heads:
+                        var_name = get_row_var(r_idx, head)
+                        val = get_v(var_name)
+                        act = head # CGST, SGST, IGST
+                        if act == 'Amount': act = 'IGST' 
+                        
+                        if act not in breakdown:
+                            breakdown[act] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
+                        breakdown[act]['tax'] += val
+                
+                if breakdown: 
+                    print("BREAKDOWN GENERATED:", breakdown)
+                    return breakdown
+
+            elif model == 'sum_of_rows':
+                current_grid = self.grid_data if hasattr(self, 'grid_data') and self.grid_data else self.template.get('grid_data')
+                if current_grid and isinstance(current_grid, dict):
+                    columns = current_grid.get('columns', [])
+                    col_map = {}
+                    for col in columns:
+                        if isinstance(col, dict):
+                             lbl = str(col.get('label', '')).upper()
+                             cid = col.get('id')
+                             for head in heads:
+                                 if head.upper() in lbl: col_map[head] = cid
+                    
+                    if col_map:
+                        rows = current_grid.get('rows', [])
+                        for row in rows:
+                            is_total = False
+                            for cell in row.values():
+                                if isinstance(cell, dict) and 'value' in cell:
+                                    if "TOTAL" in str(cell['value']).upper(): is_total = True; break
+                            if is_total: continue
+
+                            for head, cid in col_map.items():
+                                cell = row.get(cid)
+                                if isinstance(cell, dict):
+                                    val = 0.0
+                                    if cell.get('var'): val = get_v(cell['var'])
+                                    else: val = safe_float(cell.get('value', 0))
+                                    
+                                    if head not in breakdown:
+                                        breakdown[head] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
+                                    breakdown[head]['tax'] += val
+                        
+                        if breakdown: 
+                            print("BREAKDOWN GENERATED:", breakdown)
+                            return breakdown
+
+        # [FALLBACK] Legacy / Explicit Act variables (High risk of hijacking)
         igst = get_v('tax_igst') or get_v('igst_tax')
         cgst = get_v('tax_cgst') or get_v('cgst_tax')
         sgst = get_v('tax_sgst') or get_v('sgst_tax')
@@ -1588,30 +1718,8 @@ class IssueCard(QFrame):
             if cgst: breakdown['CGST'] = {'tax': cgst, 'interest': get_v('interest_cgst'), 'penalty': get_v('penalty_cgst')}
             if sgst: breakdown['SGST'] = {'tax': sgst, 'interest': get_v('interest_sgst'), 'penalty': get_v('penalty_sgst')}
             if cess: breakdown['Cess'] = {'tax': cess, 'interest': get_v('interest_cess'), 'penalty': get_v('penalty_cess')}
+            print("BREAKDOWN GENERATED:", breakdown)
             return breakdown
-
-        # [FIX] Canonical-First Logic: Strict Adherence to tax_demand_mapping
-        if self.tax_mapping:
-            has_mapped_data = False
-            for act in ['IGST', 'CGST', 'SGST', 'Cess']:
-                var_name = self.tax_mapping.get(act)
-                if var_name:
-                    # Mapped variable exists in template contract
-                    val = get_v(var_name)
-                    # We populate the breakdown even if 0, to respect the contract
-                    # But we only flag has_mapped_data if we found a valid mapping instruction
-                    has_mapped_data = True
-                    
-                    if act not in breakdown:
-                        breakdown[act] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
-                    
-                    breakdown[act]['tax'] = val
-                    
-                    # Optional: Look for sibling interest/penalty variables if conventional names used
-                    # (This part remains heuristic or requires extended mapping, but tax is the priority)
-            
-            if has_mapped_data:
-                return breakdown
 
         # 2. Smart Detection for Grid Tables (if mapping is missing)
         # Support both Legacy 'tables' and Modern 'grid_data'
@@ -1757,4 +1865,5 @@ class IssueCard(QFrame):
         if tax or interest or penalty:
             breakdown['IGST'] = {'tax': tax, 'interest': interest, 'penalty': penalty}
             
+        print("BREAKDOWN GENERATED:", breakdown)
         return breakdown

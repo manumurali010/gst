@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ASMT-10 Reference</title>
+    {{ full_styles_html | safe }}
+</head>
+
+<body>
+    {% macro render_content() %}
+    <!-- Letterhead -->
+    <div class="letterhead-container">
+        {{ letter_head | safe }}
+    </div>
+
+    <!-- OC No and Date Row -->
+    <table style="border: none; width: 100%; margin-top: 0px; margin-bottom: 20px;">
+        <tbody>
+            <tr style="border: none;">
+                <td style="border: none; text-align: left; width: 50%;">
+                    <strong>O.C. No:</strong> {{ oc_number }}
+                </td>
+                <td style="border: none; text-align: right; width: 50%;">
+                    <strong>Date:</strong> {{ notice_date }}
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="doc-header">
+        FORM GST ASMT-10<br>
+        [See rule 99(1)]
+    </div>
+
+    <div style="height: 15px;"></div>
+
+    <div class="recipient">
+        To,<br>
+        <strong>{{ legal_name }}</strong><br>
+        GSTIN: {{ gstin }}<br>
+        {{ addr_clean | safe }}
+    </div>
+
+    <div style="height: 15px;"></div>
+
+    <div class="tax-period" style="font-weight: bold;">
+        Tax period: {{ financial_year }}
+    </div>
+
+    <div style="height: 15px;"></div>
+
+    <div style="text-align: center; font-weight: bold; margin-bottom: 15px; text-decoration: underline;">
+        Sub: Notice for intimating discrepancies in the return after scrutiny
+    </div>
+
+    <p>This is to inform that during the scrutiny of the returns for the financial year {{ financial_year }}, {{
+        intro_text }} have been noticed:</p>
+
+    {{ issue_sections | safe }}
+
+    <div style="height: 20px;"></div>
+
+    <p style="font-weight: bold; font-size: 13pt;">Total Tax Liability Identified: ₹ {{ total_tax_formatted }}</p>
+
+    <div style="height: 15px;"></div>
+
+    <p>You are hereby directed to explain the reasons for the aforesaid discrepancies by <strong>{{ reply_date
+            }}</strong>.</p>
+    <p>Failing which, proceedings in accordance with law may be initiated against you without further reference.</p>
+
+    <div style="height: 40px;"></div>
+
+    <!-- Signature Block -->
+    <table style="border: none; width: 100%; margin-top: 20px;">
+        <tr style="border: none;">
+            <td style="border: none; width: 60%;"></td>
+            <td style="border: none; width: 40%; text-align: right; vertical-align: top;">
+                <p style="margin: 0; padding: 0;">Signature of Proper Officer</p>
+                <p style="margin: 0; padding: 0;">(Name)</p>
+                <p style="margin: 0; padding: 0;">Designation</p>
+            </td>
+        </tr>
+    </table>
+    {% endmacro %}
+
+    <!-- Paginated Wrapper -->
+    <div class="page-wrapper" id="asmt-preview-wrapper">
+        <!-- JS will inject discrete .a4-page containers here -->
+    </div>
+
+    <!-- Hidden Source Content -->
+    <div id="asmt-source-content" class="doc-content"
+        style="display: none; visibility: hidden; position: absolute; width: 680px;">
+        {{ render_content() }}
+    </div>
+
+    <script>
+        /**
+         * Unified A4 Pagination Engine
+         * Handles discrete pages and smart splitting.
+         */
+        const PAGE_HEIGHT = 1123;
+        const TOP_PADDING = 57;
+        const BOTTOM_PADDING = 57;
+        const CONTENT_MAX_HEIGHT = PAGE_HEIGHT - TOP_PADDING - BOTTOM_PADDING;
+
+        function createNewPage() {
+            const wrapper = document.getElementById('asmt-preview-wrapper');
+            const page = document.createElement('div');
+            page.className = 'a4-page';
+
+            const documentDiv = document.createElement('div');
+            documentDiv.className = 'doc-content';
+            page.appendChild(documentDiv);
+
+            wrapper.appendChild(page);
+            return documentDiv;
+        }
+
+        function paginate() {
+            const source = document.getElementById('asmt-source-content');
+            const wrapper = document.getElementById('asmt-preview-wrapper');
+            if (!source || !wrapper) return;
+
+            wrapper.innerHTML = '';
+            source.style.display = 'block';
+            source.style.width = '680px';
+
+            let currentPageContainer = createNewPage();
+            const children = Array.from(source.children);
+
+            children.forEach(child => {
+                const childHeight = child.offsetHeight;
+                const currentContentHeight = currentPageContainer.offsetHeight;
+
+                // Case 1: Fits in current page space
+                if (currentContentHeight + childHeight <= CONTENT_MAX_HEIGHT) {
+                    currentPageContainer.appendChild(child.cloneNode(true));
+                }
+                // Case 2: Block is physically too large for any single page
+                else if (childHeight > CONTENT_MAX_HEIGHT) {
+                    if (child.tagName === 'TABLE' || child.querySelector('table')) {
+                        // Start splitting. If page is already >80% full, start on fresh page.
+                        if (currentPageContainer.offsetHeight > CONTENT_MAX_HEIGHT * 0.8) {
+                            currentPageContainer = createNewPage();
+                        }
+
+                        if (child.tagName === 'TABLE') {
+                            currentPageContainer = splitTable(child, currentPageContainer);
+                        } else {
+                            currentPageContainer = splitContainerWithTable(child, currentPageContainer);
+                        }
+                    } else {
+                        // Non-splitable mega-block: force onto new page and let it overflow
+                        currentPageContainer = createNewPage();
+                        currentPageContainer.appendChild(child.cloneNode(true));
+                    }
+                }
+                // Case 3: Fits on a fresh page, so move it there
+                else {
+                    currentPageContainer = createNewPage();
+                    currentPageContainer.appendChild(child.cloneNode(true));
+                }
+            });
+
+            source.style.display = 'none';
+        }
+
+        function splitContainerWithTable(container, pageContent) {
+            const table = container.querySelector('table');
+            const clone = container.cloneNode(true);
+            const tableInClone = clone.querySelector('table');
+
+            tableInClone.innerHTML = '';
+            pageContent.appendChild(clone);
+
+            return splitTable(table, pageContent, tableInClone);
+        }
+
+        function splitTable(table, container, targetTable = null) {
+            let remainingRows = Array.from(table.rows);
+            let header = null;
+
+            if (table.tHead) {
+                header = table.tHead.cloneNode(true);
+                remainingRows = remainingRows.filter(r => r.parentNode.tagName !== 'THEAD');
+            } else if (remainingRows.length > 0) {
+                header = document.createElement('thead');
+                header.appendChild(remainingRows[0].cloneNode(true));
+                remainingRows.shift();
+            }
+
+            while (remainingRows.length > 0) {
+                const activeTable = targetTable || table.cloneNode(false);
+                if (header) activeTable.appendChild(header.cloneNode(true));
+
+                const tbody = document.createElement('tbody');
+                activeTable.appendChild(tbody);
+
+                if (!targetTable) container.appendChild(activeTable);
+                targetTable = null;
+
+                let rowsAdded = 0;
+                while (remainingRows.length > 0) {
+                    const row = remainingRows[0];
+                    tbody.appendChild(row.cloneNode(true));
+
+                    // Check for overflow. If 0 rows added, we must keep at least 1 row to prevent infinite loop.
+                    if (container.offsetHeight > CONTENT_MAX_HEIGHT && rowsAdded > 0) {
+                        tbody.removeChild(tbody.lastElementChild);
+                        break;
+                    }
+                    remainingRows.shift();
+                    rowsAdded++;
+                }
+
+                if (remainingRows.length > 0) {
+                    container = createNewPage();
+                }
+            }
+            return container;
+        }
+
+        window.addEventListener('load', () => setTimeout(paginate, 150));
+    </script>
+</body>
+
+</html>

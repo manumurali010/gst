@@ -15,12 +15,13 @@ def render_html_to_png(html_content, output_path):
     try:
         from weasyprint import HTML, CSS
         
-        # [FIX] Inject CSS to force continuous page height
-        # This ensures the PNG captures the full content height instead of just one A4 page.
+        # [FIX] Inject CSS to force continuous page height (prevents A4 truncation in PNG)
         continuous_css = CSS(string="@page { size: 1000px auto; margin: 0; }")
-        
-        # Render HTML to PNG with stylesheets
-        HTML(string=html_content).write_png(output_path, stylesheets=[continuous_css])
+
+        # [FIX] Render HTML to document object first, then export to PNG
+        # Newer WeasyPrint (v60+) removed direct .write_png() from HTML object
+        doc = HTML(string=html_content).render(stylesheets=[continuous_css])
+        doc.write_png(output_path)
         return True, "Success"
     except OSError as e:
         # Catch Windows DLL errors (missing GTK)

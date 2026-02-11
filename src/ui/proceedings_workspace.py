@@ -1,11 +1,12 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                              QListWidget, QStackedWidget, QSplitter, QScrollArea, QTextEdit, QTextBrowser,
                              QMessageBox, QFrame, QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView, QDateEdit, QComboBox, QLineEdit, QFileDialog, QDialog, QGridLayout, QSpacerItem, QSizePolicy)
-from PyQt6.QtCore import Qt, QTimer, QDate, pyqtSignal
+from PyQt6.QtCore import Qt, QDate, pyqtSignal
 from PyQt6 import QtCore
 from PyQt6.QtGui import QPixmap, QShortcut, QKeySequence, QIcon, QResizeEvent
 from PyQt6.QtWidgets import QGraphicsDropShadowEffect
 from src.database.db_manager import DatabaseManager
+from PyQt6.QtWebEngineWidgets import QWebEngineView
 from src.utils.preview_generator import PreviewGenerator
 from src.ui.collapsible_box import CollapsibleBox
 from src.ui.rich_text_editor import RichTextEditor
@@ -20,6 +21,8 @@ import json
 import copy
 from jinja2 import Template, Environment, FileSystemLoader
 import datetime
+import base64
+import re
 
 class ASMT10ReferenceDialog(QDialog):
     """
@@ -90,19 +93,11 @@ class ProceedingsWorkspace(QWidget):
         self.proceeding_data = {}
         self.is_hydrated = False
         
-        # Debounce Timer
-        self.preview_timer = QTimer()
-        self.preview_timer.setSingleShot(True)
-        self.preview_timer.setInterval(500)
-        self.preview_timer.timeout.connect(self.update_preview)
-        
         self.asmt10_zoom_level = 1.0
         self.asmt10_show_letterhead = True
         
-        # Collapsible Preview State
-        self.preview_visible = False
-        
         self.active_scn_step = 0
+        self.preview_initialized = False
         self.scn_workflow_phase = "METADATA" # Authority state: METADATA | DRAFTING
         
         print("ProceedingsWorkspace: calling init_ui")
@@ -190,58 +185,13 @@ class ProceedingsWorkspace(QWidget):
         self.context_title_lbl = QLabel("") # Dynamic Title
         self.context_title_lbl.setStyleSheet("font-weight: bold; color: #5f6368;")
         
-        # Preview Toggle Button
-        self.btn_preview_toggle = QPushButton("Show Preview")
-        self.btn_preview_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_preview_toggle.setCheckable(True)
-        self.btn_preview_toggle.setStyleSheet("""
-            QPushButton {
-                border: none;
-                background-color: transparent;
-                color: #5f6368;
-                font-weight: 500;
-                padding: 5px 10px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #e8eaed;
-                color: #1a73e8;
-            }
-            QPushButton:checked {
-                background-color: #e8f0fe;
-                color: #1a73e8;
-            }
-        """)
-        self.btn_preview_toggle.clicked.connect(self.toggle_preview)
-        
         header_layout.addWidget(self.context_title_lbl)
         header_layout.addStretch()
-        header_layout.addWidget(self.btn_preview_toggle)
         
-        self.central_container_layout.addWidget(self.central_header)
-        self.central_container_layout.addWidget(self.content_stack)
-
         self.central_container_layout.addWidget(self.central_header)
         self.central_container_layout.addWidget(self.content_stack)
 
         self.layout.addWidget(self.central_container_widget)
-        
-        # 3. Floating Preview Pane (Overlay)
-        # Parented to self, but NOT added to layout
-        print("ProceedingsWorkspace: creating preview_pane")
-        self.create_preview_pane()
-        print("ProceedingsWorkspace: preview_pane created")
-        
-        # Setup Shortcuts
-        self.shortcut_preview = QShortcut(QKeySequence("Ctrl+P"), self)
-        self.shortcut_preview.activated.connect(self.toggle_preview)
-        
-        self.shortcut_esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
-        self.shortcut_esc.activated.connect(self.close_preview_on_esc)
-
-        # Set initial state
-        self.preview_container.hide()
-        self.btn_preview_toggle.setChecked(False)
         
         # Initial Context
         self.apply_context_layout("summary")
@@ -275,104 +225,27 @@ class ProceedingsWorkspace(QWidget):
             if action == "scn":
                 self.load_scn_issue_templates()
                 # The actual load_scn_issues() is now triggered by on_scn_page_changed for Step 2
-            
-            # Trigger preview update
-            if self.preview_visible:
-                self.update_preview(action)
-
-    def toggle_preview(self):
-        """Toggle the visibility of the floating preview pane."""
-        self.preview_visible = not self.preview_visible
-        
-        if self.preview_visible:
-            self.btn_preview_toggle.setText("Hide Preview")
-            self.btn_preview_toggle.setToolTip("Hide Live Preview (Ctrl+P / Esc)")
-            
-            # Show and Raise
-            self.update_preview_geometry()
-            self.preview_container.setVisible(True)
-            self.preview_container.raise_()
-            
-            # Trigger immediate update
-            self.update_preview()
-        else:
-            self.btn_preview_toggle.setText("Show Preview")
-            self.btn_preview_toggle.setToolTip("Show Live Preview (Ctrl+P)")
-            self.preview_container.hide()
-            
-        self.btn_preview_toggle.setChecked(self.preview_visible)
-
-    def close_preview_on_esc(self):
-        """Close preview if visible when Esc is pressed"""
-        if self.preview_visible:
-            self.toggle_preview()
-            
-    def resizeEvent(self, event: QResizeEvent):
-        """Update floating preview geometry on resize"""
-        super().resizeEvent(event)
-        if self.preview_visible:
-            self.update_preview_geometry()
-            
-    def update_preview_geometry(self):
-        """Calculate and apply geometry for the floating preview panel"""
-        if not hasattr(self, 'preview_container') or not self.preview_visible:
-            return
-            
-        # Get dimensions
-        ws_width = self.width()
-        ws_height = self.height()
-        header_height = self.central_header.height() if hasattr(self, 'central_header') else 40
-        
-        # Calculate Preview Width (40% of workspace, clamped)
-        target_width = int(ws_width * 0.40)
-        target_width = max(400, min(target_width, 800))
-        
-        # Geometry
-        x = ws_width - target_width
-        y = header_height
-        h = ws_height - header_height
-        
-        self.preview_container.setGeometry(x, y, target_width, h)
 
     def apply_context_layout(self, context_key):
         """
         Enforce single legal context layout rules.
         """
-        # Define rules
-        # Context -> (DraftVisible, PreviewAllowed)
-        rules = {
-            "summary":   (True,  False),
-            "asmt10":    (True,  False), 
-            "scn":       (True,  True),
-            "drc01a":    (True,  True),
-            "ph":        (True,  True),
-            "order":     (True,  True),
-        }
-        
-        draft_visible, preview_allowed = rules.get(context_key, (True, False))
-        
-        # 1. Force Preview Hidden on Context Switch (Review Requirement)
-        self.preview_visible = False
-        self.preview_container.hide()
-        self.btn_preview_toggle.setChecked(False)
-        self.btn_preview_toggle.setText("Show Preview")
-            
-        # 2. Toggle Button Visibility/State
-        self.btn_preview_toggle.setVisible(preview_allowed)
-        self.shortcut_preview.setEnabled(preview_allowed)
-        
-        # 3. Dynamic Title (Optional)
+        # Update UI Title
         titles = {
             "scn": "Show Cause Notice Drafting",
             "drc01a": "DRC-01A Drafting",
-            "summary": "Case Summary",
+            "summary": "Case Summary & Cockpit",
             "asmt10": "ASMT-10 Reference",
             "ph": "Personal Hearing Intimation", 
             "order": "Adjudication Order"
         }
         self.context_title_lbl.setText(titles.get(context_key, ""))
         
-        self.content_stack.setVisible(draft_visible)
+        # SCN Specific Page 1 Navigation check (Metadata)
+        is_scn = (context_key == "scn")
+        if is_scn and hasattr(self, 'active_scn_step'):
+            # This logic is mostly handled in on_scn_page_changed
+            pass
 
     def create_asmt10_tab(self):
         """Create Read-Only ASMT-10 Tab with Professional Document Framing"""
@@ -441,12 +314,10 @@ class ProceedingsWorkspace(QWidget):
         toolbar_layout.addLayout(zoom_layout)
         layout.addWidget(self.asmt10_toolbar)
         
-        # 2. Native HTML Preview (QTextBrowser)
-        # [FIX] Switched from Image/WeasyPrint to Native Browser for robustness
-        self.asmt10_browser = QTextBrowser()
-        self.asmt10_browser.setStyleSheet("border: none; background-color: #525659;") 
-        self.asmt10_browser.setOpenExternalLinks(False)
-        self.asmt10_browser.zoomIn(0) # Reset zoom to normal
+        # 2. Native HTML Preview (QWebEngineView)
+        # Upgraded to support high-fidelity A4 simulation and JS pagination
+        self.asmt10_browser = QWebEngineView()
+        self.asmt10_browser.setStyleSheet("background-color: #525659;") 
         
         layout.addWidget(self.asmt10_browser)
         
@@ -514,8 +385,8 @@ class ProceedingsWorkspace(QWidget):
             full_data['taxpayer_details'] = taxpayer
             full_data['gstin'] = gstin
             
-            # [ALIGNMENT] Use "legacy" style mode for visual parity with Scrutiny module
-            html_content = generator.generate_html(full_data, issues, for_preview=True, show_letterhead=self.asmt10_show_letterhead, style_mode="legacy")
+            # [ALIGNMENT] Use "professional" style mode for high-fidelity A4 parity
+            html_content = generator.generate_html(full_data, issues, for_preview=True, show_letterhead=self.asmt10_show_letterhead, style_mode="professional")
             
             # Update the browser directly
             self.asmt10_browser.setHtml(html_content)
@@ -531,15 +402,13 @@ class ProceedingsWorkspace(QWidget):
             self.render_asmt10_preview(source_id)
 
     def _zoom_asmt10_in(self):
-        self.asmt10_browser.zoomIn(1)
+        self.asmt10_browser.setZoomFactor(self.asmt10_browser.zoomFactor() + 0.1)
 
     def _zoom_asmt10_out(self):
-        self.asmt10_browser.zoomOut(1)
+        self.asmt10_browser.setZoomFactor(max(0.1, self.asmt10_browser.zoomFactor() - 0.1))
 
     def _zoom_asmt10_reset(self):
-        # Reset is tricky without tracking, but we can set font size or just zoom to default
-        # QTextBrowser doesn't have absolute zoom set.
-        pass # Todo: Implement reset logic if needed
+        self.asmt10_browser.setZoomFactor(1.0)
 
     def _show_preview_error(self, message):
          self.asmt10_browser.setHtml(f"<h3 style='color:red; text-align:center;'>{message}</h3>")
@@ -587,6 +456,7 @@ class ProceedingsWorkspace(QWidget):
         # Reset Workflow Flags
         self.scn_issues_initialized = False
         self.scn_workflow_phase = "METADATA"
+        self.preview_initialized = False
 
     def load_proceeding(self, pid):
         # [FIX] State Persistence: Clear existing workspace first
@@ -600,7 +470,7 @@ class ProceedingsWorkspace(QWidget):
             # Critical Fix: Ensure data is never None
             self.proceeding_data = {}
             QMessageBox.critical(self, "Error", "Proceeding not found!")
-            self.update_preview() # Clear preview
+            pass # Clear preview logic removed
             return
 
         # CRITICAL FIX: Robust JSON Deserialization
@@ -664,80 +534,8 @@ class ProceedingsWorkspace(QWidget):
                 # We should probably disable tabs here or mark as incomplete
         
         self.is_hydrated = True
-        self.trigger_preview()
+        
 
-    def create_preview_pane(self):
-        """Create the universal floating preview pane (Overlay)."""
-        self.preview_pane_widget = QFrame(self) # Parent directly to self (overlay)
-        self.preview_pane_widget.setFrameShape(QFrame.Shape.StyledPanel)
-        
-        # Floating Styling
-        self.preview_pane_widget.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border-left: 1px solid #dadce0;
-                border-bottom: 1px solid #dadce0;
-                /* [FIX] Pure White, No Shadow as requested */
-            }
-        """)
-        
-        # [FIX] Removed Shadow Effect
-        # shadow = QGraphicsDropShadowEffect(self)
-        # shadow.setBlurRadius(15)
-        # shadow.setOffset(-2, 0)
-        # shadow.setColor(Qt.GlobalColor.lightGray) # Using global color enum
-        # self.preview_pane_widget.setGraphicsEffect(shadow)
-        
-        # Focus Safety (Critical)
-        self.preview_pane_widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.preview_pane_widget.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        
-        self.preview_pane_layout = QVBoxLayout(self.preview_pane_widget)
-        self.preview_pane_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Header with Options
-        preview_header = QHBoxLayout()
-        preview_header.setContentsMargins(10, 5, 10, 5)
-        self.preview_label_widget = QLabel("Live Preview")
-        self.preview_label_widget.setStyleSheet("font-weight: bold; color: #202124; border: none; background: transparent;")
-        
-        self.show_letterhead_cb = QCheckBox("Show Letterhead")
-        self.show_letterhead_cb.setChecked(True)
-        self.show_letterhead_cb.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.show_letterhead_cb.setStyleSheet("background: transparent; border: none;")
-        self.show_letterhead_cb.stateChanged.connect(self.trigger_preview)
-        
-        # Close Button X (Small utility)
-        btn_close = QPushButton("✕")
-        btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_close.setFixedWidth(24)
-        btn_close.setStyleSheet("""
-            QPushButton { border: none; background: transparent; color: #5f6368; font-weight: bold; }
-            QPushButton:hover { background-color: #f1f3f4; border-radius: 12px; color: #d93025; }
-        """)
-        btn_close.clicked.connect(self.toggle_preview)
-        
-        preview_header.addWidget(self.preview_label_widget)
-        preview_header.addStretch()
-        preview_header.addWidget(self.show_letterhead_cb)
-        preview_header.addSpacing(10)
-        preview_header.addWidget(btn_close)
-        
-        self.preview_pane_layout.addLayout(preview_header)
-    
-        # [FIX] Switched from Image-based (WeasyPrint PNG) to Native HTML Preview (QTextBrowser)
-        # Reason 1: WeasyPrint new versions dropped write_png support, causing crashes.
-        # Reason 2: QTextBrowser provides native scrolling and text selection.
-        
-        self.preview_browser = QTextBrowser()
-        self.preview_browser.setOpenExternalLinks(False) # or True if we want to allow links
-        self.preview_browser.setStyleSheet("border: none; background-color: white;")
-        self.preview_browser.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        
-        self.preview_pane_layout.addWidget(self.preview_browser)
-        
-        # Canonical pointer (kept for compatibility with resize logic usage)
-        self.preview_container = self.preview_pane_widget
 
     def create_side_nav_layout(self, items, page_changed_callback=None):
         """
@@ -1114,7 +912,8 @@ class ProceedingsWorkspace(QWidget):
         oc_label = QLabel("OC No:")
         self.oc_number_input = QLineEdit()
         self.oc_number_input.setPlaceholderText("Format: No./Year (e.g. 123/2025)")
-        self.oc_number_input.textChanged.connect(self.trigger_preview)
+        
+
         
         # Suggest Button
         suggest_btn = QPushButton("Get Next")
@@ -1131,7 +930,8 @@ class ProceedingsWorkspace(QWidget):
         self.oc_date_input.setCalendarPopup(True)
         self.oc_date_input.setDate(QDate.currentDate())
         self.oc_date_input.setMinimumDate(QDate.currentDate())
-        self.oc_date_input.dateChanged.connect(self.trigger_preview)
+        
+
         ref_inner_layout.addWidget(oc_date_label)
         ref_inner_layout.addWidget(self.oc_date_input)
         ref_inner_layout.addStretch()
@@ -1198,7 +998,8 @@ class ProceedingsWorkspace(QWidget):
         
         self.sections_editor = RichTextEditor("Enter the sections of law that were violated...")
         self.sections_editor.setMinimumHeight(400)
-        self.sections_editor.textChanged.connect(self.trigger_preview)
+        
+
         sec_layout.addWidget(self.sections_editor)
         
         # 4. Tax Demand Details
@@ -1241,7 +1042,8 @@ class ProceedingsWorkspace(QWidget):
         self.reply_date.setCalendarPopup(True)
         self.reply_date.setDate(QDate.currentDate().addDays(30))
         self.reply_date.setMinimumDate(QDate.currentDate())
-        self.reply_date.dateChanged.connect(self.trigger_preview)
+        
+
         dates_layout.addWidget(reply_label)
         dates_layout.addWidget(self.reply_date)
         
@@ -1251,7 +1053,8 @@ class ProceedingsWorkspace(QWidget):
         self.payment_date.setCalendarPopup(True)
         self.payment_date.setDate(QDate.currentDate().addDays(30))
         self.payment_date.setMinimumDate(QDate.currentDate())
-        self.payment_date.dateChanged.connect(self.trigger_preview)
+        
+
         dates_layout.addWidget(payment_label)
         dates_layout.addWidget(self.payment_date)
         dates_layout.addStretch()
@@ -1266,7 +1069,8 @@ class ProceedingsWorkspace(QWidget):
         # Letterhead Checkbox
         self.show_letterhead_cb = QCheckBox("Include Letterhead in Generation")
         self.show_letterhead_cb.setChecked(True)
-        self.show_letterhead_cb.stateChanged.connect(self.trigger_preview)
+        
+
         actions_layout.addWidget(self.show_letterhead_cb)
         
         action_btns_layout = QHBoxLayout()
@@ -1496,9 +1300,7 @@ class ProceedingsWorkspace(QWidget):
         if not template:
             return
             
-        card = IssueCard(template)
         card.valuesChanged.connect(self.calculate_grand_totals)
-        card.valuesChanged.connect(self.trigger_preview)  # Add preview trigger
         card.removeClicked.connect(lambda: self.remove_issue_card(card))
         
         self.issues_layout.addWidget(card)
@@ -1506,7 +1308,7 @@ class ProceedingsWorkspace(QWidget):
         
         # Trigger initial calculation and preview
         self.calculate_grand_totals()
-        self.trigger_preview()
+        
 
     def remove_issue_card(self, card):
         self.issues_layout.removeWidget(card)
@@ -1582,9 +1384,8 @@ class ProceedingsWorkspace(QWidget):
         
         # Recalculate row totals and grand total
         self.calculate_totals()
-        
-        # Trigger preview update
-        self.trigger_preview()
+        # No automatic preview trigger here. Preview is stage-gated.
+        pass
 
     def create_scn_tab(self):
         print("ProceedingsWorkspace: create_scn_tab start")
@@ -1636,7 +1437,8 @@ class ProceedingsWorkspace(QWidget):
         self.scn_no_input = QLineEdit()
         self.scn_no_input.setPlaceholderText("e.g. SCN/2026/001")
         self.scn_no_input.setStyleSheet(input_style)
-        self.scn_no_input.textChanged.connect(self.trigger_preview)
+        
+
         self.scn_no_input.textChanged.connect(self.evaluate_scn_workflow_phase)
         
         grid.addWidget(scn_no_label, 0, 0)
@@ -1689,7 +1491,8 @@ class ProceedingsWorkspace(QWidget):
         self.scn_date_input.setDate(QDate.currentDate())
         self.scn_date_input.setMinimumDate(QDate.currentDate())
         self.scn_date_input.setStyleSheet(input_style + " padding: 6px;")
-        self.scn_date_input.dateChanged.connect(self.trigger_preview)
+        
+
         self.scn_date_input.dateChanged.connect(self.evaluate_scn_workflow_phase)
         
         grid.addWidget(date_label, 3, 0)
@@ -1725,25 +1528,7 @@ class ProceedingsWorkspace(QWidget):
         self.btn_save_scn_ref.clicked.connect(self.save_scn_metadata)
         btn_layout.addWidget(self.btn_save_scn_ref)
         
-        # View ASMT-10 Reference (Secondary)
-        self.btn_asmt10_ref = QPushButton("View ASMT-10 Reference")
-        self.btn_asmt10_ref.setStyleSheet("""
-            QPushButton {
-                background-color: white;
-                border: 1px solid #dadce0;
-                color: #3c4043;
-                padding: 10px;
-                border-radius: 6px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #f8f9fa;
-                border-color: #1a73e8;
-                color: #1a73e8;
-            }
-        """)
-        self.btn_asmt10_ref.clicked.connect(self.open_asmt10_reference)
-        btn_layout.addWidget(self.btn_asmt10_ref)
+        # Action Buttons Hierarchy (End)
         
         self.ref_card.addLayout(btn_layout)
         
@@ -1840,7 +1625,8 @@ class ProceedingsWorkspace(QWidget):
         
         self.reliance_editor = RichTextEditor("List documents here (e.g., 1. INS-01 dated...)")
         self.reliance_editor.setMinimumHeight(300)
-        self.reliance_editor.textChanged.connect(lambda: self.trigger_preview() if not self.is_scn_phase1() else None)
+        
+
         rel_layout.addWidget(self.reliance_editor)
         
         # 5. Copy Submitted To
@@ -1850,41 +1636,13 @@ class ProceedingsWorkspace(QWidget):
         
         self.copy_to_editor = RichTextEditor("List authorities here...")
         self.copy_to_editor.setMinimumHeight(300)
-        self.copy_to_editor.textChanged.connect(lambda: self.trigger_preview() if not self.is_scn_phase1() else None)
+        
+
         copy_layout.addWidget(self.copy_to_editor)
         
-        # 6. Actions
-        actions_widget = QWidget()
-        actions_layout = QVBoxLayout(actions_widget)
-        
-        actions_desc = QLabel("Review and Finalize SCN")
-        actions_layout.addWidget(actions_desc)
-        
-        action_btns_layout = QHBoxLayout()
-        save_btn = QPushButton("Save Draft")
-        save_btn.setStyleSheet("background-color: #95a5a6; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
-        save_btn.clicked.connect(lambda: self.save_document("SCN") if not self.is_scn_phase1() else print("Save blocked in Phase-1"))
-        action_btns_layout.addWidget(save_btn)
-        
-        pdf_btn = QPushButton("Generate PDF")
-        pdf_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
-        pdf_btn.clicked.connect(self.generate_pdf)
-        action_btns_layout.addWidget(pdf_btn)
-        
-        docx_btn = QPushButton("Generate DOCX")
-        docx_btn.setStyleSheet("background-color: #3498db; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
-        docx_btn.clicked.connect(self.generate_docx)
-        action_btns_layout.addWidget(docx_btn)
-        
-        finalize_btn = QPushButton("Finalize SCN")
-        finalize_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
-        finalize_btn.clicked.connect(self.show_scn_finalization_panel)
-        action_btns_layout.addWidget(finalize_btn)
-        
-        action_btns_layout.addStretch()
-        actions_layout.addLayout(action_btns_layout)
-        actions_layout.addStretch()
-        
+        # 6. Finalization & Preview (Deterministic Step 6)
+        self.scn_finalization_container = self.create_scn_finalization_panel()
+
         # Build Side Nav
         nav_items = [
             ("Reference Details", "1", ref_widget),
@@ -1892,7 +1650,7 @@ class ProceedingsWorkspace(QWidget):
             ("Demand & Contraventions", "3", demand_widget),
             ("Reliance Placed", "4", reliance_widget),
             ("Copy Submitted To", "5", copy_widget),
-            ("Actions & Finalize", "✓", actions_widget)
+            ("Actions & Finalize", "✓", self.scn_finalization_container)
         ]
         
         self.scn_side_nav = self.create_side_nav_layout(nav_items, page_changed_callback=self.on_scn_page_changed)
@@ -1904,10 +1662,6 @@ class ProceedingsWorkspace(QWidget):
         # Lock Steps 2-6 initially
         for i in range(1, 6):
             self.scn_nav_cards[i].set_enabled(False)
-        
-        # --- FINALIZATION CONTAINER ---
-        self.scn_finalization_container = self.create_scn_finalization_panel()
-        self.scn_finalization_container.hide()
         
         # --- VIEW CONTAINER ---
         self.scn_view_container = QWidget()
@@ -1940,7 +1694,6 @@ class ProceedingsWorkspace(QWidget):
         wrapper_layout = QVBoxLayout(wrapper)
         wrapper_layout.setContentsMargins(0,0,0,0)
         wrapper_layout.addWidget(self.scn_draft_container)
-        wrapper_layout.addWidget(self.scn_finalization_container)
         wrapper_layout.addWidget(self.scn_view_container)
         
         print("ProceedingsWorkspace: create_scn_tab done")
@@ -2041,7 +1794,6 @@ class ProceedingsWorkspace(QWidget):
         # Trigger downstream updates if we just entered Drafting phase
         if is_drafting and prev_phase == "METADATA":
              self.sync_demand_tiles()
-             self.trigger_preview()
         
         # Re-lock if metadata fails
         if not metadata_valid:
@@ -2067,10 +1819,26 @@ class ProceedingsWorkspace(QWidget):
             self.hydrate_from_snapshot()
             
         print(f"ProceedingsWorkspace: SCN Page {index} active")
-        # In Step 2 (Adoption), enforce de-cluttering (handled in add_scn_issue_card)
         
-        # Trigger preview update
-        self.update_preview("scn")
+        # [NEW] Deterministic Stage-Gated Preview
+        # Trigger rendering ONLY when entering the finalization stage for the first time
+        # We compare the page widget at the current index directly to our stored container
+        if hasattr(self, 'scn_side_nav') and hasattr(self, 'scn_finalization_container'):
+             # Each item in the side_nav is wrapped in a scroll area. 
+             # Let's check the index if it matches the 'Actions & Finalize' item.
+             # Actually, simpler: we know Step 6 is index 5. 
+             # But per user request to use widget comparison:
+             try:
+                 # Check if the widget in the content stack for this index matches
+                 # But the items were wrapped. 
+                 # Let's use a flag on the widget itself or stored index.
+                 if index == 5: # Definitively 'Actions & Finalize'
+                     if not getattr(self, 'preview_initialized', False):
+                         self.render_final_preview()
+                         self.preview_initialized = True
+             except:
+                 pass
+            
         print(f"SCN: Moved to Step {index+1}.")
 
     def create_ph_intimation_tab(self):
@@ -2090,7 +1858,7 @@ class ProceedingsWorkspace(QWidget):
         oc_label = QLabel("OC No:")
         self.ph_oc_input = QLineEdit()
         self.ph_oc_input.setPlaceholderText("Format: No./Year")
-        self.ph_oc_input.textChanged.connect(self.trigger_preview)
+        
         
         ph_oc_suggest_btn = QPushButton("Get Next")
         ph_oc_suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 8pt;")
@@ -2100,7 +1868,7 @@ class ProceedingsWorkspace(QWidget):
         self.ph_oc_date = QDateEdit()
         self.ph_oc_date.setCalendarPopup(True)
         self.ph_oc_date.setDate(QDate.currentDate())
-        self.ph_oc_date.dateChanged.connect(self.trigger_preview)
+        
         
         ref_layout.addWidget(oc_label)
         ref_layout.addWidget(self.ph_oc_input)
@@ -2116,7 +1884,7 @@ class ProceedingsWorkspace(QWidget):
         self.ph_editor = RichTextEditor("Enter the Personal Hearing Intimation content here...")
         print("ProceedingsWorkspace: ph_editor created")
         self.ph_editor.setMinimumHeight(400)
-        self.ph_editor.textChanged.connect(self.trigger_preview)
+        
         layout.addWidget(self.ph_editor)
         print("ProceedingsWorkspace: ph_editor added")
         
@@ -2180,7 +1948,7 @@ class ProceedingsWorkspace(QWidget):
         oc_label = QLabel("OC No:")
         self.order_oc_input = QLineEdit()
         self.order_oc_input.setPlaceholderText("Format: No./Year")
-        self.order_oc_input.textChanged.connect(self.trigger_preview)
+        
         
         order_oc_suggest_btn = QPushButton("Get Next")
         order_oc_suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 8pt;")
@@ -2190,7 +1958,7 @@ class ProceedingsWorkspace(QWidget):
         self.order_oc_date = QDateEdit()
         self.order_oc_date.setCalendarPopup(True)
         self.order_oc_date.setDate(QDate.currentDate())
-        self.order_oc_date.dateChanged.connect(self.trigger_preview)
+        
         
         ref_layout.addWidget(oc_label)
         ref_layout.addWidget(self.order_oc_input)
@@ -2206,7 +1974,7 @@ class ProceedingsWorkspace(QWidget):
         self.order_editor = RichTextEditor("Enter the Order content here...")
         print("ProceedingsWorkspace: order_editor created")
         self.order_editor.setMinimumHeight(400)
-        self.order_editor.textChanged.connect(self.trigger_preview)
+        
         layout.addWidget(self.order_editor)
         print("ProceedingsWorkspace: order_editor added")
         
@@ -2255,52 +2023,68 @@ class ProceedingsWorkspace(QWidget):
 
     
     def create_scn_finalization_panel(self):
-        """Create the SCN Finalization Summary Panel using reusable component"""
+        """Create the SCN Finalization Summary Panel with embedded QWebEngineView (Chromium)"""
+        container = QWidget()
+        container.setObjectName("SCNFinalizationContainer")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Top: Summary Panel (Fixed/Minimal Height)
         self.scn_fin_panel = FinalizationPanel()
+        layout.addWidget(self.scn_fin_panel, 0)
         
-        # Connect Signals
-        self.scn_fin_panel.cancel_btn.clicked.connect(self.hide_scn_finalization_panel)
+        # Bottom: High-Fidelity Preview (Expanding)
+        self.scn_final_preview = QWebEngineView()
+        self.scn_final_preview.setMinimumHeight(400)
+        self.scn_final_preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Apply page container background style to the internal browser
+        self.scn_final_preview.setStyleSheet("background-color: #f1f3f4;")
+        layout.addWidget(self.scn_final_preview, 1)
+        
+        # Clear/Set Stretch explicitly
+        layout.setStretch(0, 0) # Buttons/Summary
+        layout.setStretch(1, 1) # Preview
+        
+        # Consolidated Button Connections
+        self.scn_fin_panel.save_btn.clicked.connect(lambda: self.save_document("SCN"))
+        self.scn_fin_panel.pdf_btn.clicked.connect(self.generate_pdf)
+        self.scn_fin_panel.docx_btn.clicked.connect(self.generate_docx)
+        self.scn_fin_panel.refresh_btn.clicked.connect(self.render_final_preview)
         self.scn_fin_panel.finalize_btn.clicked.connect(self.confirm_scn_finalization)
-        self.scn_fin_panel.preview_btn.clicked.connect(self.generate_pdf) # Re-use existing PDF gen
         
-        return self.scn_fin_panel
+        # Navigation
+        self.scn_fin_panel.cancel_btn.clicked.connect(lambda: self.scn_side_nav.nav_cards[0].click()) # Back to Step 1
+        
+        return container
 
-    def show_scn_finalization_panel(self):
-        """Review and Show SCN Finalization Panel"""
-        # 1. Validate Inputs
-        if not self.scn_no_input.text().strip():
-            QMessageBox.warning(self, "Validation Error", "SCN Number is mandatory for finalization.")
-            self.scn_no_input.setFocus()
-            return
-
+    def render_final_preview(self):
+        """
+        One-shot or manual refresh of the high-fidelity Chromium preview.
+        Gathers in-memory state from all IssueCards.
+        """
+        print("ProceedingsWorkspace: Generating deterministic SCN preview...")
+        # 1. Update data for FinalizationPanel summary
         scn_no = self.scn_no_input.text()
         scn_date = self.scn_date_input.date().toString('dd-MM-yyyy')
         oc_no = self.scn_oc_input.text()
-
-        # 2. Prepare Data for Panel
-        # We need to pass the issue cards directly because they have the 'get_tax_breakdown' method
-        # AND we need to pass the tax payer / case info
-        
-        # Enrich proceeding data with taxpayer info if missing (it might be in parent/dashboard logic)
-        # But self.proceeding_data usually has it from load.
         
         self.scn_fin_panel.load_data(
             proceeding_data=self.proceeding_data,
-            issues_list=self.scn_issue_cards, # Passing rich objects
+            issues_list=self.scn_issue_cards,
             doc_type="SCN",
             doc_no=scn_no,
             doc_date=scn_date,
             ref_no=oc_no
         )
+        
+        # 2. Render HTML and load into WebEngineView
+        html = self.render_scn(is_preview=True)
+        self.scn_final_preview.setHtml(html)
+        
+        # Mark as initialized to prevent auto-render on every future tab switch
+        self.preview_initialized = True
 
-        # 3. Switch View
-        self.scn_draft_container.hide()
-        self.scn_finalization_container.show()
-        
-    def hide_scn_finalization_panel(self):
-        self.scn_finalization_container.hide()
-        self.scn_draft_container.show()
-        
     def confirm_scn_finalization(self):
         """Commit SCN Finalization"""
         try:
@@ -2455,8 +2239,10 @@ class ProceedingsWorkspace(QWidget):
         
         # Connect signals
         card.removeClicked.connect(lambda c_obj=card: self.remove_scn_issue_card(None, c_obj))
-        card.valuesChanged.connect(self.trigger_preview)
-        card.contentChanged.connect(self.trigger_preview)
+        
+
+        
+
         
         self.scn_issues_layout.addWidget(card)
         self.scn_issue_cards.append(card)
@@ -2580,7 +2366,7 @@ class ProceedingsWorkspace(QWidget):
         # Phase-1 Isolation: Guarded at highest call-site
         if not self.is_scn_phase1():
             self.sync_demand_tiles()
-            self.trigger_preview()
+            
             self.save_document("SCN")
 
     def remove_scn_issue_card(self, modern_card, card):
@@ -2613,7 +2399,7 @@ class ProceedingsWorkspace(QWidget):
         # Phase-1 Isolation: Guarded at highest call-site
         if not self.is_scn_phase1():
             self.sync_demand_tiles()
-            self.trigger_preview()
+            
             self.save_document("SCN")
 
     def is_scn_phase1(self):
@@ -3259,43 +3045,6 @@ class ProceedingsWorkspace(QWidget):
                 
                 # Rule: NEVER consult Issue Master for restored issues.
                 # Use the template snapshot embedded in the data payload.
-                template_snapshot = data_payload.get('template_snapshot')
-                
-                # [FIX] Hydration Data Flow: Authoritative Master Merge
-                # Problem: Snapshot might be "hollow" (missing issue_name, brief_facts_scn).
-                # Solution: Fetch Master (if available) and overlay snapshot data.
-                
-                master_template = self.db.get_issue(issue_id) or self.db.get_issue_by_name(issue_id)
-                
-                if master_template:
-                     # 1. Base is Master (Identity + Static Text + Logic)
-                     template = copy.deepcopy(master_template)
-                     
-                     # 2. Overlay Snapshot State (The "Values")
-                     if template_snapshot:
-                          # Preserve User Edits / Specific Tables (ASMT10)
-                          if 'grid_data' in template_snapshot:
-                               template['grid_data'] = template_snapshot['grid_data']
-                          if 'variables' in template_snapshot:
-                               template['variables'] = template_snapshot['variables']
-                               
-                     # Note: We purposely do NOT overlay 'issue_name' or 'templates' from snapshot
-                     # to ensure we get the latest corrections from Master.
-                else:
-                     # Fallback: Trust Snapshot if Master gone (e.g. ad-hoc/custom issues)
-                     template = template_snapshot
-                     if not template:
-                          print(f"WARNING: No template snapshot or master for {issue_id}.")
-
-                if not template:
-                     # Absolute fallback for corrupted IDs
-                     template = {
-                        'issue_id': issue_id, 
-                        'issue_name': data_payload.get('issue', 'Issue'),
-                        'variables': {}
-                     }
-                
-                
                 # Extract values from payload structure
                 if 'values' in data_payload:
                      # New Structure
@@ -3306,6 +3055,122 @@ class ProceedingsWorkspace(QWidget):
                 else:
                      # Legacy Structure (Direct props)
                      restore_data = data_payload
+                
+                template_snapshot = data_payload.get('template_snapshot')
+                     
+                # [FIX] Hydration Data Flow: Authoritative Master Merge
+                # Rule: Consult Master (if available) but preserve USER VALUES from snapshot.
+                master_template = self.db.get_issue(issue_id) or self.db.get_issue_by_name(issue_id)
+                
+                if master_template:
+                     # 1. Base is Master (Identity + Static Text + Logic + LIABILITY CONFIG)
+                     template = copy.deepcopy(master_template)
+
+                     # 2. Overlay Snapshot State (The "Values", NOT the "Structure")
+                     if template_snapshot:
+                          # [DEEP MERGE] Preserve Master Structure (var tags) but Adopt Snapshot Values
+                          snapshot_grid = template_snapshot.get('grid_data')
+                          if snapshot_grid and template.get('grid_data'):
+                               master_grid = template['grid_data']
+                               
+                               # Polymorphic Normalize: Handle List (Legacy) vs Dict (Modern)
+                               s_rows = snapshot_grid.get('rows', []) if isinstance(snapshot_grid, dict) else (snapshot_grid if snapshot_grid else [])
+                               m_rows = master_grid.get('rows', []) if isinstance(master_grid, dict) else master_grid
+                               m_cols = master_grid.get('columns', []) if isinstance(master_grid, dict) else []
+                               
+                               # [RESILIENCE] Helper to extract value from dict or primitive
+                               def safe_get_value(cell):
+                                   if isinstance(cell, dict): return cell.get('value', 0)
+                                   return cell if cell is not None else 0
+                               
+
+                               
+                               row_policy = master_grid.get('row_policy', 'fixed')
+
+                               for i, s_row in enumerate(s_rows):
+                                   m_row = None
+
+                                   if i < len(m_rows):
+                                       m_row = m_rows[i]
+                                   elif row_policy == 'dynamic' and len(m_rows) > 0:
+                                       # [FIX] Expand Master for Dynamic Rows
+                                       prototype = m_rows[0]
+                                       if isinstance(prototype, dict):
+                                           try:
+                                               new_row = copy.deepcopy(prototype)
+                                               new_row['id'] = f"r{i+1}_hydrated"
+                                               m_rows.append(new_row)
+                                               m_row = new_row
+                                           except Exception as e:
+                                               print(f"[HYDRATION ERROR] Failed to clone dynamic row: {e}")
+
+                                   if m_row:
+                                       
+                                       # Scenario A: Modern Dict-based Row
+                                       if isinstance(m_row, dict):
+                                           if isinstance(s_row, dict):
+                                               # Match by Column ID with Positional Fallback
+                                               for cid, s_cell in s_row.items():
+                                                   target_cid = None
+                                                   if cid in m_row:
+                                                       target_cid = cid
+                                                   elif cid.startswith('col') and cid[3:].isdigit():
+                                                       # Fallback: Positional mapping for legacy col0, col1, etc.
+                                                       col_idx = int(cid[3:])
+                                                       if col_idx < len(m_cols):
+                                                           target_cid = m_cols[col_idx].get('id') if isinstance(m_cols[col_idx], dict) else str(m_cols[col_idx]).lower().replace(" ", "_")
+                                                   
+                                                   if target_cid and target_cid in m_row and isinstance(m_row[target_cid], dict):
+                                                       m_row[target_cid]['value'] = safe_get_value(s_cell)
+                                           elif isinstance(s_row, list):
+                                               # Match Legacy List-Row by Index using Master Column IDs
+                                               for col_idx, s_cell in enumerate(s_row):
+                                                   if col_idx < len(m_cols):
+                                                       m_col = m_cols[col_idx]
+                                                       cid = m_col.get('id') if isinstance(m_col, dict) else str(m_col).lower().replace(" ", "_")
+                                                       if cid in m_row and isinstance(m_row[cid], dict):
+                                                            m_row[cid]['value'] = safe_get_value(s_cell)
+                                       
+                                       # Scenario B: Legacy List-based Row
+                                       elif isinstance(m_row, list) and isinstance(s_row, list):
+                                           for col_idx, s_cell in enumerate(s_row):
+                                               if col_idx < len(m_row):
+                                                   if isinstance(m_row[col_idx], dict):
+                                                       m_row[col_idx]['value'] = safe_get_value(s_cell)
+                               
+                               # [CRITICAL] Update restore_data so IssueCard uses the merged structure/values
+                               if isinstance(master_grid, dict):
+                                   restore_data['table_data'] = copy.deepcopy(master_grid)
+                               else:
+                                   # Master is list (Legacy fallback)
+                                   restore_data['table_data'] = copy.deepcopy(master_grid)
+
+                          # Adoption of variables (if any fresh overrides existed)
+                          if 'variables' in template_snapshot:
+                               if not template.get('variables'): template['variables'] = {}
+                               # Only adopt non-null values
+                               for kv, vv in template_snapshot.get('variables', {}).items():
+                                   if vv is not None and vv != "":
+                                       template['variables'][kv] = vv
+                else:
+                     # Fallback for ad-hoc issues
+                     template = template_snapshot
+                     if not template:
+                          print(f"WARNING: No template snapshot or master for {issue_id}.")
+
+                if not template:
+                     template = {
+                        'issue_id': issue_id, 
+                        'issue_name': data_payload.get('issue', 'Issue'),
+                        'variables': {}
+                     }
+                
+                
+                     template = {
+                        'issue_id': issue_id, 
+                        'issue_name': data_payload.get('issue', 'Issue'),
+                        'variables': {}
+                     }
                 
                 # --- GLOBAL PROVENANCE LOGIC (System-Wide) ---
                 current_origin = record.get('origin', 'SCRUTINY')
@@ -3479,11 +3344,20 @@ class ProceedingsWorkspace(QWidget):
             tax_numerals = []
             
             for i, card in enumerate(self.scn_issue_cards, 1):
-                data = card.get_data()
                 template = card.template
                 issue_id = template.get('issue_id', 'unknown')
                 issue_name = template.get('issue_name', f'Issue {i}')
-                
+
+                # [DIAGNOSTIC]
+                print(f"SYNC ISSUE INDEX: {i}")
+                print(f"SYNC ISSUE ID: {issue_id}")
+
+                # [REFRESH] Force state synchronization before generating demand text
+                # This ensures liability rows are extracted from grid into variables
+                card.calculate_values() 
+                data = card.get_data() # Fresh snapshot
+                print(f"BREAKDOWN SENT TO GENERATOR (Issue {i}):", data.get('tax_breakdown'))
+
                 # Generate Tax Text (Clause i/ii/iii)
                 text = self.db.generate_single_issue_demand_text(data, i)
                 # Extract numeral (naive but sufficient for now)
@@ -3498,7 +3372,8 @@ class ProceedingsWorkspace(QWidget):
                 formatted_text = text.replace('\n', '<br>')
                 editor.setHtml(formatted_text)
                 editor.setMinimumHeight(150)
-                editor.textChanged.connect(lambda: self.trigger_preview() if not self.is_scn_phase1() else None)
+                
+
                 
                 tile.addWidget(editor)
                 self.demand_tiles_layout.addWidget(tile)
@@ -3521,7 +3396,8 @@ class ProceedingsWorkspace(QWidget):
                 int_editor = RichTextEditor()
                 int_editor.setHtml(int_text)
                 int_editor.setMinimumHeight(120)
-                int_editor.textChanged.connect(lambda: self.trigger_preview() if not self.is_scn_phase1() else None)
+                
+
                 int_tile.addWidget(int_editor)
                 self.demand_tiles_layout.addWidget(int_tile)
                 self.demand_tiles.append({'issue_id': 'INTEREST_GLOBAL', 'type': 'INTEREST', 'card': int_tile, 'editor': int_editor})
@@ -3534,12 +3410,13 @@ class ProceedingsWorkspace(QWidget):
                 pen_editor = RichTextEditor()
                 pen_editor.setHtml(pen_text)
                 pen_editor.setMinimumHeight(120)
-                pen_editor.textChanged.connect(lambda: self.trigger_preview() if not self.is_scn_phase1() else None)
+                
+
                 pen_tile.addWidget(pen_editor)
                 self.demand_tiles_layout.addWidget(pen_tile)
                 self.demand_tiles.append({'issue_id': 'PENALTY_GLOBAL', 'type': 'PENALTY', 'card': pen_tile, 'editor': pen_editor})
                 
-            self.trigger_preview()
+            
             
         except Exception as e:
             print(f"Error syncing demand tiles: {e}")
@@ -3589,7 +3466,8 @@ class ProceedingsWorkspace(QWidget):
                     "copy_submitted_to": self.copy_to_editor.toHtml(),
                     "demand_text": full_demand_text,
                     "demand_tiles_data": demand_tiles_data,
-                    "scn_issues_initialized": self.scn_issues_initialized
+                    "scn_issues_initialized": self.scn_issues_initialized,
+                    "scn_model_snapshot": self._get_scn_model() # Authoritative point-in-time snapshot
                 }
                 
                 # Update additional_details
@@ -3817,113 +3695,7 @@ class ProceedingsWorkspace(QWidget):
         dlg = ASMT10ReferenceDialog(self, html)
         dlg.exec()
 
-    def change_tab(self, index):
-        self.content_stack.setCurrentIndex(index)
-        if not self.is_scn_phase1():
-            self.trigger_preview()
 
-    def trigger_preview(self):
-        self.preview_timer.start()
-
-
-    def update_preview(self, context_key=None):
-        """Standardized Preview Logic: Updates the global preview pane."""
-        # Optimization: Don't render if preview is hidden
-        if not self.preview_visible:
-            return
-
-        if not self.proceeding_id:
-            return
-            
-        # 1. Resolve Context
-        if not context_key:
-            idx = self.content_stack.currentIndex()
-            reverse_map = {0: "summary", 1: "drc01a", 2: "asmt10", 3: "scn", 4: "ph", 5: "order"}
-            context_key = reverse_map.get(idx, "summary")
-
-        # 2. Prevent preview for specific states if needed
-        if context_key == "summary":
-            self._clear_preview()
-            return
-
-        # 3. Generate HTML Content
-        html = ""
-        header_text = "Live Preview"
-        
-        if context_key == "drc01a":
-            if bool(self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')):
-                return
-            html = self.generate_drc01a_html()
-            header_text = "✏️ Draft – DRC-01A"
-        elif context_key == "asmt10":
-            scrutiny_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
-            if scrutiny_id:
-                scrutiny_data = self.db.get_scrutiny_case_data(scrutiny_id)
-                if scrutiny_data:
-                    case_info = {
-                        'case_id': scrutiny_data.get('case_id'),
-                        'financial_year': scrutiny_data.get('financial_year'),
-                        'section': scrutiny_data.get('section'),
-                        'notice_date': scrutiny_data.get('asmt10_finalised_on', '-'),
-                        'oc_number': scrutiny_data.get('oc_number', 'DRAFT'),
-                        'last_date_to_reply': scrutiny_data.get('last_date_to_reply', 'N/A')
-                    }
-                    taxpayer = scrutiny_data.get('taxpayer_details', {})
-                    issues = scrutiny_data.get('selected_issues', [])
-                    generator = ASMT10Generator()
-                    full_data = case_info.copy()
-                    full_data['taxpayer_details'] = taxpayer
-                    html = generator.generate_html(full_data, issues, for_preview=True)
-                    header_text = "🔒 Finalised ASMT-10 — Reference"
-                else:
-                    html = "<h3>Source Data Missing</h3>"
-            else:
-                html = "<h3>No Source ASMT-10</h3>"
-        elif context_key == "scn":
-            html = self.render_scn()
-            header_text = "✏️ Draft – Show Cause Notice"
-        elif context_key == "ph":
-            editor = getattr(self, "ph_editor", None)
-            html = editor.toHtml() if editor else "<h3>PH Intimation Draft</h3>"
-            header_text = "✏️ Draft – PH Intimation"
-        elif context_key == "order":
-            editor = getattr(self, "order_editor", None)
-            html = editor.toHtml() if editor else "<h3>Order Draft</h3>"
-            header_text = "✏️ Draft – Order in Original"
-        
-        if not html:
-            self._clear_preview()
-            return
-
-        # 4. Render to UI
-        # Target Header
-        if hasattr(self, 'preview_label_widget'):
-            self.preview_label_widget.setText(header_text)
-
-        # [FIX] Direct HTML Rendering via QTextBrowser
-        # Bypasses the fragile Image Generation pipeline (WeasyPrint PNG)
-        if hasattr(self, 'preview_browser'):
-            # Ensure base URL is set for any relative resource resolution (if needed)
-            self.preview_browser.setHtml(html)
-            
-        # Legacy Fallback cleanup (if old widgets exist)
-        if hasattr(self, 'preview_content_layout'):
-            # If we accidentally have both, clear the old layout
-            while self.preview_content_layout.count():
-                item = self.preview_content_layout.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-
-    def _clear_preview(self):
-        # [FIX] Clear Native Browser
-        if hasattr(self, 'preview_browser'):
-            self.preview_browser.setHtml("")
-            
-        # Legacy cleanup
-        if hasattr(self, 'preview_content_layout'):
-            while self.preview_content_layout.count():
-                item = self.preview_content_layout.takeAt(0)
-                if item.widget(): item.widget().deleteLater()
 
     def generate_drc01a_html(self):
         if not self.proceeding_data:
@@ -4080,246 +3852,266 @@ class ProceedingsWorkspace(QWidget):
             
         return html
 
-    def render_scn(self):
-        """Render SCN HTML using Jinja2 template"""
+    def _get_scn_model(self):
+        """Build a structured SCN data model for consistent rendering across Preview, PDF, and DOCX."""
         if not self.proceeding_data:
+            return None
+
+        # 1. Base Metadata
+        model = self.proceeding_data.copy()
+        
+        # Format Dates
+        scn_date = self.scn_date_input.date()
+        model['issue_date'] = scn_date.toString("dd/MM/yyyy")
+        model['year'] = scn_date.year()
+        
+        # Financial Year
+        model['current_financial_year'] = model.get('financial_year', '') or ''
+        
+        # OC & SCN No
+        model['oc_no'] = self.scn_oc_input.text() or "____"
+        model['scn_no'] = self.scn_no_input.text() or "____"
+        model['initiating_section'] = model.get('adjudication_section') or model.get('initiating_section', '') or "____"
+        
+        # Taxpayer Details
+        tp = model.get('taxpayer_details', {})
+        if tp is None: tp = {}
+        if isinstance(tp, str): 
+            try:
+                import json
+                tp = json.loads(tp)
+            except:
+                tp = {}
+        
+        model['legal_name'] = tp.get('Legal Name', '') or model.get('legal_name', '')
+        model['trade_name'] = tp.get('Trade Name', '') or model.get('trade_name', '')
+        model['address'] = tp.get('Address', '') or model.get('address', '')
+        model['gstin'] = model.get('gstin', '')
+        model['constitution_of_business'] = tp.get('Constitution of Business', 'Registered')
+        
+        # Officer Details
+        model['officer_name'] = "VISHNU V"
+        model['officer_designation'] = "Superintendent"
+        model['designation'] = "Superintendent"
+        model['jurisdiction'] = "Paravur Range"
+
+        # 2. Sequential Issues Handling
+        included_issues = []
+        if hasattr(self, 'scn_issue_cards'):
+            # Filter strictly by is_included
+            for card in self.scn_issue_cards:
+                if card.get_data().get('is_included', True):
+                    included_issues.append(card)
+
+        # Build issue list for rendering
+        issues_data = []
+        total_tax = 0
+        igst_total = 0
+        cgst_total = 0
+        sgst_total = 0
+        
+        # Mapping for narrative replacement
+        id_to_index = {}
+        for idx, card in enumerate(included_issues, start=1):
+            id_to_index[card.issue_id] = str(idx)
+
+        import re
+        for idx, card in enumerate(included_issues, start=1):
+            issue_info = {
+                'index': idx,
+                'title': card.display_title,
+                'issue_id': card.issue_id, # Keep for internal use, but suppress in display
+                'paras': [],
+                'table_html': card.generate_table_html(card.template, card.variables)
+            }
+            
+            # Narrative Content Handling with Regex Replacement
+            editor_part = card.editor.toHtml()
+            editor_part = re.sub(r'<p>\s*&nbsp;\s*</p>', '', editor_part)
+            editor_part = re.sub(r'<p>\s*</p>', '', editor_part)
+            paras = re.findall(r'<p.*?>(.*?)</p>', editor_part, re.DOTALL)
+            if not paras and editor_part.strip():
+                paras = [editor_part]
+
+            for p_content in paras:
+                if p_content.strip():
+                    clean_content = re.sub(r'\s+', ' ', p_content).strip()
+                    # REGEX REPLACE internal IDs with sequential numbers
+                    for internal_id, seq_num in id_to_index.items():
+                        # Word boundary regex to avoid partial replacements
+                        pattern = r'\b' + re.escape(internal_id) + r'\b'
+                        clean_content = re.sub(pattern, f"issue {seq_num}", clean_content)
+                    
+                    issue_info['paras'].append(clean_content)
+            
+            issues_data.append(issue_info)
+            
+            # Totals
+            card_data = card.get_data()
+            breakdown = card_data.get('tax_breakdown', {})
+            for act, vals in breakdown.items():
+                tax = vals.get('tax', 0)
+                total_tax += tax
+                if act == 'IGST': igst_total += tax
+                elif act == 'CGST': cgst_total += tax
+                elif act == 'SGST': sgst_total += tax
+
+        model['issues'] = issues_data
+        model['total_tax_val'] = total_tax
+        model['igst_total_val'] = igst_total
+        model['cgst_total_val'] = cgst_total
+        model['sgst_total_val'] = sgst_total
+        
+        # Formatted totals
+        model['total_amount'] = f"{total_tax:,.2f}"
+        model['igst_total'] = f"{igst_total:,.2f}"
+        model['cgst_total'] = f"{cgst_total:,.2f}"
+        model['sgst_total'] = f"{sgst_total:,.2f}"
+
+        # 3. Dynamic Paragraph Numbering
+        # Intro=Para 1, Jurisdiction=Para 2, Issues start at Para 3
+        # If we have N issues, they occupy Para 3 to 3+(N-1)
+        next_para = 3 + len(issues_data)
+        model['para_demand'] = next_para
+        model['para_waiver'] = next_para + 1
+        model['para_cancellation'] = next_para + 2
+        model['para_hearing'] = next_para + 3
+        model['para_exparte'] = next_para + 4
+        model['para_prejudice'] = next_para + 5
+        model['para_amendment'] = next_para + 6
+        model['para_reliance'] = next_para + 7
+
+        # 4. Additional Data (Reliance, Copy To)
+        rel_text = self.reliance_editor.toPlainText()
+        model['reliance_documents'] = [line for line in rel_text.split('\n') if line.strip()]
+        
+        copy_text = self.copy_to_editor.toPlainText()
+        model['copy_submitted_to'] = [line for line in copy_text.split('\n') if line.strip()]
+        
+        model['show_letterhead'] = self.show_letterhead_cb.isChecked()
+        
+        # Demand Text (Loaded from Tiles)
+        if hasattr(self, 'demand_tiles') and self.demand_tiles:
+             full_text = ""
+             for tile in self.demand_tiles:
+                 full_text += tile['editor'].toHtml() + "<br><br>"
+             model['demand_text'] = full_text
+        else:
+             model['demand_text'] = "<p>No demand details generated.</p>"
+
+        # Tax Table
+        model['tax_table_html'] = self.generate_tax_table_html()
+
+        return model
+    def render_scn(self, is_preview=False):
+        """Render SCN HTML using Jinja2 template"""
+        model = self._get_scn_model()
+        if not model:
             return "<h3>No Case Data Loaded</h3>"
             
+        model['is_preview'] = is_preview
+        
         try:
-            # 1. Gather Data
-            data = self.proceeding_data.copy()
-            
-            # Format Dates
-            # Use SCN specific date if available, else fallback to issue_date (which is DRC-01A date usually)
-            # Actually, we added scn_date_input
-            scn_date = self.scn_date_input.date()
-            data['issue_date'] = scn_date.toString("dd/MM/yyyy")
-            data['year'] = scn_date.year()
-            
-            # Financial Year
-            fy = data.get('financial_year', '') or ''
-            data['current_financial_year'] = fy
-            
-            # OC No & SCN No (SCN Specific)
-            data['oc_no'] = self.scn_oc_input.text() or "____"
-            data['scn_no'] = self.scn_no_input.text() or "____"
-            data['oc_no'] = self.scn_oc_input.text() or "____"
-            data['scn_no'] = self.scn_no_input.text() or "____"
-            # Prioritize adjudication_section
-            data['initiating_section'] = data.get('adjudication_section') or data.get('initiating_section', '') or "____"
-            
-            # Taxpayer Details (Already in data, but ensure keys match template)
-            tp = data.get('taxpayer_details', {})
-            if tp is None: tp = {}
-            if isinstance(tp, str): 
-                try:
-                    tp = json.loads(tp)
-                except:
-                    tp = {}
-            
-            data['legal_name'] = tp.get('Legal Name', '') or data.get('legal_name', '')
-            data['trade_name'] = tp.get('Trade Name', '') or data.get('trade_name', '')
-            data['address'] = tp.get('Address', '') or data.get('address', '')
-            data['gstin'] = data.get('gstin', '')
-            data['constitution_of_business'] = tp.get('Constitution of Business', 'Registered')
-            
-            # Officer Details (Mock for now, should come from Settings/Auth)
-            data['officer_name'] = "VISHNU V"
-            data['officer_designation'] = "Superintendent"
-            data['designation'] = "Superintendent"
-            data['jurisdiction'] = "Paravur Range"
-            
-            # Issues & Demands
-            # 2. Issues Content
+            # 1. Format Issues HTML from the centralized model
             issues_html = ""
-            demand_html = ""
-            
-            total_tax = 0
-            igst_total = 0
-            cgst_total = 0
-            sgst_total = 0
-
-            # Start numbering from Para 3 (Para 1=Intro, Para 2=References)
-            current_para_num = 3
-
-            if hasattr(self, 'scn_issue_cards') and self.scn_issue_cards:
-                # New Logic: Render from self.scn_issue_cards (Live Draft)
-                current_para_num = 1
+            for issue in model['issues']:
+                current_para_num = issue['index'] + 2 # Paras 1&2 are fixed, Issues start at 3
+                title = issue['title']
                 
-                # 1. Introduction Para (Para 1) - Handled in Template
-                current_para_num += 1
+                # No wrapper for the whole issue to avoid pagination truncation of multi-block content
                 
-                # 2. Jurisdiction/Definition Para (Para 2) - Handled in Template
-                current_para_num += 1
+                # Issue Heading
+                issues_html += f"""
+                <div class="issue-header">
+                    <table class="para-table">
+                        <tr>
+                            <td class="para-num">{current_para_num}.</td>
+                            <td class="para-content"><h3>Issue No. {issue['index']}: {title}</h3></td>
+                        </tr>
+                    </table>
+                </div>
+                """
                 
-                # 3. Dynamic Issues (Para 3 onwards)
-                for card in self.scn_issue_cards:
-                        if not card.get_data().get('is_enabled', True):
-                            continue
-                            
-                        # Issue Title as Main Paragraph
-                        title = card.display_title
-                        i = card.issue_id
-                        
-                        # [FIX] Use Scoped Class Structure
-                        issues_html += f"""
-                        <table class="para-table">
-                            <tr>
-                                <td class="para-num">{current_para_num}.</td>
-                                <td class="para-content"><strong>Issue No. {i}: {title}</strong></td>
-                            </tr>
-                        </table>
-                        """
-                        
-                        # --- Sub Paragraphs (e.g., "3.1 Content...") ---
-                        sub_para_count = 1
-                        
-                        # [FIX] Direct Separation of Content and Table
-                        editor_part = card.editor.toHtml()
-                        table_part = card.generate_table_html(card.template, card.variables)
-                        
-                        # Regex split for paragraphs
-                        import re
-                        editor_part = re.sub(r'<p>\s*&nbsp;\s*</p>', '', editor_part)
-                        editor_part = re.sub(r'<p>\s*</p>', '', editor_part)
-                        paras = re.findall(r'<p.*?>(.*?)</p>', editor_part, re.DOTALL)
-                        
-                        # Fallback for raw text
-                        if not paras and editor_part.strip():
-                            paras = [editor_part]
-                            
-                        for p_content in paras:
-                            if p_content.strip():
-                                # [FIX] Flatten text and Remove Wrapper
-                                # 1. Replace all whitespace/newlines with single space
-                                clean_content = re.sub(r'\s+', ' ', p_content).strip()
-                                
-                                # 2. Inject into P.legal-para (Qt Justification Contract)
-                                num_str = f"{current_para_num}.{sub_para_count}"
-                                issues_html += f"""
-                                <table class="para-table">
-                                    <tr>
-                                        <td class="para-num">{num_str}</td>
-                                        <td class="para-content">
-                                            <p class="legal-para">{clean_content}</p>
-                                        </td>
-                                    </tr>
-                                </table>
-                                """
-                                sub_para_count += 1
-                        
-                        # Table as Sub-Para
-                        if table_part and table_part.strip():
-                            num_str = f"{current_para_num}.{sub_para_count}"
-                            issues_html += f"""
-                            <table class="para-table">
-                                <tr>
-                                    <td class="para-num">{num_str}</td>
-                                    <td class="para-content">{table_part}</td>
-                                </tr>
-                            </table>
-                            """
-                            sub_para_count += 1
-                            
-                        current_para_num += 1
-                    
-                        # Demand Summary Calculations
-                        # demand_html += f"<li>Demand for {title}...</li>"
-                        
-                        # Totals
-                        card_data = card.get_data()
-                        breakdown = card_data.get('tax_breakdown', {})
-                        for act, vals in breakdown.items():
-                            tax = vals.get('tax', 0)
-                            total_tax += tax
-                            if act == 'IGST': igst_total += tax
-                            elif act == 'CGST': cgst_total += tax
-                            elif act == 'SGST': sgst_total += tax
-            else:
-                issues_html = "<p>No issues selected.</p>"
-
-            # Pass the next available para number to the template for subsequent sections
-            data['next_para_num'] = current_para_num
+                # Sub Paragraphs
+                sub_para_count = 1
+                for p_content in issue['paras']:
+                    num_str = f"{current_para_num}.{sub_para_count}"
+                    issues_html += f"""
+                    <table class="para-table">
+                        <tr>
+                            <td class="para-num">{num_str}</td>
+                            <td class="para-content">
+                                <p class="legal-para">{p_content}</p>
+                            </td>
+                        </tr>
+                    </table>
+                    """
+                    sub_para_count += 1
+                
+                # Table as Sub-Para (Unwrapped for pagination splitting)
+                if issue['table_html'] and issue['table_html'].strip():
+                    num_str = f"{current_para_num}.{sub_para_count}"
+                    issues_html += f"""
+                    <table class="para-table">
+                        <tr>
+                            <td class="para-num">{num_str}</td>
+                            <td class="para-content">
+                                <p class="legal-para">The details of the discrepancies are as follows:</p>
+                            </td>
+                        </tr>
+                    </table>
+                    {issue['table_html']}
+                    """
+                
+                # End issue
             
-            # Explicitly calculate subsequent paragraph numbers
-            data['para_demand'] = current_para_num
-            data['para_payment'] = current_para_num + 1
-            data['para_evidence'] = current_para_num + 2  # Was "As per Section 29..." merged? No, separate.
-            # Wait, "As per Section 29" was Para 6 in template, "With regard to..." was Para 5.
-            # Let's map them exactly to the template structure:
-            # Para N: Demand
-            # Para N+1: "With regard to..." (Payment/Penalty waiver)
-            # Para N+2: "As per Section 29..." (Cancellation liability)
-            # Para N+3: Hearing / Evidence
-            # Para N+4: Ex-parte warning
+            model['issues_content'] = issues_html
+            model['issues_templates'] = issues_html
             
-            data['para_waiver'] = current_para_num + 1
-            data['para_cancellation'] = current_para_num + 2
-            data['para_hearing'] = current_para_num + 3
-            data['para_exparte'] = current_para_num + 4
-            
-            # Additional clauses usually present in SCN
-            data['para_prejudice'] = current_para_num + 5
-            data['para_amendment'] = current_para_num + 6
-            data['para_reliance'] = current_para_num + 7
-            
-            data['issues_content'] = issues_html
-            data['issues_templates'] = issues_html
-            
-            # Demand Text (Loaded from Editor)
-            # Demand Text (Loaded from Editor or Tiles)
-            if hasattr(self, 'demand_tiles') and self.demand_tiles:
-                 full_text = ""
-                 for tile in self.demand_tiles:
-                     full_text += tile['editor'].toHtml() + "<br><br>"
-                 data['demand_text'] = full_text
-            else:
-                 # Fallback (though editor removed)
-                 data['demand_text'] = "<p>No demand details generated.</p>"
-            
-            # Generate Tax Table HTML (Reuse DRC-01A table logic)
-            data['tax_table'] = self.generate_tax_table_html()
-            
-            data['total_amount'] = f"{total_tax:,.2f}"
-            data['igst_total'] = f"{igst_total:,.2f}"
-            data['cgst_total'] = f"{cgst_total:,.2f}"
-            data['sgst_total'] = f"{sgst_total:,.2f}"
-            
-            # Reliance Documents
-            rel_text = self.reliance_editor.toPlainText()
-            data['reliance_documents'] = [line for line in rel_text.split('\\n') if line.strip()]
-            data['reliance_documents_placeholder'] = "No documents listed"
-            
-            # Copy Submitted To
-            copy_text = self.copy_to_editor.toPlainText()
-            data['copy_submitted_to'] = [line for line in copy_text.split('\\n') if line.strip()]
-            data['copy_submitted_to_placeholder'] = "No copies listed"
-            
-            data['show_letterhead'] = self.show_letterhead_cb.isChecked()
-            
-            # Letterhead Content
-            if data['show_letterhead']:
+            # Letterhead
+            import base64
+            model['letter_head'] = ""
+            if model['show_letterhead']:
                 try:
                     from src.utils.config_manager import ConfigManager
                     config = ConfigManager()
-                    letterhead_path = config.get_letterhead_path('pdf')
-                    with open(letterhead_path, 'r', encoding='utf-8') as f:
-                        data['letter_head'] = f.read()
+                    lh_filename = config.get_pdf_letterhead()
+                    lh_path = config.get_letterhead_path('pdf')
+                    
+                    if lh_path and os.path.exists(lh_path):
+                        ext = os.path.splitext(lh_path)[1][1:].lower()
+                        
+                        # Fetch visual adjustments for this specific letterhead
+                        adj = config.get_letterhead_adjustments(lh_filename)
+                        width_val = min(adj.get('width', 100), 100)
+                        
+                        lh_style = f"width: {width_val}%; padding-top: {adj.get('padding_top', 0)}px; margin-bottom: {adj.get('margin_bottom', 20)}px;"
+                        
+                        if ext == "html":
+                            # Case 1: HTML letterhead - read as text
+                            with open(lh_path, 'r', encoding='utf-8') as f:
+                                lh_full = f.read()
+                                # Extract body content if present, otherwise use full content
+                                match = re.search(r"<body[^>]*>(.*?)</body>", lh_full, re.DOTALL | re.IGNORECASE)
+                                inner_html = match.group(1) if match else lh_full
+                                model['letter_head'] = f'<div style="{lh_style} text-align: center;">{inner_html}</div>'
+                        else:
+                            # Case 2: Image letterhead - read as binary and base64 encode
+                            with open(lh_path, "rb") as image_file:
+                                encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+                            if ext == "jpg": ext = "jpeg"
+                            model['letter_head'] = f'<div style="{lh_style} text-align: center;"><img src="data:image/{ext};base64,{encoded_string}" alt="Letterhead" style="max-width: 100%; height: auto;"></div>'
                 except Exception as e:
-                    print(f"Error loading letterhead: {e}")
-                    data['letter_head'] = ""
-            else:
-                data['letter_head'] = ""
+                    print(f"Letterhead failed: {e}")
+                    model['letter_head'] = ""
 
-            # Section Logic
-            section = data.get('initiating_section', '')
-            data['section'] = section
+            # Standard SCN context variables
+            model['section'] = model.get('initiating_section', '')
             
-            # 2. Load Template and CSS
-            template_dir = os.path.join(os.getcwd(), 'templates')
+            # Load Template and CSS
+            template_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "templates")
             css_dir = os.path.join(template_dir, 'css')
             
-            # Helper to read CSS safely
             def read_css(filename):
                 path = os.path.join(css_dir, filename)
                 if os.path.exists(path):
@@ -4327,27 +4119,31 @@ class ProceedingsWorkspace(QWidget):
                         return f.read()
                 return ""
 
-            # Load CSS Content
-            data['base_css'] = read_css('scn_base.css')
-            
-            # Determine Renderer CSS
-            # Default to Qt (Preview) unless overridden
-            renderer_mode = data.get('render_mode', 'qt') 
+            model['base_css'] = read_css('doc_base.css')
+            renderer_mode = 'pdf' if not is_preview else 'qt'
             if renderer_mode == 'pdf':
-                data['renderer_css'] = read_css('scn_pdf.css')
+                model['renderer_css'] = "" # Base CSS now includes @media print
             else:
-                data['renderer_css'] = read_css('scn_qt.css')
+                model['renderer_css'] = read_css('doc_qt.css')
+
+            print(f"DEBUG SCN: template_dir={template_dir}")
+            print(f"DEBUG SCN: base_css_len={len(model['base_css'])}")
+            print(f"DEBUG SCN: renderer_css_len={len(model['renderer_css'])}")
+
+            # Workaround for formatter mangling: generate full style tag in Python
+            model['full_styles_html'] = f"<style>\n{model['base_css']}\n{model['renderer_css']}\n</style>"
 
             env = Environment(loader=FileSystemLoader(template_dir))
             template = env.get_template('scn.html')
             
-            # 3. Render
-            return template.render(**data)
+            return template.render(**model)
             
         except Exception as e:
             print(f"Error rendering SCN: {e}")
             import traceback
             traceback.print_exc()
+            return f"<h3>Render Error: {str(e)}</h3>"
+
     def save_drc01a_metadata(self):
         """Save DRC-01A Metadata (OC No, Dates, etc.) to DB"""
         metadata = {
@@ -4625,8 +4421,79 @@ class ProceedingsWorkspace(QWidget):
                 if self.is_scn_phase1():
                     QMessageBox.warning(self, "Locked", "SCN DOCX generation is locked during Phase-1.")
                     return
-            else:
-                QMessageBox.information(self, "Info", "DOCX generation is only available for DRC-01A and SCN.")
+                # SCN Logic
+                model = self._get_scn_model()
+                if not model:
+                     QMessageBox.warning(self, "Error", "Failed to build SCN model.")
+                     return
+                
+                from script_docx import Document # Using a helper if available, or docx.Document
+                from docx import Document
+                from docx.shared import Pt, Inches
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                
+                case_id = model.get('case_id', 'DRAFT').replace('/', '_')
+                default_filename = f"SCN_{case_id}.docx"
+                
+                from PyQt6.QtWidgets import QFileDialog
+                file_path, _ = QFileDialog.getSaveFileName(self, "Save SCN DOCX As", default_filename, "Word Documents (*.docx)")
+                if not file_path: return
+
+                doc = Document()
+                for section in doc.sections:
+                    section.top_margin = Inches(0.8)
+                    section.bottom_margin = Inches(0.8)
+                    section.left_margin = Inches(1)
+                    section.right_margin = Inches(1)
+
+                # Title
+                p = doc.add_paragraph()
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = p.add_run("SHOW CAUSE NOTICE")
+                run.bold = True
+                run.font.size = Pt(16)
+                
+                # Header
+                doc.add_paragraph(f"GSTIN: {model.get('gstin', '')}")
+                doc.add_paragraph(f"Legal Name: {model.get('legal_name', '')}")
+                doc.add_paragraph(f"OC Number: {model.get('oc_no', '')}")
+                doc.add_paragraph(f"Date: {model.get('issue_date', '')}")
+                doc.add_paragraph()
+
+                # Paragraph 1: Intro
+                p = doc.add_paragraph()
+                p.add_run("1. ").bold = True
+                p.add_run("A brief of the case and the grounds for initiating proceedings are as follows:")
+                
+                # Issues
+                for issue in model['issues']:
+                    p_num = issue['index'] + 2 # Starts at 3
+                    title = issue['title']
+                    
+                    p = doc.add_paragraph()
+                    p.add_run(f"{p_num}. Issue No. {issue['index']}: {title}").bold = True
+                    
+                    for s_idx, para in enumerate(issue['paras'], start=1):
+                        sp = doc.add_paragraph()
+                        sp.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                        sp.add_run(f"{p_num}.{s_idx} ").bold = True
+                        sp.add_run(para)
+                
+                # Demands
+                num = model['para_demand']
+                p = doc.add_paragraph()
+                p.add_run(f"{num}. Summary of Tax Liability:").bold = True
+                doc.add_paragraph(f"The total tax liability is determined as ₹{model['total_amount']}.")
+
+                # Proper Officer
+                doc.add_paragraph()
+                sig = doc.add_paragraph()
+                sig.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                sig.add_run("Proper Officer").bold = True
+                
+                doc.save(file_path)
+                import os
+                os.startfile(file_path)
                 return
 
             # Check if proceeding is loaded
@@ -4875,7 +4742,7 @@ class ProceedingsWorkspace(QWidget):
             if hasattr(self, 'oc_provenance_lbl'):
                 self.oc_provenance_lbl.hide()
         
-        self.trigger_preview()
+        
         self.evaluate_scn_workflow_phase()
 
     def restore_draft_state(self):
@@ -4951,7 +4818,7 @@ class ProceedingsWorkspace(QWidget):
                     # Connect signals
                     card.removeClicked.connect(lambda c=card: self.remove_issue_card(c))
                     card.valuesChanged.connect(self.calculate_grand_totals)
-                    card.valuesChanged.connect(lambda _: self.trigger_preview() if not self.is_scn_phase1() else None)
+
                     
                     # Trigger calculation to update totals based on restored variables
                     card.calculate_values()

@@ -3,304 +3,401 @@
 
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Show Cause Notice</title>
-    <style>
-        /* Base Styles (Shared) */
-            {
-                {
-                base_css | safe
-            }
-        }
+    {{ full_styles_html | safe }}
 
-        /* Renderer Specific Styles (Qt/PDF) */
-            {
-                {
-                renderer_css | safe
-            }
-        }
-    </style>
 </head>
 
 <body>
-    {% if is_preview %}<div class="page-container">{% endif %}
-        <!-- Letterhead -->
+    {% macro render_content() %}
+    <!-- Letterhead -->
+    <div class="letterhead-container">
         {{ letter_head | safe }}
+    </div>
 
-        <!-- [User Req] No Gap needed between Letter head and OC No -->
-        <table style="border: none; width: 100%; margin-top: 0px; margin-bottom: 20px;">
-            <tbody>
-                <tr style="border: none;">
-                    <td style="border: none; text-align: left; width: 50%;">
-                        <strong>OC No:</strong> {{ oc_no }}
-                    </td>
-                    <td style="border: none; text-align: right; width: 50%;">
-                        <strong>Date:</strong> {{ issue_date }}
-                    </td>
-                </tr>
-            </tbody>
-        </table>
-
-        <div style="text-align: center; font-weight: bold; font-size: 11pt; margin-bottom: 20px;">
-            SHOW CAUSE NOTICE No. {{ scn_no }}/{{ current_financial_year }}/GST-{{ designation }}
-        </div>
-
-        <div class="header">
-            FORM GST DRC-01<br>
-            [See rule 142(1)]<br>
-            Show Cause Notice under section {{ section }}
-        </div>
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <!-- Para 1 -->
-        <table class="para-table">
-            <tr>
-                <td class="para-num">1.</td>
-                <td class="para-content">
-                    <strong>{{ legal_name }}, {{ trade_name }}, {{ address }}
-                    </strong>(hereinafter referred to as ‘the taxpayer’) is holding GST registration bearing
-                    GSTIN:<strong>{{
-                        gstin
-                        }} </strong>in the capacity of a ‘registered person’ as envisaged under section 2(94) of the
-                    Central
-                    Goods
-                    and Services Tax Act, 2017 (hereinafter referred to as “the Act”) is a {{ constitution_of_business
-                    }}
-                    firm
-                    with
-                    trade name <strong>M/s. {{ trade_name }}. </strong>
+    <!-- OC No and Date Row -->
+    <table style="border: none; width: 100%; margin-top: 0px; margin-bottom: 20px;">
+        <tbody>
+            <tr style="border: none;">
+                <td style="border: none; text-align: left; width: 50%;">
+                    <strong>OC No:</strong> {{ oc_no }}
+                </td>
+                <td style="border: none; text-align: right; width: 50%;">
+                    <strong>Date:</strong> {{ issue_date }}
                 </td>
             </tr>
-        </table>
+        </tbody>
+    </table>
 
-        <!-- Para 2 -->
-        <table class="para-table">
+    <div style="text-align: center; font-weight: bold; font-size: 11pt; margin-bottom: 20px;">
+        SHOW CAUSE NOTICE No. {{ scn_no }}/{{ current_financial_year }}/GST-{{ designation }}
+    </div>
+
+    <div class="header">
+        FORM GST DRC-01<br>
+        [See rule 142(1)]<br>
+        Show Cause Notice under section {{ section }}
+    </div>
+
+    <div style="height: 15px;"></div>
+
+    <!-- Para 1 -->
+    <table class="para-table">
+        <tr>
+            <td class="para-num">1.</td>
+            <td class="para-content">
+                <strong>{{ legal_name }}, {{ trade_name }}, {{ address }}</strong>
+                (hereinafter referred to as ‘the taxpayer’) is holding GST registration bearing
+                GSTIN:<strong>{{ gstin }} </strong>in the capacity of a ‘registered person’ as envisaged under section
+                2(94) of the Central Goods and Services Tax Act, 2017 (hereinafter referred to as “the Act”) is a {{
+                constitution_of_business }} firm with trade name <strong>M/s. {{ trade_name }}. </strong>
+            </td>
+        </tr>
+    </table>
+
+    <!-- Para 2 -->
+    <table class="para-table">
+        <tr>
+            <td class="para-num">2.</td>
+            <td class="para-content">
+                All references in this Notice to a Section of the Central Goods and Services Tax Act, 2017 (CGST Act,
+                2017) implies reference to the corresponding section of the Kerala State Goods and Services Tax Act,
+                2017 (KSGST Act, 2017). Similarly, all references to a Rule of the Central Goods and Services Tax Rules,
+                2017 (CGST Rules, 2017) implies reference to the corresponding Rules of the Kerala State Goods and
+                Services Tax Rules, 2017 (KSGST Rules, 2017).
+            </td>
+        </tr>
+    </table>
+
+    <div style="height: 15px;"></div>
+
+    <div style="text-align: center; font-weight: bold; margin-bottom: 15px; text-decoration: underline;">
+        GROUNDS OF SCN
+    </div>
+
+    {{ issues_content | safe }}
+
+    <div style="height: 15px;"></div>
+
+    <!-- Demand Section -->
+    <table class="para-table">
+        <tr>
+            <td class="para-num">{{ para_demand }}.</td>
+            <td class="para-content">
+                <strong>Demand-</strong> Based on the facts of the issue and reference of laws as mentioned above,
+                whereas it appears that <strong>{{ legal_name }}, {{ trade_name }}, {{ address }}</strong> is liable to
+                pay tax amounting to Rs. {{ total_amount }}/- (IGST Rs. {{ igst_total }}/-, CGST Rs. {{ cgst_total }}/-
+                &amp; SGST Rs. {{ sgst_total }}/-) for the contraventions made by them as discussed above, they are
+                hereby directed to Show Cause to <strong>{{ officer_designation }}, {{ jurisdiction }}</strong> as to
+                why:
+            </td>
+        </tr>
+    </table>
+
+    <div style="height: 15px;"></div>
+
+    {{ demand_text | safe }}
+
+    <div style="height: 15px;"></div>
+
+    <!-- Boilerplate Paragraphs -->
+    <table class="para-table">
+        <tr>
+            <td class="para-num">{{ para_waiver }}.</td>
+            <td class="para-content waiver-para">
+                With regard to the above demand, where any person chargeable with tax under sub-section (1) or
+                sub-section (3) of Section 73 of the CGST Act, 2017 / Kerala SGST Act, 2017 read with Section 20 of the
+                IGST Act, 2017 pays the said tax along with interest payable under Section 50 within thirty days of
+                issue of the show cause notice, no penalty shall be payable and all proceedings in respect of the said
+                notice shall be deemed to be concluded.
+            </td>
+        </tr>
+    </table>
+
+    <table class="para-table">
+        <tr>
+            <td class="para-num">{{ para_cancellation }}.</td>
+            <td class="para-content">
+                As per Section 29(3) of the CGST Act 2017/Kerala SGST Act, 2017 read with Section 20 of the IGST Act,
+                2017, the cancellation of the registration under this Section shall not affect the liability of person
+                to pay tax and other dues under this Act or to discharge any obligation under this Act or the rules made
+                thereunder for any period prior to the date of cancellation whether or not such tax and other dues are
+                determined before or after the date of cancellation.
+            </td>
+        </tr>
+    </table>
+
+    <div style="height: 15px;"></div>
+
+    <table class="para-table">
+        <tr>
+            <td class="para-num">{{ para_hearing }}.</td>
+            <td class="para-content">
+                <strong> {{ legal_name }}, {{ trade_name }}, {{ address }} </strong> is also directed to produce, at the
+                time of showing cause, all the evidences upon which they intend to rely on in support of their defence.
+                They should also indicate in their written reply as to whether they wish to be heard in person before
+                the case is adjudicated. If no such mention is made in their written reply or if they do not appear
+                before the adjudicating authority when the case is posted for personal hearing, it will be presumed that
+                they do not wish to be heard in person.
+            </td>
+        </tr>
+    </table>
+
+    <div style="height: 15px;"></div>
+
+    <table class="para-table">
+        <tr>
+            <td class="para-num">{{ para_exparte }}.</td>
+            <td class="para-content">
+                If no cause is shown against the action proposed to be taken <strong>within thirty days (30
+                    days)</strong> from the date of receipt of this notice or if they fail to appear before the
+                adjudicating authority when the case is posted for hearing, the case will be decided ex-parte on its own
+                merits without any further reference.
+            </td>
+        </tr>
+    </table>
+
+    <div style="height: 15px;"></div>
+
+    <table class="para-table">
+        <tr>
+            <td class="para-num">{{ para_prejudice }}.</td>
+            <td class="para-content">
+                This notice is issued without prejudice to any other action that may be taken against them under the
+                provisions of the CGST Act, 2017/Kerala SGST Act, 2017 and IGST Act, 2017 as amended or the Rules made
+                there under or under any other law for the time being in force in India. Further, this notice is issued
+                without prejudice to the right to support it with any material evidence which may be collected at a
+                later date and which may be considered relevant to the proceedings in this matter.
+            </td>
+        </tr>
+    </table>
+
+    <div style="height: 15px;"></div>
+
+    <table class="para-table">
+        <tr>
+            <td class="para-num">{{ para_amendment }}.</td>
+            <td class="para-content">
+                <p class="legal-para">The Department reserves the right to add, amend, delete or modify any part or
+                    portion of this show cause notice, if considered necessary at any point of time before the case is
+                    adjudicated and such addition, amendment, deletion or modification shall be deemed to be part and
+                    parcel of this notice.</p>
+            </td>
+        </tr>
+    </table>
+
+    <div style="height: 15px;"></div>
+
+    <table class="para-table">
+        <tr>
+            <td class="para-num">{{ para_reliance }}.</td>
+            <td class="para-content">
+                In this Show Cause Notice, reliance is placed on the following documents:
+            </td>
+        </tr>
+    </table>
+
+    <table class="calc-table">
+        <tbody>
             <tr>
-                <td class="para-num">2.</td>
-                <td class="para-content">
-                    All references in this Notice to a Section of the Central Goods and Services Tax Act, 2017 (CGST
-                    Act,
-                    2017)
-                    implies reference to the corresponding section of the Kerala State Goods and Services Tax Act, 2017
-                    (KSGST
-                    Act, 2017). Similarly, all references to a Rule of the Central Goods and Services Tax Rules, 2017
-                    (CGST
-                    Rules, 2017) implies reference to the corresponding Rules of the Kerala State Goods and Services Tax
-                    Rules,
-                    2017 (KSGST Rules, 2017).
+                <td width="15%">
+                    <p>Si No.</p>
+                </td>
+                <td>
+                    <p>Description</p>
                 </td>
             </tr>
-        </table>
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <!-- Grounds of SCN Header -->
-        <div style="text-align: center; font-weight: bold; margin-bottom: 15px; text-decoration: underline;">
-            GROUNDS OF SCN
-        </div>
-
-        <!-- Issues (Dynamic Numbering) -->
-        {{ issues_content | safe }}
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <!-- Demand Section (Para X) -->
-        <table class="para-table">
+            {% for doc in reliance_documents %}
             <tr>
-                <td class="para-num">{{ next_para_num }}.</td>
-                <td class="para-content">
-                    <strong>Demand-</strong> Based on the facts of the issue and reference of laws as mentioned above,
-                    whereas it appears that <strong>{{ legal_name }}, {{ trade_name }}, {{ address }} </strong>is liable
-                    to pay tax amounting to Rs. {{ total_amount }}/- (IGST Rs. {{ igst_total }}/-, CGST Rs. {{
-                    cgst_total }}/-
-                    &amp; SGST Rs. {{ sgst_total }}/-) for the contraventions made by them as discussed above, they are
-                    hereby directed to Show Cause to <strong>{{ officer_designation }}, {{ jurisdiction }}</strong> as
-                    to why:
-                </td>
+                <td>({{ loop.index }})</td>
+                <td>{{ doc }}</td>
             </tr>
-        </table>
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        {{ demand_text | safe }}
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <!-- Post-Demand (Para X+1) -->
-        <table class="para-table">
-            <tr>
-                <td class="para-num">{{ para_waiver }}.</td>
-                <td class="para-content waiver-para">
-                    With regard to the above demand, where any person chargeable with tax under sub-section (1) or
-                    sub-section (3) of Section 73 of the CGST Act, 2017 / Kerala SGST Act, 2017 read with Section 20 of
-                    the IGST Act, 2017 pays the said tax along with interest payable under Section 50 within thirty days
-                    of issue of the show cause notice, no penalty shall be payable and all proceedings in respect of the
-                    said notice shall be deemed to be concluded.
-                </td>
-            </tr>
-        </table>
-
-        <table class="para-table">
-            <tr>
-                <td class="para-num">{{ para_cancellation }}.
-                </td>
-                <td class="para-content">As per Section 29(3) of the CGST Act 2017/Kerala SGST Act, 2017 read with
-                    Section 20 of the IGST Act, 2017, the cancellation of the registration under this Section shall not
-                    affect the liability of person to pay tax and other dues under this Act or to discharge any
-                    obligation under this Act or the rules made thereunder for any period prior to the date of
-                    cancellation whether or not such tax and other dues are determined before or after the date of
-                    cancellation.
-                </td>
-            </tr>
-        </table>
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <table class="para-table">
-            <tr>
-                <td class="para-num">{{ para_hearing }}.</td>
-                <td class="para-content"><strong> {{ legal_name }}, {{ trade_name }}, {{ address }} </strong>is also
-                    directed to produce, at the time of showing cause, all the evidences upon which they intend to rely
-                    on in support of their defence. They should also indicate in their written reply as to whether they
-                    wish to be heard in person before the case is adjudicated. If no such mention is made in their
-                    written reply or if they do not appear before the adjudicating authority when the case is posted for
-                    personal hearing, it will be presumed that they do not wish to be heard in person.
-                </td>
-            </tr>
-        </table>
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <table class="para-table">
-            <tr>
-                <td class="para-num">{{ para_exparte }}.</td>
-                <td class="para-content">If no cause is shown against the action proposed to be taken <strong>within
-                        thirty days (30 days)</strong> from the date of receipt of this notice or if they fail to appear
-                    before the adjudicating authority when the case is posted for hearing, the case will be decided
-                    ex-parte on its own merits without any further reference.
-                </td>
-            </tr>
-        </table>
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <table class="para-table">
-            <tr>
-                <td class="para-num">{{ para_prejudice }}.
-                </td>
-                <td class="para-content">This notice is issued without prejudice to any other action that may be taken
-                    against them under the provisions of the CGST Act, 2017/Kerala SGST Act, 2017 and IGST Act, 2017 as
-                    amended or the Rules made there under or under any other law for the time being in force in India.
-                    Further, this notice is issued without prejudice to the right to support it with any material
-                    evidence which may be collected at a later date and which may be considered relevant to the
-                    proceedings in this matter.
-                </td>
-            </tr>
-        </table>
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <table class="para-table">
-            <tr>
-                <td class="para-num">{{ para_amendment }}.
-                </td>
-                <td class="para-content">
-                    <p class="legal-para">The Department reserves the right to add, amend, delete or modify any part or
-                        portion of this show cause notice, if considered necessary at any point of time before the case
-                        is adjudicated and such addition, amendment, deletion or modification shall be deemed to be part
-                        and parcel of this notice.</p>
-                </td>
-            </tr>
-        </table>
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <table class="para-table">
-            <tr>
-                <td class="para-num">{{ para_reliance }}.</td>
-                <td class="para-content">
-                    In this Show Cause Notice, reliance is placed on the following documents:
-                </td>
-            </tr>
-        </table>
-
-        <table class="calc-table">
-            <tbody>
-                <tr>
-                    <td width="15%">
-                        <p>Si No.</p>
-                    </td>
-                    <td>
-                        <p>Description</p>
-                    </td>
-                </tr>
-                {% for doc in reliance_documents %}
-                <tr>
-                    <td>({{ loop.index }})</td>
-                    <td>{{ doc }}</td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td>(i)</td>
-                    <td>{{ reliance_documents_placeholder }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <!-- [FIX] Replaced Float with Table for Signature Block -->
-        <table class="para-table" style="margin: 20px 0;">
-            <tr>
-                <td style="border: none; width: 50%;"></td> <!-- Spacer -->
-                <td style="border: none; width: 50%; text-align: right; vertical-align: top;">
-                    <p style="margin: 0; padding: 0;"><strong>{{ officer_name }}</strong></p>
-                    <p style="margin: 0; padding: 0;"><strong>{{ designation }}</strong></p>
-                </td>
-            </tr>
-        </table>
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <p>To,</p>
-        <p><strong>{{ legal_name }}, </strong></p>
-        <p><strong>{{ trade_name }}, </strong></p>
-        <p><strong>{{ gstin }}</strong></p>
-        <p><strong>{{ address }}</strong></p>
-
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
-
-        <p>Copy submitted to:</p>
-        <!-- Spacer -->
-        <div style="height: 5px;"></div>
-
-        <ul>
-            {% for copy in copy_submitted_to %}
-            <li>{{ copy }}</li>
             {% else %}
-            <li>{{ copy_submitted_to_placeholder }}</li>
+            <tr>
+                <td>(i)</td>
+                <td>{{ reliance_documents_placeholder }}</td>
+            </tr>
             {% endfor %}
-        </ul>
+        </tbody>
+    </table>
 
-        <!-- Spacer -->
-        <div style="height: 15px;"></div>
+    <div style="height: 15px;"></div>
 
-        {% if is_preview %}
-    </div>{% endif %}
+    <!-- Signature Block -->
+    <table class="para-table" style="margin: 20px 0;">
+        <tr>
+            <td style="border: none; width: 50%;"></td>
+            <td style="border: none; width: 50%; text-align: right; vertical-align: top;">
+                <p style="margin: 0; padding: 0;"><strong>{{ officer_name }}</strong></p>
+                <p style="margin: 0; padding: 0;"><strong>{{ designation }}</strong></p>
+            </td>
+        </tr>
+    </table>
+
+    <div style="height: 15px;"></div>
+
+    <p>To,</p>
+    <p><strong>{{ legal_name }}, </strong></p>
+    <p><strong>{{ trade_name }}, </strong></p>
+    <p><strong>{{ gstin }}</strong></p>
+    <p><strong>{{ address }}</strong></p>
+
+    <div style="height: 15px;"></div>
+
+    <p>Copy submitted to:</p>
+    <div style="height: 5px;"></div>
+
+    <ul>
+        {% for copy in copy_submitted_to %}
+        <li>{{ copy }}</li>
+        {% else %}
+        <li>{{ copy_submitted_to_placeholder }}</li>
+        {% endfor %}
+    </ul>
+
+    <div style="height: 15px;"></div>
+    {% endmacro %}
+
+    <!-- ASMT-10 Style Page Container Pattern -->
+    <div class="page-wrapper" id="scn-preview-wrapper">
+        <!-- JS will inject discrete .a4-page containers here -->
+    </div>
+
+    <!-- Hidden Source Content for Pagination -->
+    <div id="scn-source-content" class="doc-content"
+        style="display: none; visibility: hidden; position: absolute; width: 680px;">
+        {{ render_content() }}
+    </div>
+
+    <script>
+        /**
+         * Unified A4 Pagination Engine
+         * Handles discrete pages and smart splitting of large tables.
+         */
+        const PAGE_HEIGHT = 1123;
+        const TOP_PADDING = 57;
+        const BOTTOM_PADDING = 57;
+        const CONTENT_MAX_HEIGHT = PAGE_HEIGHT - TOP_PADDING - BOTTOM_PADDING;
+
+        function createNewPage() {
+            const wrapper = document.getElementById('scn-preview-wrapper');
+            const page = document.createElement('div');
+            page.className = 'a4-page';
+
+            const documentDiv = document.createElement('div');
+            documentDiv.className = 'doc-content';
+            page.appendChild(documentDiv);
+
+            wrapper.appendChild(page);
+            return documentDiv;
+        }
+
+        function paginate() {
+            const source = document.getElementById('scn-source-content');
+            const wrapper = document.getElementById('scn-preview-wrapper');
+            if (!source || !wrapper) return;
+
+            wrapper.innerHTML = '';
+            source.style.display = 'block';
+            source.style.width = '680px';
+
+            let currentPageContainer = createNewPage();
+            const children = Array.from(source.children);
+
+            children.forEach(child => {
+                const childHeight = child.offsetHeight;
+                const currentContentHeight = currentPageContainer.offsetHeight;
+
+                // Case 1: Fits in current page space
+                if (currentContentHeight + childHeight <= CONTENT_MAX_HEIGHT) {
+                    currentPageContainer.appendChild(child.cloneNode(true));
+                }
+                // Case 2: Block is physically too large for any single page
+                else if (childHeight > CONTENT_MAX_HEIGHT) {
+                    if (child.tagName === 'TABLE' || child.querySelector('table')) {
+                        // Start splitting. If page is already >80% full, start on fresh page.
+                        if (currentPageContainer.offsetHeight > CONTENT_MAX_HEIGHT * 0.8) {
+                            currentPageContainer = createNewPage();
+                        }
+
+                        if (child.tagName === 'TABLE') {
+                            currentPageContainer = splitTable(child, currentPageContainer);
+                        } else {
+                            currentPageContainer = splitContainerWithTable(child, currentPageContainer);
+                        }
+                    } else {
+                        // Non-table large block: move to fresh page
+                        currentPageContainer = createNewPage();
+                        currentPageContainer.appendChild(child.cloneNode(true));
+                    }
+                }
+                // Case 3: Fits on a fresh page, so move it there
+                else {
+                    currentPageContainer = createNewPage();
+                    currentPageContainer.appendChild(child.cloneNode(true));
+                }
+            });
+
+            source.style.display = 'none';
+        }
+
+        function splitContainerWithTable(container, pageContent) {
+            const table = container.querySelector('table');
+            const clone = container.cloneNode(true);
+            const tableInClone = clone.querySelector('table');
+
+            tableInClone.innerHTML = '';
+            pageContent.appendChild(clone);
+
+            return splitTable(table, pageContent, tableInClone);
+        }
+
+        function splitTable(table, container, targetTable = null) {
+            let remainingRows = Array.from(table.rows);
+            let header = null;
+
+            if (table.tHead) {
+                header = table.tHead.cloneNode(true);
+                remainingRows = remainingRows.filter(r => r.parentNode.tagName !== 'THEAD');
+            } else if (remainingRows.length > 0) {
+                header = document.createElement('thead');
+                header.appendChild(remainingRows[0].cloneNode(true));
+                remainingRows.shift();
+            }
+
+            while (remainingRows.length > 0) {
+                const activeTable = targetTable || table.cloneNode(false);
+                if (header) activeTable.appendChild(header.cloneNode(true));
+
+                const tbody = document.createElement('tbody');
+                activeTable.appendChild(tbody);
+
+                if (!targetTable) container.appendChild(activeTable);
+                targetTable = null;
+
+                let rowsAdded = 0;
+                while (remainingRows.length > 0) {
+                    const row = remainingRows[0];
+                    tbody.appendChild(row.cloneNode(true));
+
+                    if (container.offsetHeight > CONTENT_MAX_HEIGHT && rowsAdded > 0) {
+                        tbody.removeChild(tbody.lastElementChild);
+                        break;
+                    }
+                    remainingRows.shift();
+                    rowsAdded++;
+                }
+
+                if (remainingRows.length > 0) {
+                    container = createNewPage();
+                }
+            }
+            return container;
+        }
+
+        window.addEventListener('load', () => setTimeout(paginate, 150));
+    </script>
 </body>
 
 </html>

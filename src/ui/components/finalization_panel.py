@@ -6,6 +6,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
 from src.utils.formatting import format_indian_number
 
+from src.ui.components.modern_card import ModernCard
+
 class FinalizationPanel(QWidget):
     """
     A reusable component for finalizing documents (DRC-01A, SCN, etc.)
@@ -17,9 +19,14 @@ class FinalizationPanel(QWidget):
         self.setup_ui()
         
     def setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(20)
-        layout.setContentsMargins(30, 30, 30, 30)
+        self.layout = QVBoxLayout(self)
+        self.layout.setSpacing(10)
+        self.layout.setContentsMargins(15, 15, 15, 15)
+        
+        # --- COLLAPSIBLE SUMMARY CARD ---
+        self.summary_card = ModernCard(title="Case Summary & Demand Details", collapsible=True)
+        self.summary_card.content_layout.setContentsMargins(20, 20, 20, 20)
+        self.summary_card.content_layout.setSpacing(15)
         
         # --- 1. RECEIPT HEADER (Context) ---
         header_frame = QFrame()
@@ -63,7 +70,7 @@ class FinalizationPanel(QWidget):
             
         header_layout.addLayout(right_layout)
         
-        layout.addWidget(header_frame)
+        self.summary_card.addWidget(header_frame)
         
         # --- 2. DOCUMENT INFO BAR ---
         doc_bar = QFrame()
@@ -94,22 +101,22 @@ class FinalizationPanel(QWidget):
         doc_layout.addWidget(self.doc_date_lbl)
         doc_layout.addWidget(self.doc_ref_lbl)
         
-        layout.addWidget(doc_bar)
+        self.summary_card.addWidget(doc_bar)
         
         # --- 3. SCOPE SUMMARY (Issues) ---
         scope_lbl = QLabel("Issues Involved")
-        scope_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #7f8c8d; margin-top: 10px;")
-        layout.addWidget(scope_lbl)
+        scope_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #7f8c8d;")
+        self.summary_card.addWidget(scope_lbl)
         
         self.issue_list_widget = QLabel("• Issue 1\n• Issue 2")
         self.issue_list_widget.setStyleSheet("margin-left: 10px; line-height: 1.5; color: #2c3e50;")
         self.issue_list_widget.setWordWrap(True)
-        layout.addWidget(self.issue_list_widget)
+        self.summary_card.addWidget(self.issue_list_widget)
         
         # --- 4. FINANCIAL SUMMARY TABLE ---
         table_lbl = QLabel("Demand Summary")
-        table_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #7f8c8d; margin-top: 10px;")
-        layout.addWidget(table_lbl)
+        table_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #7f8c8d;")
+        self.summary_card.addWidget(table_lbl)
         
         self.amounts_table = QTableWidget()
         self.amounts_table.setColumnCount(4)
@@ -118,7 +125,7 @@ class FinalizationPanel(QWidget):
         self.amounts_table.verticalHeader().setVisible(False)
         self.amounts_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.amounts_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        self.amounts_table.setFixedHeight(150)
+        self.amounts_table.setFixedHeight(120)
         self.amounts_table.setStyleSheet("""
             QTableWidget {
                 border: 1px solid #ddd;
@@ -131,7 +138,7 @@ class FinalizationPanel(QWidget):
                 font-weight: bold;
             }
         """)
-        layout.addWidget(self.amounts_table)
+        self.summary_card.addWidget(self.amounts_table)
         
         # Grand Total Display
         total_frame = QFrame()
@@ -147,17 +154,37 @@ class FinalizationPanel(QWidget):
         
         total_layout.addWidget(t_label)
         total_layout.addWidget(self.grand_total_lbl)
-        layout.addWidget(total_frame)
+        self.summary_card.addWidget(total_frame)
         
-        layout.addStretch()
+        self.layout.addWidget(self.summary_card)
         
-        # --- 5. ACTION FOOTER ---
-        footer_layout = QHBoxLayout()
+        # --- 5. ACTION FOOTER (Always Visible) ---
+        footer_frame = QFrame()
+        footer_layout = QHBoxLayout(footer_frame)
+        footer_layout.setContentsMargins(0, 5, 0, 5)
         
-        # Preview Button
-        self.preview_btn = QPushButton("👁 Preview Draft PDF")
-        self.preview_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.preview_btn.setStyleSheet("""
+        # Save Draft Button
+        self.save_btn = QPushButton("💾 Save Draft")
+        self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                border: 1px solid #7f8c8d;
+                color: #2c3e50;
+                padding: 8px 15px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #f1f3f4;
+            }
+        """)
+        footer_layout.addWidget(self.save_btn)
+
+        # Refresh Preview Button
+        self.refresh_btn = QPushButton("🔄 Refresh Preview")
+        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_btn.setStyleSheet("""
             QPushButton {
                 background-color: white;
                 border: 1px solid #3498db;
@@ -170,7 +197,43 @@ class FinalizationPanel(QWidget):
                 background-color: #ecf0f1;
             }
         """)
-        footer_layout.addWidget(self.preview_btn)
+        footer_layout.addWidget(self.refresh_btn)
+        
+        # Preview Button (PDF)
+        self.pdf_btn = QPushButton("👁 Draft PDF")
+        self.pdf_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pdf_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                border: 1px solid #e74c3c;
+                color: #e74c3c;
+                padding: 8px 15px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #fdf2f2;
+            }
+        """)
+        footer_layout.addWidget(self.pdf_btn)
+
+        # DOCX Button
+        self.docx_btn = QPushButton("📝 Draft DOCX")
+        self.docx_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.docx_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                border: 1px solid #3498db;
+                color: #3498db;
+                padding: 8px 15px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #ebf5fb;
+            }
+        """)
+        footer_layout.addWidget(self.docx_btn)
         
         footer_layout.addStretch()
         
@@ -215,8 +278,7 @@ class FinalizationPanel(QWidget):
         right_action_layout.addLayout(btn_row)
         
         footer_layout.addLayout(right_action_layout)
-        
-        layout.addLayout(footer_layout)
+        self.layout.addWidget(footer_frame)
 
     def on_verify_toggled(self, checked):
         self.finalize_btn.setEnabled(checked)
@@ -352,12 +414,18 @@ class FinalizationPanel(QWidget):
         """Toggle read-only mode (hide action footer)"""
         if read_only:
             # Hide the entire footer layout items
-            self.preview_btn.setVisible(False)
+            self.save_btn.setVisible(False)
+            self.refresh_btn.setVisible(False)
+            self.pdf_btn.setVisible(False)
+            self.docx_btn.setVisible(False)
             self.confirm_chk.setVisible(False)
             self.cancel_btn.setVisible(False)
             self.finalize_btn.setVisible(False)
         else:
-            self.preview_btn.setVisible(True)
+            self.save_btn.setVisible(True)
+            self.refresh_btn.setVisible(True)
+            self.pdf_btn.setVisible(True)
+            self.docx_btn.setVisible(True)
             self.confirm_chk.setVisible(True)
             self.cancel_btn.setVisible(True)
             self.finalize_btn.setVisible(True)

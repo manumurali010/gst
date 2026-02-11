@@ -469,9 +469,19 @@ class ASMT10Generator:
         notice_date = format_date(data.get('notice_date') or datetime.now().date())
         reply_date = data.get('last_date_to_reply', 'Within 30 Days')
         
-        legal_name = data.get('taxpayer_details', {}).get('legal_name', data.get('legal_name', 'N/A'))
-        gstin = data.get('taxpayer_details', {}).get('gstin', data.get('gstin', 'N/A'))
-        addr = data.get('taxpayer_details', {}).get('address', 'Address not available')
+        def get_taxpayer_val(keys):
+            t_details = data.get('taxpayer_details', {})
+            if not isinstance(t_details, dict): t_details = {}
+            for k in keys:
+                val = t_details.get(k) or data.get(k)
+                if val and val != "N/A" and val != "Address not available":
+                    return val
+            return "N/A"
+
+        legal_name = get_taxpayer_val(['legal_name', 'Legal Name', 'legalName', 'taxpayer_name'])
+        gstin = get_taxpayer_val(['gstin', 'GSTIN', 'taxpayer_gstin'])
+        addr = get_taxpayer_val(['address', 'Address', 'Address of Principal Place of Business'])
+        if addr == "N/A": addr = "Address not available"
         addr_clean = addr.replace('\n', '<br>')
         
         # 4. Generate Body
@@ -489,15 +499,14 @@ class ASMT10Generator:
             # Issue Table
             table_html = ASMT10Generator.generate_issue_table_html(issue)
             
+            # Output as direct children to allow natural pagination
             issue_sections += f"""
-            <div class="issue-block">
-                <div style="font-weight: bold; margin-bottom: 5px; font-size: 11pt;">Issue {idx} – {name}</div>
-                <div style="font-weight: bold; color: #b91c1c; margin-bottom: 10px;">Estimated Tax: ₹ {format_indian_number(shortfall, prefix_rs=False)}</div>
+                <div style="font-weight: bold; margin-top: 20px; margin-bottom: 5px; font-size: 11pt; page-break-after: avoid;">Issue {idx} – {name}</div>
+                <div style="font-weight: bold; color: #b91c1c; margin-bottom: 10px; page-break-after: avoid;">Estimated Tax: ₹ {format_indian_number(shortfall, prefix_rs=False)}</div>
                 
-                <div style="margin-bottom: 10px; text-align: justify;">{desc}</div>
+                <div style="margin-bottom: 15px; text-align: justify;">{desc}</div>
                 
                 {table_html}
-            </div>
             """
             
         intro_text = f"the following {len(active_issues)} discrepancies"
@@ -507,73 +516,45 @@ class ASMT10Generator:
         
         if style_mode == "professional":
             # --- PROFESSIONAL STYLE (Adjudication Tab) ---
-            # Used for the read-only view in Proceedings Workspace
-            page_width = "794px" # A4 width approx at 96dpi
+            # Using Jinja2 template and shared doc_base.css for visual parity with SCN
+            template_vars = {
+                'oc_number': oc_number,
+                'notice_date': notice_date,
+                'legal_name': legal_name,
+                'gstin': gstin,
+                'addr_clean': addr_clean,
+                'financial_year': data.get('financial_year', 'N/A'),
+                'intro_text': intro_text,
+                'issue_sections': issue_sections,
+                'total_tax_formatted': format_indian_number(total_tax, prefix_rs=False),
+                'reply_date': reply_date,
+                'letter_head': display_lh,
+                'show_letterhead': show_letterhead
+            }
             
-            css = f"""
-                body {{ 
-                    font-family: 'Times New Roman', serif; 
-                    background-color: #525659; 
-                    color: black;
-                    margin: 0;
-                    padding: 20px;
-                }}
-                .page-wrapper {{
-                    width: 100%;
-                    text-align: center;
-                }}
-                .page-container {{
-                    display: inline-block;
-                    text-align: left;
-                    width: {page_width}; 
-                    min-height: {"1000px" if for_preview else "297mm"}; 
-                    padding: {padding}; 
-                    background-color: white; 
-                    border: 1px solid #ccc;
-                    box-shadow: 0 0 10px rgba(0,0,0,0.5);
-                }}
-                .letterhead-area {{ margin-bottom: 20px; width: 100%; text-align: center; }}
-                .letterhead-area img {{ width: 100%; max-height: 120px; object-fit: contain; }}
-                .oc-header {{ width: 100%; margin-bottom: 15px; font-weight: bold; font-size: 11pt; }}
-                .form-title-area {{ text-align: center; margin-bottom: 25px; }}
-                .form-title {{ font-size: 14pt; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }}
-                .form-rule {{ font-size: 10pt; font-style: italic; }}
-                .recipient {{ margin-bottom: 25px; font-size: 12pt; text-align: left; line-height: 1.4; }}
-                .tax-period {{ margin-bottom: 15px; font-size: 12pt; font-weight: bold; }}
-                .subject {{ text-align: center; font-weight: bold; margin-bottom: 20px; font-size: 12pt; text-decoration: underline; }}
-                .content-main {{ font-size: 12pt; line-height: 1.5; }}
-                .justify-text {{ text-align: justify; }}
-                .issue-block {{ margin-bottom: 30px; border-bottom: 1px dashed #ccc; padding-bottom: 20px; }}
-                .data-table {{ width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 15px; border: 1px solid black; }}
-                .data-table th, .data-table td {{ border: 1px solid black; padding: 5px; font-size: 10pt; text-align: center; }}
-                .data-table th {{ background-color: #f2f2f2; font-weight: bold; }}
-                .footer-sign {{ margin-top: 60px; text-align: right; font-size: 12pt; font-weight: bold; }}
-            """
+            # Load Template and CSS
+            import os
+            from jinja2 import Environment, FileSystemLoader
+            template_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "templates")
+            css_dir = os.path.join(template_dir, 'css')
             
-            body_content = f"""
-            <div class="page-wrapper">
-                <div class="page-container">
-                    <div class="letterhead-area">{display_lh}</div>
-                    <table class="oc-header" width="100%">
-                        <tr><td align="left">O.C. No.: {oc_number}</td><td align="right">Date: {notice_date}</td></tr>
-                    </table>
-                    <div class="form-title-area">
-                        <div class="form-title">FORM GST ASMT-10</div>
-                        <div class="form-rule">[See rule 99(1)]</div>
-                    </div>
-                    <div class="recipient">To,<br><strong>{legal_name}</strong><br>GSTIN: {gstin}<br>{addr_clean}</div>
-                    <div class="tax-period">Tax period: {data.get('financial_year', 'N/A')}</div>
-                    <div class="subject">Sub: Notice for intimating discrepancies in the return after scrutiny</div>
-                    <div class="content-main">
-                        <p class="justify-text">This is to inform that during the scrutiny of the returns for the financial year {data.get('financial_year')}, {intro_text} have been noticed:</p>
-                        {issue_sections}
-                        <p style="margin-top: 20px; font-size: 13pt;"><strong>Total Tax Liability Identified: ₹ {format_indian_number(total_tax, prefix_rs=False)}</strong></p>
-                        <p class="justify-text">You are hereby directed to explain the reasons for the aforesaid discrepancies by <strong>{reply_date}</strong>.</p>
-                        <p class="justify-text">Failing which, proceedings in accordance with law may be initiated against you without further reference.</p>
-                        <div class="footer-sign"><br><br>Signature of Proper Officer<br>(Name)<br>Designation</div>
-                </div>
-            </div>
-            """
+            def read_css(filename):
+                path = os.path.join(css_dir, filename)
+                if os.path.exists(path):
+                    with open(path, 'r', encoding='utf-8') as f:
+                        return f.read()
+                return ""
+
+            base_css = read_css('doc_base.css')
+            renderer_css = "" if not for_preview else read_css('doc_qt.css')
+            
+            # Workaround for formatter mangling: generate full style tag in Python
+            template_vars['full_styles_html'] = f"<style>\n{base_css}\n{renderer_css}\n</style>"
+
+            env = Environment(loader=FileSystemLoader(template_dir))
+            template = env.get_template('asmt10_prof.html')
+            
+            return template.render(**template_vars)
 
         else:
             # --- LEGACY STYLE (Original Scrutiny Tab) ---

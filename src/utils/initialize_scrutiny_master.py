@@ -355,18 +355,29 @@ def get_grid_schema_sop9_sec16_4():
 
 issues = [
     {"issue_id": "LIABILITY_3B_R1", "issue_name": "Outward Liability Mismatch (GSTR 3B vs GSTR 1)", "sop_point": 1, "grid_data": get_grid_schema_sop1(), 
-     "table_definition": get_strict_table_def_point_1(), "analysis_type": "auto", "sop_version": "CBIC_SCRUTINY_SOP_2024.1", "applicable_from_fy": "2017-18"},
-    {"issue_id": "RCM_LIABILITY_ITC", "issue_name": "RCM Liability mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 2, "grid_data": get_grid_schema_summary_3x4(["Description", "IGST", "CGST", "SGST", "Cess"])},
-    {"issue_id": "ISD_CREDIT_MISMATCH", "issue_name": "ISD Credit mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 3, "grid_data": get_grid_schema_sop3()},
-    {"issue_id": "ITC_3B_2B_OTHER", "issue_name": "All Other ITC Mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 4, "grid_data": get_grid_schema_sop4()},
-    {"issue_id": "TDS_TCS_MISMATCH", "issue_name": "TDS/TCS Credit mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 5, "grid_data": get_grid_schema_sop5()},
+     "table_definition": get_strict_table_def_point_1(), "analysis_type": "auto", "sop_version": "CBIC_SCRUTINY_SOP_2024.1", "applicable_from_fy": "2017-18",
+     "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
+    {"issue_id": "RCM_LIABILITY_ITC", "issue_name": "RCM Liability mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 2, "grid_data": get_grid_schema_summary_3x4(["Description", "IGST", "CGST", "SGST", "Cess"]),
+     "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
+    {"issue_id": "ISD_CREDIT_MISMATCH", "issue_name": "ISD Credit mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 3, "grid_data": get_grid_schema_sop3(),
+     "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
+    {"issue_id": "ITC_3B_2B_OTHER", "issue_name": "All Other ITC Mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 4, "grid_data": get_grid_schema_sop4(),
+     "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
+    {"issue_id": "TDS_TCS_MISMATCH", "issue_name": "TDS/TCS Credit mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 5, "grid_data": get_grid_schema_sop5(),
+     "liability_config": {"model": "multiple_rows", "row_indices": [4, 10], "column_heads": ["Amount"]}},
     {"issue_id": "EWAY_BILL_MISMATCH", "issue_name": "E-Waybill Comparison (GSTR 3B vs E-Waybill)", "sop_point": 6, "grid_data": []},
-    {"issue_id": "CANCELLED_SUPPLIERS", "issue_name": "ITC from Cancelled Suppliers", "sop_point": 7, "grid_data": get_grid_schema_sop7_cancelled()},
-    {"issue_id": "NON_FILER_SUPPLIERS", "issue_name": "ITC from Non-Filing Suppliers", "sop_point": 8, "grid_data": get_grid_schema_sop8_non_filer()},
-    {"issue_id": "SEC_16_4_VIOLATION", "issue_name": "Section 16(4) ITC Violation", "sop_point": 9, "grid_data": get_grid_schema_sop9_sec16_4()},
-    {"issue_id": "IMPORT_ITC_MISMATCH", "issue_name": "Import ITC Mismatch (GSTR 3B vs ICEGATE)", "sop_point": 10, "grid_data": get_grid_schema_sop10()},
-    {"issue_id": "RULE_42_43_VIOLATION", "issue_name": "Rule 42/43 Reversal Mismatch", "sop_point": 11, "grid_data": get_grid_schema_sop11()},
-    {"issue_id": "ITC_3B_2B_9X4", "issue_name": "GSTR 3B vs 2B (discrepancy identified from GSTR 9)", "sop_point": 12, "grid_data": get_grid_schema_point_12()}
+    {"issue_id": "CANCELLED_SUPPLIERS", "issue_name": "ITC from Cancelled Suppliers", "sop_point": 7, "grid_data": get_grid_schema_sop7_cancelled(),
+     "liability_config": {"model": "sum_of_rows", "row_indices": "all_data_rows", "column_heads": ["IGST", "CGST", "SGST"]}},
+    {"issue_id": "NON_FILER_SUPPLIERS", "issue_name": "ITC from Non-Filing Suppliers", "sop_point": 8, "grid_data": get_grid_schema_sop8_non_filer(),
+     "liability_config": {"model": "sum_of_rows", "row_indices": "all_data_rows", "column_heads": ["IGST", "CGST", "SGST"]}},
+    {"issue_id": "SEC_16_4_VIOLATION", "issue_name": "Section 16(4) ITC Violation", "sop_point": 9, "grid_data": get_grid_schema_sop9_sec16_4(),
+     "liability_config": {"model": "sum_of_rows", "row_indices": "all_data_rows", "column_heads": ["IGST", "CGST", "SGST"]}},
+    {"issue_id": "IMPORT_ITC_MISMATCH", "issue_name": "Import ITC Mismatch (GSTR 3B vs ICEGATE)", "sop_point": 10, "grid_data": get_grid_schema_sop10(),
+     "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST"]}},
+    {"issue_id": "RULE_42_43_VIOLATION", "issue_name": "Rule 42/43 Reversal Mismatch", "sop_point": 11, "grid_data": get_grid_schema_sop11(),
+     "liability_config": {"model": "single_column", "row_indices": [7], "column_heads": ["Amount"]}},
+    {"issue_id": "ITC_3B_2B_9X4", "issue_name": "GSTR 3B vs 2B (discrepancy identified from GSTR 9)", "sop_point": 12, "grid_data": get_grid_schema_point_12(),
+     "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
 ]
 
 # Add default templates
@@ -400,9 +411,10 @@ def run_init():
             INSERT OR REPLACE INTO issues_master (
                 issue_id, issue_name, category, sop_point, 
                 table_definition, analysis_type, sop_version, applicable_from_fy,
-                templates, grid_data, active, updated_at
+                templates, grid_data, liability_config, tax_demand_mapping,
+                active, updated_at
             ) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
         """, (
             issue['issue_id'], 
             issue['issue_name'], 
@@ -410,12 +422,30 @@ def run_init():
             issue['sop_point'],
             tbl_def, an_type, sop_ver, app_fy,
             json.dumps(issue.get('templates', {})),
-            json.dumps(issue.get('grid_data', []))
+            json.dumps(issue.get('grid_data', [])),
+            json.dumps(issue.get('liability_config')),
+            json.dumps(issue.get('tax_demand_mapping'))
         ))
         
         # Legacy Sync (Optional but keeps issues_data alive if used elsewhere)
-        issue_payload = { "issue_id": issue['issue_id'], "issue_name": issue['issue_name'], "grid_data": issue['grid_data'], "templates": issue['templates'] }
-        c.execute("INSERT OR REPLACE INTO issues_data (issue_id, issue_json) VALUES (?, ?)", (issue['issue_id'], json.dumps(issue_payload)))
+        issue_payload = { 
+            "issue_id": issue['issue_id'], 
+            "issue_name": issue['issue_name'], 
+            "grid_data": issue['grid_data'], 
+            "templates": issue['templates'],
+            "liability_config": issue.get('liability_config'),
+            "tax_demand_mapping": issue.get('tax_demand_mapping')
+        }
+        c.execute("""
+            INSERT OR REPLACE INTO issues_data 
+            (issue_id, issue_json, liability_config, tax_demand_mapping) 
+            VALUES (?, ?, ?, ?)
+        """, (
+            issue['issue_id'], 
+            json.dumps(issue_payload),
+            json.dumps(issue.get('liability_config')),
+            json.dumps(issue.get('tax_demand_mapping'))
+        ))
     conn.commit()
     conn.close()
     print(f"Initialized {len(issues)} Scrutiny Points.")

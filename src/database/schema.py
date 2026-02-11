@@ -131,6 +131,8 @@ def init_db():
         tags TEXT, -- JSON Array
         version TEXT,
         active BOOLEAN DEFAULT 0,
+        liability_config TEXT,
+        tax_demand_mapping TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
@@ -198,6 +200,17 @@ def init_db():
     except: pass
 
     
+    # Migration: Add liability columns if missing
+    lib_cols = [
+        ("issues_master", "liability_config TEXT"),
+        ("issues_master", "tax_demand_mapping TEXT"),
+        ("issues_data", "liability_config TEXT"),
+        ("issues_data", "tax_demand_mapping TEXT")
+    ]
+    for table, col_def in lib_cols:
+        try: cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
+        except: pass
+
     # 10. GST Acts Table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS gst_acts (

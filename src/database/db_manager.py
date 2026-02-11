@@ -1701,7 +1701,8 @@ class DatabaseManager:
             # EXPLICIT SELECTION to force cached schema refresh/bypass
             cursor.execute("""
                 SELECT issue_id, issue_name, category, sop_point, templates, grid_data, 
-                       table_definition, analysis_type, sop_version, applicable_from_fy
+                       table_definition, analysis_type, sop_version, applicable_from_fy,
+                       liability_config, tax_demand_mapping
                 FROM issues_master 
                 WHERE issue_id = ?
             """, (issue_id,))
@@ -1724,6 +1725,8 @@ class DatabaseManager:
                 parse_json_field('templates')
                 parse_json_field('grid_data')
                 parse_json_field('table_definition')
+                parse_json_field('liability_config')
+                parse_json_field('tax_demand_mapping')
                 
                 return d
             return None
@@ -1864,6 +1867,7 @@ class DatabaseManager:
              cursor.execute("DELETE FROM case_issues WHERE proceeding_id = ? AND stage = 'SCN'", (pid_str,))
              
              # 2. Insert new issues
+             print(f"[DB DIAG] save_scn_issue_snapshot: Saving {len(issue_list)} issues. IDs: {[i.get('issue_id') for i in issue_list]}")
              for issue in issue_list:
                  issue_id = issue.get('issue_id')
                  origin = issue.get('origin', 'SCN')
@@ -1874,12 +1878,17 @@ class DatabaseManager:
                  # Prepare JSON payload
                  data_json = json.dumps(data)
                  
+                 print(f"[DB DIAG] Inserting {issue_id} | PID: {pid_str} | SrcPID: {source_pid}")
+
                  cursor.execute("""
-                     INSERT INTO case_issues (proceeding_id, issue_id, stage, data_json, origin, added_by)
-                     VALUES (?, ?, ?, ?, ?, ?)
-                 """, (pid_str, issue_id, 'SCN', data_json, origin, added_by))
+                     INSERT INTO case_issues (proceeding_id, issue_id, stage, data_json, origin, added_by, source_proceeding_id)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)
+                 """, (pid_str, issue_id, 'SCN', data_json, origin, added_by, source_pid))
              
              conn.commit()
+             # Verify immediately
+             chk = cursor.execute("SELECT count(*) FROM case_issues WHERE proceeding_id=? AND stage='SCN'", (pid_str,)).fetchone()
+             print(f"[DB DIAG] Post-Commit Count: {chk[0]}")
              return True
              
         except Exception as e:
