@@ -52,14 +52,15 @@ class DocumentGenerator:
         with open(os.path.join(OUTPUT_DIR, "debug_last_generated.html"), "w", encoding="utf-8") as f:
             f.write(html_content)
 
-        # [HARD-DISABLE] Emergency Bypass
-        print("[STABILIZATION] PDF Generation from HTML is HARD-DISABLED.")
-        return filepath # Return path even if empty to avoid crashes if expected
-        
         try:
-            with open(filepath, "w+b") as result_file:
-                # from xhtml2pdf import pisa
-                pass
+            from src.utils.preview_generator import PreviewGenerator
+            success, msg = PreviewGenerator.generate_pdf(html_content, filepath)
+            
+            if success:
+                return filepath
+            else:
+                # Bubble up error via exception
+                raise RuntimeError(msg)
         except Exception as e:
             # Log full traceback to file
             import traceback

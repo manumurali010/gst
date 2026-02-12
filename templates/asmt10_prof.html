@@ -85,7 +85,8 @@
     </table>
     {% endmacro %}
 
-    <!-- Paginated Wrapper -->
+    <!-- Paginated Wrapper (UI Only) -->
+    {% if not for_pdf %}
     <div class="page-wrapper" id="asmt-preview-wrapper">
         <!-- JS will inject discrete .a4-page containers here -->
     </div>
@@ -225,6 +226,14 @@
 
         window.addEventListener('load', () => setTimeout(paginate, 150));
     </script>
+    {% else %}
+    <!-- Static PDF Rendering -->
+    <div class="a4-page-static">
+        <div class="doc-content">
+            {{ render_content() }}
+        </div>
+    </div>
+    {% endif %}
 </body>
 
 </html>

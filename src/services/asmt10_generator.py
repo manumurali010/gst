@@ -362,7 +362,7 @@ class ASMT10Generator:
         return html
 
     @staticmethod
-    def generate_html(data, issues, for_preview=True, show_letterhead=True, style_mode="legacy"):
+    def generate_html(data, issues, for_preview=True, show_letterhead=True, style_mode="legacy", for_pdf=False):
         """
         Generates the HTML content for ASMT-10 with specific layout and formatting.
         
@@ -372,6 +372,7 @@ class ASMT10Generator:
             for_preview (bool): Optimized for screen preview if True
             show_letterhead (bool): Whether to include letterhead image
             style_mode (str): "legacy" (Scrutiny Tab default) or "professional" (Adjudication Tab)
+            for_pdf (bool): If True, renders static content for WeasyPrint (No JS pagination)
         """
         from src.utils.config_manager import ConfigManager
         import re
@@ -529,7 +530,8 @@ class ASMT10Generator:
                 'total_tax_formatted': format_indian_number(total_tax, prefix_rs=False),
                 'reply_date': reply_date,
                 'letter_head': display_lh,
-                'show_letterhead': show_letterhead
+                'show_letterhead': show_letterhead,
+                'for_pdf': for_pdf
             }
             
             # Load Template and CSS

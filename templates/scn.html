@@ -34,7 +34,7 @@
         SHOW CAUSE NOTICE No. {{ scn_no }}/{{ current_financial_year }}/GST-{{ designation }}
     </div>
 
-    <div class="header">
+    <div class="header" style="text-align: center;">
         FORM GST DRC-01<br>
         [See rule 142(1)]<br>
         Show Cause Notice under section {{ section }}
@@ -179,10 +179,10 @@
         <tr>
             <td class="para-num">{{ para_amendment }}.</td>
             <td class="para-content">
-                <p class="legal-para">The Department reserves the right to add, amend, delete or modify any part or
-                    portion of this show cause notice, if considered necessary at any point of time before the case is
-                    adjudicated and such addition, amendment, deletion or modification shall be deemed to be part and
-                    parcel of this notice.</p>
+                The Department reserves the right to add, amend, delete or
+                modify any part or portion of this show cause notice, if considered necessary at any point of time
+                before the case is adjudicated and such addition, amendment, deletion or modification shall be
+                deemed to be part and parcel of this notice.
             </td>
         </tr>
     </table>
@@ -228,20 +228,22 @@
     <table class="para-table" style="margin: 20px 0;">
         <tr>
             <td style="border: none; width: 50%;"></td>
-            <td style="border: none; width: 50%; text-align: right; vertical-align: top;">
-                <p style="margin: 0; padding: 0;"><strong>{{ officer_name }}</strong></p>
-                <p style="margin: 0; padding: 0;"><strong>{{ designation }}</strong></p>
+            <td style="border: none; width: 50%; text-align: right; vertical-align: top; font-size: 11pt;">
+                <p style="margin: 0; padding: 0;">{{ officer_name }}</p>
+                <p style="margin: 0; padding: 0;">{{ designation }}</p>
             </td>
         </tr>
     </table>
 
     <div style="height: 15px;"></div>
 
-    <p>To,</p>
-    <p><strong>{{ legal_name }}, </strong></p>
-    <p><strong>{{ trade_name }}, </strong></p>
-    <p><strong>{{ gstin }}</strong></p>
-    <p><strong>{{ address }}</strong></p>
+    <div style="font-size: 11pt; font-weight: normal; line-height: 1.1; margin: 0;">
+        <p style="margin: 0;">To,</p>
+        <p style="margin: 0;">{{ legal_name }}, </p>
+        <p style="margin: 0;">{{ trade_name }}, </p>
+        <p style="margin: 0;">{{ gstin }}</p>
+        <p style="margin: 0;">{{ address }}</p>
+    </div>
 
     <div style="height: 15px;"></div>
 
@@ -259,7 +261,8 @@
     <div style="height: 15px;"></div>
     {% endmacro %}
 
-    <!-- ASMT-10 Style Page Container Pattern -->
+    <!-- ASMT-10 Style Page Container Pattern (UI Only) -->
+    {% if not for_pdf %}
     <div class="page-wrapper" id="scn-preview-wrapper">
         <!-- JS will inject discrete .a4-page containers here -->
     </div>
@@ -398,6 +401,14 @@
 
         window.addEventListener('load', () => setTimeout(paginate, 150));
     </script>
+    {% else %}
+    <!-- Static PDF Rendering -->
+    <div class="a4-page-static">
+        <div class="doc-content">
+            {{ render_content() }}
+        </div>
+    </div>
+    {% endif %}
 </body>
 
 </html>

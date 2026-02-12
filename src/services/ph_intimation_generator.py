@@ -9,12 +9,13 @@ class PHIntimationGenerator:
         self.env = Environment(loader=FileSystemLoader(self.template_dir))
         self.config = ConfigManager()
 
-    def generate_html(self, case_data, ph_entry, for_preview=False):
+    def generate_html(self, case_data, ph_entry, for_preview=False, for_pdf=False):
         """
         Generate PH Intimation HTML.
         :param case_data: Dict containing taxpayer and SCN metadata
         :param ph_entry: Dict containing specific PH date/time/venue
         :param for_preview: Boolean for Qt-specific styling
+        :param for_pdf: Boolean for WeasyPrint (static) rendering
         """
         try:
             template = self.env.get_template('ph_intimation.html')
@@ -61,6 +62,7 @@ class PHIntimationGenerator:
                 except Exception as e:
                     print(f"PH Generator: Letterhead failed: {e}")
 
+            model['for_pdf'] = for_pdf
             return template.render(**model)
 
         except Exception as e:

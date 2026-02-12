@@ -179,7 +179,8 @@ tr {
         display: block !important;
     }
 
-    .a4-page {
+    .a4-page,
+    .a4-page-static {
         box-shadow: none !important;
         margin: 0 !important;
         width: 100% !important;

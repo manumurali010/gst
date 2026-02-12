@@ -1,19 +1,41 @@
 import sqlite3
 import json
+import os
 
-db_path = 'C:/Users/manum/.gemini/antigravity/scratch/gst/data/adjudication.db'
-conn = sqlite3.connect(db_path)
-c = conn.cursor()
-c.execute("SELECT issue_json FROM issues_data WHERE issue_id = 'ITC_3B_2B_9X4'")
-row = c.fetchone()
-if row:
-    data = json.loads(row[0])
-    print(f"Issue ID: {data.get('issue_id')}")
-    print(f"Has grid_data: {'grid_data' in data}")
-    if 'grid_data' in data:
-        print(f"Grid Data Rows: {len(data['grid_data'])}")
-    print(f"Has SCN template: {'scn' in data.get('templates', {})}")
-    print(f"SCN Template snippet: {data.get('templates', {}).get('scn')[:50] if data.get('templates', {}).get('scn') else 'None'}")
-else:
-    print("Not found")
-conn.close()
+DB_PATH = r"data\adjudication.db"
+
+def inspect_proceedings():
+    if not os.path.exists(DB_PATH):
+        print(f"Database not found at {DB_PATH}")
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Get the most recent proceeding
+    try:
+        cursor.execute("SELECT id, taxpayer_details FROM proceedings ORDER BY id DESC LIMIT 1")
+        row = cursor.fetchone()
+        
+        if row:
+            print(f"Propceeding ID: {row[0]}")
+            tp_details = row[1]
+            print(f"Raw Taxpayer Details: {tp_details}")
+            
+            if tp_details:
+                try:
+                    tp = json.loads(tp_details)
+                    print(f"Parsed Taxpayer Details: {json.dumps(tp, indent=2)}")
+                    print(f"Constitution of Business: {tp.get('Constitution of Business', 'NOT FOUND')}")
+                except json.JSONDecodeError:
+                    print("Failed to parse taxpayer_details JSON")
+        else:
+            print("No proceedings found")
+            
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        conn.close()
+
+if __name__ == "__main__":
+    inspect_proceedings()

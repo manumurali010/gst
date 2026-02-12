@@ -941,10 +941,38 @@ class DatabaseManager:
                 elif act == 'IGST': igst_demand += tax
                 elif act == 'Cess': cess_demand += tax
             
-            formatted_total = f"{total_demand:,.2f}"
-            formatted_cgst = f"{cgst_demand:,.2f}"
-            formatted_sgst = f"{sgst_demand:,.2f}"
-            formatted_igst = f"{igst_demand:,.2f}"
+            def format_indian_currency(n):
+                try:
+                    d = float(n)
+                    is_negative = d < 0
+                    d = abs(d)
+                    s = "{:.2f}".format(d)
+                    parts = s.split('.')
+                    integer_part = parts[0]
+                    decimal_part = parts[1]
+                    
+                    if len(integer_part) > 3:
+                        last_three = integer_part[-3:]
+                        rest = integer_part[:-3]
+                        
+                        # Add commas to the rest (every 2 digits)
+                        formatted_rest = ""
+                        for i, digit in enumerate(reversed(rest)):
+                            if i > 0 and i % 2 == 0:
+                                formatted_rest = "," + formatted_rest
+                            formatted_rest = digit + formatted_rest
+                            
+                        integer_part = formatted_rest + "," + last_three
+                        
+                    formatted = integer_part + "." + decimal_part
+                    return f"-{formatted}" if is_negative else formatted
+                except:
+                    return str(n)
+
+            formatted_total = format_indian_currency(total_demand)
+            formatted_cgst = format_indian_currency(cgst_demand)
+            formatted_sgst = format_indian_currency(sgst_demand)
+            formatted_igst = format_indian_currency(igst_demand)
             amount_words = amount_to_words(total_demand)
                     # Construct Tax Cause (Clause i)
             # Use dynamic roman numeral passed in 'index' argument if possible, or just plain text lists
@@ -1191,7 +1219,7 @@ class DatabaseManager:
                 d[field] = {} if field in ['taxpayer_details', 'additional_details'] else []
 
     def update_proceeding(self, pid, data):
-        """Update proceeding details"""
+        """Update proceeding details (Smart: Handles Proceedings and Adjudication Cases)"""
         import json
         try:
             conn = self._get_conn()
@@ -1200,7 +1228,10 @@ class DatabaseManager:
             fields = []
             values = []
             
-            for k, v in data.items():
+            # Local copy to prevent mutation if we need to pass to failover
+            data_processed = data.copy()
+            
+            for k, v in data_processed.items():
                 if k in ['demand_details', 'selected_issues', 'taxpayer_details', 'additional_details']:
                     v = json.dumps(v)
                 fields.append(f"{k} = ?")
@@ -1208,12 +1239,27 @@ class DatabaseManager:
             
             values.append(pid)
             
+            # 1. Try updating PROCEEDINGS table
             query = f"UPDATE proceedings SET {', '.join(fields)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+            
+            # [DEBUG] Trace SQL Update
+            print(f"DB: update_proceeding (Primary) for {pid}")
+            
             cursor.execute(query, values)
+            rows_affected = cursor.rowcount
             
             conn.commit()
             conn.close()
-            return True
+            
+            if rows_affected > 0:
+                return True
+            
+            # 2. If 0 rows, Failover to ADJUDICATION_CASES
+            print(f"DB WARNING: update_proceeding modified 0 rows in proceedings! PID={pid}")
+            print(f"DB: Failing over to update_adjudication_case...")
+            
+            return self.update_adjudication_case(pid, data)
+
         except Exception as e:
             print(f"Error updating proceeding: {e}")
             return False

@@ -1,10 +1,9 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                              QListWidget, QStackedWidget, QSplitter, QScrollArea, QTextEdit, QTextBrowser,
-                             QMessageBox, QFrame, QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView, QDateEdit, QComboBox, QLineEdit, QFileDialog, QDialog, QGridLayout, QSpacerItem, QSizePolicy)
+                             QMessageBox, QFrame, QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView, QDateEdit, QComboBox, QLineEdit, QFileDialog, QDialog, QGridLayout, QSpacerItem, QSizePolicy, QGraphicsDropShadowEffect)
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
 from PyQt6 import QtCore
-from PyQt6.QtGui import QPixmap, QShortcut, QKeySequence, QIcon, QResizeEvent
-from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+from PyQt6.QtGui import QPixmap, QShortcut, QKeySequence, QIcon, QResizeEvent, QColor
 from src.database.db_manager import DatabaseManager
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from src.utils.preview_generator import PreviewGenerator
@@ -17,6 +16,7 @@ from src.ui.components.side_nav_card import SideNavCard # Canonical import
 from src.ui.components.finalization_panel import FinalizationPanel
 from src.services.asmt10_generator import ASMT10Generator
 from src.services.ph_intimation_generator import PHIntimationGenerator
+from src.ui.styles import Theme, Styles
 import os
 import json
 import copy
@@ -465,6 +465,47 @@ class ProceedingsWorkspace(QWidget):
         self.scn_workflow_phase = "METADATA"
         self.preview_initialized = False
 
+    def hydrate_proceeding_data(self):
+        """
+        Idempotently normalize self.proceeding_data['additional_details'].
+        Must handle str/dict/null and corrupted JSON safely.
+        """
+        raw = self.proceeding_data.get("additional_details")
+        parsed = {}
+
+        if isinstance(raw, str):
+            if not raw.strip():
+                parsed = {}
+            else:
+                try:
+                    import json
+                    parsed = json.loads(raw)
+                    # Handle potential double-serialization
+                    if isinstance(parsed, str):
+                        try:
+                            parsed = json.loads(parsed)
+                        except: pass
+                except (json.JSONDecodeError, TypeError):
+                    print(f"Warning: Failed to hydrate additional_details JSON. Falling back to {{}}.")
+                    parsed = {}
+        elif isinstance(raw, dict):
+            parsed = raw
+        else:
+            parsed = {}
+
+        # Type Enforcement & Normalization
+        if not isinstance(parsed.get("ph_entries"), list):
+            parsed["ph_entries"] = []
+
+        if not isinstance(parsed.get("scn_metadata"), dict):
+            parsed["scn_metadata"] = {}
+
+        if not isinstance(parsed.get("drc01a_metadata"), dict):
+            parsed["drc01a_metadata"] = {}
+
+        # Assign back atomically
+        self.proceeding_data["additional_details"] = parsed
+
     def load_proceeding(self, pid):
         # [FIX] State Persistence: Clear existing workspace first
         self._clear_scn_workspace_state()
@@ -480,9 +521,8 @@ class ProceedingsWorkspace(QWidget):
             pass # Clear preview logic removed
             return
 
-        # CRITICAL FIX: Robust JSON Deserialization
-        # Fixes legacy double-serialization issues by recursively parsing strings
-        self.proceeding_data['additional_details'] = self._ensure_dict(self.proceeding_data.get('additional_details'))
+        # [PHASE 15] Centralized Hydration
+        self.hydrate_proceeding_data()
         self.proceeding_data['taxpayer_details'] = self._ensure_dict(self.proceeding_data.get('taxpayer_details'))
         
 
@@ -507,14 +547,11 @@ class ProceedingsWorkspace(QWidget):
         # Restore Draft State (Issues, Amounts, etc.)
         self.restore_draft_state()
         
-        # Hydrate SCN Initialization Flag (Authoritative from DB)
+        # [PHASE 15] Hydrate SCN Initialization Flag from normalized details
         self.scn_issues_initialized = False
-        add_details = self.proceeding_data.get('additional_details', {})
-        if isinstance(add_details, str):
-            try: add_details = json.loads(add_details)
-            except: add_details = {}
-        
-        self.scn_issues_initialized = add_details.get('scn_issues_initialized', False)
+        details = self.proceeding_data.get('additional_details', {})
+        scn_meta = details.get('scn_metadata', {})
+        self.scn_issues_initialized = scn_meta.get('scn_issues_initialized') or details.get('scn_issues_initialized', False)
         print(f"ProceedingsWorkspace: SCN Hydration State = {self.scn_issues_initialized}")
 
         # Check for existing generated documents to toggle View Mode
@@ -1849,28 +1886,42 @@ class ProceedingsWorkspace(QWidget):
         print(f"SCN: Moved to Step {index+1}.")
 
     def create_ph_intimation_tab(self):
-        print("ProceedingsWorkspace: create_ph_intimation_tab start")
-        """Create Personal Hearing Intimation tab with structured form & preview"""
+        """Create Personal Hearing Intimation tab with neutral professional design"""
         main_widget = QWidget()
+        main_widget.setStyleSheet(f"background-color: {Theme.NEUTRAL_100};") # Screen Background
         main_layout = QVBoxLayout(main_widget)
-        main_layout.setContentsMargins(0,0,0,0)
+        main_layout.setContentsMargins(24, 24, 24, 24)
+        main_layout.setSpacing(24)
         
         # Splitter for Form (Left) and Preview (Right)
         self.ph_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.ph_splitter.setStyleSheet("QSplitter::handle { background: transparent; }")
         
         # --- LEFT PANE: FORM ---
         form_scroll = QScrollArea()
         form_scroll.setWidgetResizable(True)
+        form_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
         form_container = QWidget()
+        form_container.setStyleSheet("background: transparent;")
         form_layout = QVBoxLayout(form_container)
-        form_layout.setSpacing(15)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(16)
         
         # 1. Header & Entries List
         header_layout = QHBoxLayout()
-        header_label = QLabel("<b>Personal Hearing Intimations</b>")
-        header_label.setStyleSheet("font-size: 11pt;")
+        header_label = QLabel("Personal Hearing Intimations")
+        header_label.setStyleSheet(f"font-size: 11pt; font-weight: bold; color: {Theme.NEUTRAL_900};")
+        
         self.ph_add_btn = QPushButton("+ Add New Entry")
-        self.ph_add_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 5px 15px; font-weight: bold; border-radius: 4px;")
+        self.ph_add_btn.setFixedHeight(32)
+        self.ph_add_btn.setStyleSheet(f"""
+            QPushButton {{ 
+                background-color: {Theme.SUCCESS}; color: white; padding: 0 16px; 
+                font-weight: bold; border-radius: 6px; font-size: 13px;
+            }}
+            QPushButton:hover {{ background-color: {Theme.SUCCESS_HOVER}; }}
+        """)
         self.ph_add_btn.clicked.connect(self.add_new_ph_entry)
         
         header_layout.addWidget(header_label)
@@ -1881,51 +1932,106 @@ class ProceedingsWorkspace(QWidget):
         # List of Entries (Cards)
         self.ph_list_container = QWidget()
         self.ph_list_layout = QVBoxLayout(self.ph_list_container)
-        self.ph_list_layout.setContentsMargins(0,0,0,0)
+        self.ph_list_layout.setContentsMargins(0, 0, 0, 0)
+        self.ph_list_layout.setSpacing(12)
         form_layout.addWidget(self.ph_list_container)
         
-        # 2. Entry Editor (Form) - Hidden by default until "Add" or "Edit"
+        # 2. Entry Editor (Form) - Hidden by default
         self.ph_editor_card = QFrame()
-        self.ph_editor_card.setStyleSheet("background-color: #2c3e50; border-radius: 8px; border: 1px solid #34495e;")
+        self.ph_editor_card.setStyleSheet(f"""
+            QFrame {{ 
+                background-color: {Theme.SURFACE}; 
+                border-radius: 8px; 
+                border: 1px solid {Theme.NEUTRAL_200};
+            }}
+            QLabel {{ border: none; color: {Theme.NEUTRAL_500}; font-size: 13px; }}
+            QLineEdit, QDateEdit {{ 
+                height: 32px; 
+                border: 1px solid {Theme.NEUTRAL_200}; 
+                border-radius: 6px; 
+                padding: 0 8px;
+                background-color: white;
+            }}
+        """)
         self.ph_editor_card.setVisible(False)
-        editor_layout = QVBoxLayout(self.ph_editor_card)
         
-        editor_title = QLabel("<b>Edit PH Details</b>")
-        editor_title.setStyleSheet("color: #ecf0f1; font-size: 10pt; border: none;")
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(15)
+        shadow.setXOffset(0)
+        shadow.setYOffset(4)
+        shadow.setColor(QColor(0, 0, 0, 40))
+        self.ph_editor_card.setGraphicsEffect(shadow)
+
+        editor_layout = QVBoxLayout(self.ph_editor_card)
+        editor_layout.setContentsMargins(16, 16, 16, 16)
+        editor_layout.setSpacing(16)
+        
+        editor_title = QLabel("Edit PH Details")
+        editor_title.setStyleSheet(f"color: {Theme.NEUTRAL_900}; font-weight: bold; font-size: 14px; border: none;")
         editor_layout.addWidget(editor_title)
         
         grid = QGridLayout()
+        grid.setSpacing(12)
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(3, 1)
         
         # Row 1: OC Details
-        grid.addWidget(QLabel("<font color='white'>OC No:</font>"), 0, 0)
-        self.ph_edit_oc = QLineEdit()
-        grid.addWidget(self.ph_edit_oc, 0, 1)
+        grid.addWidget(QLabel("OC No:"), 0, 0)
         
-        grid.addWidget(QLabel("<font color='white'>OC Date:</font>"), 0, 2)
+        oc_no_layout = QHBoxLayout()
+        oc_no_layout.setSpacing(4)
+        
+        self.ph_edit_oc = QLineEdit()
+        oc_no_layout.addWidget(self.ph_edit_oc)
+        
+        self.ph_auto_oc_btn = QPushButton("Auto-Generate")
+        self.ph_auto_oc_btn.setFixedHeight(28)
+        self.ph_auto_oc_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ph_auto_oc_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f8fafc;
+                border: 1px solid #cbd5e1;
+                color: #475569;
+                padding: 0 8px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #f1f5f9;
+                border-color: #3498db;
+                color: #3498db;
+            }
+        """)
+        self.ph_auto_oc_btn.clicked.connect(self._on_ph_auto_generate_oc)
+        oc_no_layout.addWidget(self.ph_auto_oc_btn)
+        
+        grid.addLayout(oc_no_layout, 0, 1)
+        
+        grid.addWidget(QLabel("OC Date:"), 0, 2)
         self.ph_edit_oc_date = QDateEdit()
         self.ph_edit_oc_date.setCalendarPopup(True)
         self.ph_edit_oc_date.setDate(QDate.currentDate())
         grid.addWidget(self.ph_edit_oc_date, 0, 3)
         
         # Row 2: PH Details
-        grid.addWidget(QLabel("<font color='white'>PH Date:</font>"), 1, 0)
+        grid.addWidget(QLabel("PH Date:"), 1, 0)
         self.ph_edit_date = QDateEdit()
         self.ph_edit_date.setCalendarPopup(True)
         self.ph_edit_date.setDate(QDate.currentDate().addDays(7))
         grid.addWidget(self.ph_edit_date, 1, 1)
         
-        grid.addWidget(QLabel("<font color='white'>PH Time:</font>"), 1, 2)
+        grid.addWidget(QLabel("PH Time:"), 1, 2)
         self.ph_edit_time = QLineEdit("11:00 AM")
         grid.addWidget(self.ph_edit_time, 1, 3)
         
-        # Row 3: Venue & Copy To
-        grid.addWidget(QLabel("<font color='white'>Venue:</font>"), 2, 0)
+        # Row 3: Venue
+        grid.addWidget(QLabel("Venue:"), 2, 0)
         self.ph_edit_venue = QLineEdit("Paravur Range Office")
         grid.addWidget(self.ph_edit_venue, 2, 1, 1, 3)
         
-        grid.addWidget(QLabel("<font color='white'>Copy To:</font>"), 3, 0)
+        # Row 4: Copy To
+        grid.addWidget(QLabel("Copy To:"), 3, 0)
         self.ph_edit_copy_to = QLineEdit("The Assistant Commissioner, Central Tax, Paravur Division")
         grid.addWidget(self.ph_edit_copy_to, 3, 1, 1, 3)
         
@@ -1933,14 +2039,36 @@ class ProceedingsWorkspace(QWidget):
         
         # Editor Buttons
         editor_btn_layout = QHBoxLayout()
+        editor_btn_layout.setSpacing(12)
+        
         cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(32)
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet(f"color: {Theme.NEUTRAL_500}; background: transparent; border: none; font-weight: bold;")
         cancel_btn.clicked.connect(lambda: self.ph_editor_card.setVisible(False))
         
         save_entry_btn = QPushButton("Save Draft")
+        save_entry_btn.setFixedHeight(32)
+        save_entry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_entry_btn.setStyleSheet(f"""
+            QPushButton {{ 
+                background: transparent; border: 1px solid {Theme.NEUTRAL_200}; 
+                color: {Theme.NEUTRAL_900}; border-radius: 6px; padding: 0 16px; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: {Theme.NEUTRAL_100}; }}
+        """)
         save_entry_btn.clicked.connect(self.save_ph_entry)
         
         finalize_reg_btn = QPushButton("Finalize & Register")
-        finalize_reg_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 5px 15px; font-weight: bold;")
+        finalize_reg_btn.setFixedHeight(32)
+        finalize_reg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        finalize_reg_btn.setStyleSheet(f"""
+            QPushButton {{ 
+                background-color: {Theme.PRIMARY}; color: white; padding: 0 16px; 
+                font-weight: bold; border-radius: 6px;
+            }}
+            QPushButton:hover {{ background-color: {Theme.PRIMARY_HOVER}; }}
+        """)
         finalize_reg_btn.clicked.connect(self.register_ph_entry)
         
         editor_btn_layout.addStretch()
@@ -1953,46 +2081,86 @@ class ProceedingsWorkspace(QWidget):
         form_layout.addStretch()
         
         form_scroll.setWidget(form_container)
+        form_scroll.setMinimumWidth(450) # Fix side scroll for PH editor
         self.ph_splitter.addWidget(form_scroll)
         
         # --- RIGHT PANE: PREVIEW ---
         preview_container = QWidget()
-        preview_layout = QVBoxLayout(preview_container)
-        preview_layout.setContentsMargins(5,5,5,5)
+        preview_container.setStyleSheet("background: transparent;")
+        preview_v_layout = QVBoxLayout(preview_container)
+        preview_v_layout.setContentsMargins(0, 0, 0, 0)
+        preview_v_layout.setSpacing(0)
         
-        # Preview Toolbar
-        toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("<b>Live Preview</b>"))
-        toolbar.addStretch()
+        # Compact Preview Toolbar (Single Flex Row)
+        self.ph_preview_toolbar = QFrame()
+        self.ph_preview_toolbar.setFixedHeight(40)
+        self.ph_preview_toolbar.setStyleSheet(f"background: transparent; border: none;")
         
-        lh_cb = QCheckBox("Show Letterhead")
-        lh_cb.setChecked(True)
-        lh_cb.stateChanged.connect(self.render_ph_preview)
-        self.ph_show_lh = lh_cb
-        toolbar.addWidget(lh_cb)
+        toolbar_layout = QHBoxLayout(self.ph_preview_toolbar)
+        toolbar_layout.setContentsMargins(16, 8, 16, 8)
+        toolbar_layout.setSpacing(8)
         
-        pdf_btn = QPushButton("Generate PDF")
-        pdf_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 4px 10px;")
-        pdf_btn.clicked.connect(self.generate_ph_pdf)
-        toolbar.addWidget(pdf_btn)
+        live_preview_label = QLabel("Live Preview")
+        live_preview_label.setStyleSheet(f"font-weight: bold; color: {Theme.NEUTRAL_900}; font-size: 14px;")
+        toolbar_layout.addWidget(live_preview_label)
+        toolbar_layout.addStretch()
         
-        preview_layout.addLayout(toolbar)
+        # Toolbar Actions
+        self.ph_show_lh = QCheckBox("Show Letterhead")
+        self.ph_show_lh.setChecked(True)
+        self.ph_show_lh.stateChanged.connect(self.render_ph_preview)
+        self.ph_show_lh.setStyleSheet(f"font-size: 13px; color: {Theme.NEUTRAL_500};")
+        toolbar_layout.addWidget(self.ph_show_lh)
         
+        btn_style = f"""
+            QPushButton {{ 
+                background: transparent; border: 1px solid {Theme.NEUTRAL_200}; 
+                color: {Theme.NEUTRAL_900}; padding: 0 12px; border-radius: 6px; 
+                font-size: 13px; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: {Theme.NEUTRAL_100}; }}
+        """
+        
+        self.ph_refresh_btn = QPushButton("🔄 Refresh Preview")
+        self.ph_refresh_btn.setFixedHeight(32)
+        self.ph_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ph_refresh_btn.setStyleSheet(btn_style)
+        self.ph_refresh_btn.clicked.connect(self.render_ph_preview)
+        toolbar_layout.addWidget(self.ph_refresh_btn)
+        
+        self.ph_pdf_btn = QPushButton("👁 Draft PDF")
+        self.ph_pdf_btn.setFixedHeight(32)
+        self.ph_pdf_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ph_pdf_btn.setStyleSheet(btn_style)
+        self.ph_pdf_btn.clicked.connect(self.generate_ph_pdf)
+        toolbar_layout.addWidget(self.ph_pdf_btn)
+        
+        self.ph_docx_btn = QPushButton("📝 Draft DOCX")
+        self.ph_docx_btn.setFixedHeight(32)
+        self.ph_docx_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ph_docx_btn.setStyleSheet(btn_style)
+        self.ph_docx_btn.clicked.connect(self.generate_ph_docx)
+        toolbar_layout.addWidget(self.ph_docx_btn)
+        
+        preview_v_layout.addWidget(self.ph_preview_toolbar)
+        
+        # Restore Phase 8 direct browser placement (fixes hidden preview regression)
         self.ph_browser = QWebEngineView()
-        self.ph_browser.setStyleSheet("background: #f0f0f0; border: 1px solid #ccc;")
-        preview_layout.addWidget(self.ph_browser)
+        self.ph_browser.setStyleSheet(f"background-color: {Theme.NEUTRAL_100}; border: none;")
+        preview_v_layout.addWidget(self.ph_browser)
         
         self.ph_splitter.addWidget(preview_container)
         self.ph_splitter.setStretchFactor(0, 1)
         self.ph_splitter.setStretchFactor(1, 2)
         
         main_layout.addWidget(self.ph_splitter)
-        
-        print("ProceedingsWorkspace: create_ph_intimation_tab done")
         return main_widget
         
-        print("ProceedingsWorkspace: create_ph_intimation_tab done")
-        return main_scroll
+        
+        
+        
+        
+
 
     def create_order_tab(self):
         print("ProceedingsWorkspace: create_order_tab start")
@@ -3400,15 +3568,19 @@ class ProceedingsWorkspace(QWidget):
     def _persist_scn_init_flag(self):
         """Authoritative, minimal persistence for SCN initialization flag only. UI-only side effect."""
         try:
-            add_details = self.proceeding_data.get('additional_details', {})
-            if isinstance(add_details, str): add_details = json.loads(add_details)
-            add_details['scn_issues_initialized'] = True
+            # [PHASE 15] Safe Merge
+            details = copy.deepcopy(self.proceeding_data.get('additional_details', {}))
+            if 'scn_metadata' not in details: details['scn_metadata'] = {}
+            
+            details['scn_metadata']['scn_issues_initialized'] = True
+            # For backward compatibility during migration
+            details['scn_issues_initialized'] = True 
             
             # Persist to DB directly
-            # Fix: Pass dict directly to avoid double serialization (DB manager handles it)
             self.db.update_proceeding(self.proceeding_id, {
-                'additional_details': add_details
+                'additional_details': details
             })
+            self.proceeding_data['additional_details'] = details
             print(f"ProceedingsWorkspace: SCN initialization flag persisted for {self.proceeding_id}")
         except Exception as e:
             print(f"Error persisting SCN init flag: {e}")
@@ -3553,21 +3725,17 @@ class ProceedingsWorkspace(QWidget):
                     "scn_model_snapshot": self._get_scn_model() # Authoritative point-in-time snapshot
                 }
                 
-                # Update additional_details
-                current_details = self.proceeding_data.get('additional_details', {})
-                if isinstance(current_details, str):
-                    try: current_details = json.loads(current_details)
-                    except: current_details = {}
-                    
-                current_details.update(metadata)
+                # [PHASE 15] Safe Merge with deep copy
+                details = copy.deepcopy(self.proceeding_data.get('additional_details', {}))
+                details['scn_metadata'] = metadata
                 
                 self.db.update_proceeding(self.proceeding_id, {
                     "status": "SCN Draft",
-                    "additional_details": json.dumps(current_details)
+                    "additional_details": details
                 })
                 
                 # Update local data
-                self.proceeding_data['additional_details'] = current_details
+                self.proceeding_data['additional_details'] = details
                 
                 QMessageBox.information(self, "Success", "Show Cause Notice draft saved successfully!")
                 return True
@@ -3956,13 +4124,21 @@ class ProceedingsWorkspace(QWidget):
         model['issue_date'] = scn_date.toString("dd/MM/yyyy")
         model['year'] = scn_date.year()
         
-        # Financial Year
-        model['current_financial_year'] = model.get('financial_year', '') or ''
+        # Dynamic Financial Year (based on SCN Date)
+        # If Month >= 4 (April), FY is Year-(Year+1). Else (Year-1)-Year.
+        if scn_date.month() >= 4:
+            fy_start = scn_date.year()
+            fy_end = (scn_date.year() + 1) % 100
+        else:
+            fy_start = scn_date.year() - 1
+            fy_end = scn_date.year() % 100
+        model['current_financial_year'] = f"{fy_start}-{fy_end:02d}"
         
         # OC & SCN No
         model['oc_no'] = self.scn_oc_input.text() or "____"
         model['scn_no'] = self.scn_no_input.text() or "____"
         model['initiating_section'] = model.get('adjudication_section') or model.get('initiating_section', '') or "____"
+        model['section'] = model['initiating_section'] # Specific key for template
         
         # Taxpayer Details
         tp = model.get('taxpayer_details', {})
@@ -4053,11 +4229,56 @@ class ProceedingsWorkspace(QWidget):
         model['cgst_total_val'] = cgst_total
         model['sgst_total_val'] = sgst_total
         
-        # Formatted totals
-        model['total_amount'] = f"{total_tax:,.2f}"
-        model['igst_total'] = f"{igst_total:,.2f}"
-        model['cgst_total'] = f"{cgst_total:,.2f}"
-        model['sgst_total'] = f"{sgst_total:,.2f}"
+        # Helper: Indian Currency Format (Hardened)
+        def format_indian_currency(value):
+            if value is None: return "0"
+            try:
+                val = float(value)
+            except (ValueError, TypeError):
+                return str(value)
+            
+            is_negative = val < 0
+            val = abs(val)
+            
+            # Format to 2 decimals first to handle rounding
+            s_val = f"{val:.2f}"
+            
+            # Extract integer and decimal parts
+            if "." in s_val:
+                integer_part, decimal_part = s_val.split(".")
+            else:
+                integer_part, decimal_part = s_val, "00"
+            
+            # Drop decimal if zero
+            if decimal_part == "00":
+                decimal_suffix = ""
+            else:
+                decimal_suffix = "." + decimal_part
+                
+            # Apply commas to integer part
+            if len(integer_part) > 3:
+                last3 = integer_part[-3:]
+                rest = integer_part[:-3]
+                # split rest into chunks of 2 from right
+                parts = []
+                while len(rest) > 2:
+                    parts.insert(0, rest[-2:])
+                    rest = rest[:-2]
+                parts.insert(0, rest)
+                formatted_int = ",".join(parts) + "," + last3
+            else:
+                formatted_int = integer_part
+                
+            result = formatted_int + decimal_suffix
+            if is_negative:
+                result = "-" + result
+            return result
+
+        # Formatted totals using Indian Format
+        model['total_amount'] = format_indian_currency(total_tax)
+        model['igst_total'] = format_indian_currency(igst_total)
+        model['cgst_total'] = format_indian_currency(cgst_total)
+        model['sgst_total'] = format_indian_currency(sgst_total)
 
         # 3. Dynamic Paragraph Numbering
         # Intro=Para 1, Jurisdiction=Para 2, Issues start at Para 3
@@ -4094,7 +4315,7 @@ class ProceedingsWorkspace(QWidget):
         model['tax_table_html'] = self.generate_tax_table_html()
 
         return model
-    def render_scn(self, is_preview=False):
+    def render_scn(self, is_preview=False, for_pdf=False):
         """Render SCN HTML using Jinja2 template"""
         model = self._get_scn_model()
         if not model:
@@ -4227,6 +4448,7 @@ class ProceedingsWorkspace(QWidget):
             env = Environment(loader=FileSystemLoader(template_dir))
             template = env.get_template('scn.html')
             
+            model['for_pdf'] = for_pdf
             return template.render(**model)
             
         except Exception as e:
@@ -4269,23 +4491,19 @@ class ProceedingsWorkspace(QWidget):
         metadata['tax_period_from'] = period_from_list[0] if period_from_list else ""
         metadata['tax_period_to'] = period_to_list[-1] if period_to_list else ""
         
-        # Update DB
-        current_details = self.proceeding_data.get('additional_details', {})
-        if isinstance(current_details, str):
-            try: current_details = json.loads(current_details)
-            except: current_details = {}
-            
-        current_details.update(metadata)
+        # [PHASE 15] Safe Merge
+        details = copy.deepcopy(self.proceeding_data.get('additional_details', {}))
+        details['drc01a_metadata'] = metadata
         
         self.db.update_proceeding(self.proceeding_id, {
             "initiating_section": metadata['initiating_section'],
             "last_date_to_reply": metadata['reply_date'],
-            "additional_details": json.dumps(current_details)
+            "additional_details": details
         })
         
         # Update local data
         self.proceeding_data.update(metadata)
-        self.proceeding_data['additional_details'] = current_details
+        self.proceeding_data['additional_details'] = details
 
     def save_drc01a(self):
         """Save DRC-01A Draft"""
@@ -4415,7 +4633,7 @@ class ProceedingsWorkspace(QWidget):
                         generator = ASMT10Generator()
                         full_data = case_info.copy()
                         full_data['taxpayer_details'] = taxpayer
-                        html_content = generator.generate_html(full_data, issues)
+                        html_content = generator.generate_html(full_data, issues, for_pdf=True)
                         filename_prefix = f"ASMT-10_{case_id}"
                         default_filename = f"{filename_prefix}.pdf"
                         doc_type = "ASMT-10"
@@ -4429,7 +4647,7 @@ class ProceedingsWorkspace(QWidget):
                 if self.is_scn_phase1():
                     QMessageBox.warning(self, "Locked", "SCN PDF generation is locked during Phase-1.")
                     return
-                html_content = self.render_scn()
+                html_content = self.render_scn(for_pdf=True)
                 case_id = self.proceeding_data.get('case_issue_id', 'DRAFT').replace('/', '_')
                 default_filename = f"SCN_{case_id}.pdf"
                 doc_type = "Show Cause Notice"
@@ -4447,57 +4665,62 @@ class ProceedingsWorkspace(QWidget):
             if file_path:
                 # Generate PDF using the correct method
                 import shutil
+                import os
                 from src.utils.document_generator import DocumentGenerator
                 
-                # Extract just the filename without extension
+                # [ULTRA-SAFE] UI Mitigation
+                from PyQt6.QtWidgets import QApplication
+                QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+                
                 filename_only = os.path.splitext(os.path.basename(file_path))[0]
-                
                 doc_gen = DocumentGenerator()
-                generated_path = doc_gen.generate_pdf_from_html(html_content, filename_only)
-                
-                if generated_path and os.path.exists(generated_path):
-                    # Move the file to user-selected location
-                    try:
+                try:
+                    generated_path = doc_gen.generate_pdf_from_html(html_content, filename_only)
+                    
+                    if generated_path and os.path.exists(generated_path):
+                        # Move the file to user-selected location
                         shutil.move(generated_path, file_path)
                         
-                        # 2. Auto-Register in OC Register -> REMOVED to prevent phantom entries on preview/draft
-                        # oc_data = {
-                        #     'OC_Number': oc_no if current_index == 1 else self.scn_oc_input.text(),
-                        #     'OC_Content': doc_type,
-                        #     'OC_Date': self.oc_date_input.date().toString("yyyy-MM-dd"), # DB format
-                        #     'OC_To': self.proceeding_data.get('legal_name', '')
-                        # }
-                        # self.db.add_oc_entry(self.proceeding_data.get('case_id'), oc_data)
-                        pass # No implicit register write
-                        
-                        # 3. Save Document Record to DB (for View Mode)
+                        # 3. Save Document Record to DB
                         doc_data = {
                             'proceeding_id': self.proceeding_data.get('id'),
                             'doc_type': doc_type,
                             'content_html': html_content,
-                            'template_id': None, # Could link to template if needed
+                            'template_id': None,
                             'template_version': 1,
                             'version_no': 1,
                             'is_final': 1,
-                            'snapshot_path': file_path # Using PDF path as snapshot for now
+                            'snapshot_path': file_path
                         }
                         self.db.save_document(doc_data)
                         
-                        QMessageBox.information(self, "Success", f"PDF generated and OC Registered successfully!\n\nSaved to: {file_path}")
+                        QMessageBox.information(self, "Success", f"PDF generated and Registered successfully!\n\nSaved to: {file_path}")
+                    else:
+                        raise RuntimeError("File generation failed without error message.")
                         
-                        # Open the file
-                        try:
-                            os.startfile(file_path)
-                        except Exception as e:
-                            print(f"Could not open file: {e}")
+                except Exception as e:
+                    err_str = str(e)
+                    if "MISSING_DEPENDENCY" in err_str:
+                        msg = ("PDF Generation Unavailable.\n\n"
+                               "The system is missing required rendering libraries (GTK3).\n"
+                               "Please install the dependencies or use 'Draft Word' instead.")
+                        QMessageBox.critical(self, "Dependency Error", msg)
+                    elif "TIMEOUT" in err_str:
+                        QMessageBox.warning(self, "Timeout", "PDF generation took too long (20s limit) and was cancelled for safety.")
+                    else:
+                        QMessageBox.critical(self, "Error", f"Failed to generate {doc_type} PDF: {err_str}")
+                finally:
+                    QApplication.restoreOverrideCursor()
+                
+                # Open the file if it exists and was successfully moved
+                if os.path.exists(file_path):
+                    try:
+                        os.startfile(file_path)
                     except Exception as e:
-                        QMessageBox.warning(self, "Error", f"PDF was generated but could not be moved to selected location.\n\nGenerated at: {generated_path}\nError: {str(e)}")
-                else:
-                    QMessageBox.warning(self, "Error", "Failed to generate PDF. Check console for errors.")
-                    
+                        print(f"Could not open file: {e}")
+                        
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Error generating PDF: {str(e)}")
-            print(f"PDF Generation Error: {e}")
+            QMessageBox.critical(self, "Error", f"Error during export: {str(e)}")
             import traceback
             traceback.print_exc()
 
@@ -4826,6 +5049,10 @@ class ProceedingsWorkspace(QWidget):
             self.scn_oc_input.setToolTip("Auto-generated value. You can still edit manually.")
         self._auto_generating_oc = False
 
+    def _on_ph_auto_generate_oc(self):
+        """Helper for PH Auto-Generate OC utility"""
+        self.suggest_next_oc(self.ph_edit_oc)
+        
     def _on_scn_oc_changed(self):
         """Handle OC text changes for SCN"""
         if not getattr(self, '_auto_generating_oc', False):
@@ -4921,42 +5148,53 @@ class ProceedingsWorkspace(QWidget):
 
         # --- BLOCK 2: Metadata Restoration (Foundational, Low Risk) ---
         try:
-            add_details = self.proceeding_data.get('additional_details', {})
-            if add_details:
-                if 'oc_number' in add_details: 
-                    self.oc_number_input.setText(add_details['oc_number'])
-                if 'oc_date' in add_details: 
-                    self.oc_date_input.setDate(QDate.fromString(add_details['oc_date'], "yyyy-MM-dd"))
-                if 'reply_date' in add_details: 
-                    self.reply_date.setDate(QDate.fromString(add_details['reply_date'], "yyyy-MM-dd"))
+            # [PHASE 15] additional_details is already normalized by hydrate_proceeding_data
+            details = self.proceeding_data.get('additional_details', {})
+            
+            if details:
+                # 1. DRC-01A Metadata (with legacy fallback)
+                drc_meta = details.get('drc01a_metadata', {})
+                oc_num = drc_meta.get('oc_number') or details.get('oc_number')
+                oc_dte = drc_meta.get('oc_date') or details.get('oc_date')
+                rply_dte = drc_meta.get('reply_date') or details.get('reply_date')
                 
-                # SCN Metadata (Step 1 ONLY in Phase-1)
-                # Safeguard: Block signals during restoration to prevent unintended autosaves
+                if oc_num: self.oc_number_input.setText(oc_num)
+                if oc_dte: self.oc_date_input.setDate(QDate.fromString(oc_dte, "yyyy-MM-dd"))
+                if rply_dte: self.reply_date.setDate(QDate.fromString(rply_dte, "yyyy-MM-dd"))
+                
+                # SCN Metadata (with legacy fallback)
+                scn_meta = details.get('scn_metadata', {})
+                scn_num = scn_meta.get('scn_number') or details.get('scn_number')
+                scn_oc = scn_meta.get('scn_oc_number') or details.get('scn_oc_number')
+                scn_dte = scn_meta.get('scn_date') or details.get('scn_date')
+                
+                # Safeguard: Block signals during restoration
                 self.scn_no_input.blockSignals(True)
                 self.scn_oc_input.blockSignals(True)
                 self.scn_date_input.blockSignals(True)
                 
-                if 'scn_number' in add_details: self.scn_no_input.setText(add_details['scn_number'])
-                if 'scn_oc_number' in add_details: self.scn_oc_input.setText(add_details['scn_oc_number'])
-                if 'scn_date' in add_details: self.scn_date_input.setDate(QDate.fromString(add_details['scn_date'], "yyyy-MM-dd"))
+                if scn_num: self.scn_no_input.setText(scn_num)
+                if scn_oc: self.scn_oc_input.setText(scn_oc)
+                if scn_dte: self.scn_date_input.setDate(QDate.fromString(scn_dte, "yyyy-MM-dd"))
                 
                 self.scn_no_input.blockSignals(False)
                 self.scn_oc_input.blockSignals(False)
                 self.scn_date_input.blockSignals(False)
                 
                 # PH Intimation Restoration
-                if 'ph_entries' in add_details:
-                    self.ph_entries = add_details['ph_entries']
-                    self.refresh_ph_list()
-                    if self.ph_entries:
-                        self.render_ph_preview()
+                self.ph_entries = details.get('ph_entries', [])
+                self.refresh_ph_list()
+                if self.ph_entries:
+                    self.render_ph_preview()
                 
-                # Phase-2/3 Restoration: BLOCKED during Phase-1
+                # Phase-2/3 Restoration (Reliance/Copy-To)
                 if not self.is_scn_phase1():
-                    if 'reliance_documents' in add_details: self.reliance_editor.setHtml(add_details['reliance_documents'])
-                    if 'copy_submitted_to' in add_details: self.copy_to_editor.setHtml(add_details['copy_submitted_to'])
+                    rel_docs = scn_meta.get('reliance_documents') or details.get('reliance_documents')
+                    copy_to = scn_meta.get('copy_submitted_to') or details.get('copy_submitted_to')
+                    if rel_docs: self.reliance_editor.setHtml(rel_docs)
+                    if copy_to: self.copy_to_editor.setHtml(copy_to)
                 else:
-                    print("ProceedingsWorkspace: Phase-1 Active. Skipping Phase-2/3 Restoration (Reliance/Copy-To).")
+                    print("ProceedingsWorkspace: Phase-1 Active. Skipping Phase-2/3 Restoration.")
 
         except Exception as e:
              print(f"SCN Metadata restore failed: {e}")
@@ -5026,13 +5264,15 @@ class ProceedingsWorkspace(QWidget):
         """Save form data into ph_entries list and persist"""
         entry = {
             "oc_no": self.ph_edit_oc.text(),
-            "issue_date": self.ph_edit_oc_date.date().toString("yyyy-MM-dd"),
-            "ph_date": self.ph_edit_date.date().toString("yyyy-MM-dd"),
+            "issue_date": self.ph_edit_oc_date.date().toString("dd/MM/yyyy"),
+            "ph_date": self.ph_edit_date.date().toString("dd/MM/yyyy"),
             "ph_time": self.ph_edit_time.text(),
             "venue": self.ph_edit_venue.text(),
             "copy_to": self.ph_edit_copy_to.text(),
             "show_letterhead": self.ph_show_lh.isChecked()
         }
+        
+        print(f"DEBUG: save_ph_entry captured: {entry}")
         
         if self.ph_editing_index == -1:
             self.ph_entries.append(entry)
@@ -5068,8 +5308,8 @@ class ProceedingsWorkspace(QWidget):
             # 2. Mark entry as registered
             entry = {
                 "oc_no": oc_no,
-                "issue_date": self.ph_edit_oc_date.date().toString("yyyy-MM-dd"),
-                "ph_date": self.ph_edit_date.date().toString("yyyy-MM-dd"),
+                "issue_date": self.ph_edit_oc_date.date().toString("dd/MM/yyyy"),
+                "ph_date": self.ph_edit_date.date().toString("dd/MM/yyyy"),
                 "ph_time": self.ph_edit_time.text(),
                 "venue": self.ph_edit_venue.text(),
                 "copy_to": self.ph_edit_copy_to.text(),
@@ -5095,8 +5335,7 @@ class ProceedingsWorkspace(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to register PH: {e}")
 
     def refresh_ph_list(self):
-        """Rebuild the list of PH entry cards"""
-        # Clear existing
+        """Rebuild the list of PH entry cards with modern neutralized style"""
         while self.ph_list_layout.count():
             item = self.ph_list_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
@@ -5106,72 +5345,137 @@ class ProceedingsWorkspace(QWidget):
         for idx, entry in enumerate(self.ph_entries):
             card = QFrame()
             is_reg = entry.get('is_registered', False)
-            color = "#f9f9f9" if is_reg else "white"
-            card.setStyleSheet(f"background-color: {color}; border-radius: 6px; border: 1px solid #ddd; margin-bottom: 5px;")
-            l = QHBoxLayout(card)
+            card.setStyleSheet(f"""
+                QFrame {{ 
+                    background-color: {Theme.SURFACE}; 
+                    border-radius: 8px; 
+                    border: 1px solid {Theme.NEUTRAL_200};
+                }}
+            """)
             
-            reg_status = " [REGISTERED]" if is_reg else " [DRAFT]"
-            info = QLabel(f"<b>PH {idx+1}:</b> {entry['ph_date']} @ {entry['ph_time']}<br><small>OC: {entry['oc_no']}{reg_status}</small>")
-            l.addWidget(info)
+            l = QHBoxLayout(card)
+            l.setContentsMargins(12, 12, 12, 12)
+            
+            # Info Section
+            info_layout = QVBoxLayout()
+            info_layout.setSpacing(4)
+            
+            title = QLabel(f"PH {idx+1}: {entry['ph_date']} @ {entry['ph_time']}")
+            title.setStyleSheet(f"font-weight: bold; color: {Theme.NEUTRAL_900}; font-size: 14px; border: none;")
+            
+            status_row = QHBoxLayout()
+            status_row.setSpacing(8)
+            
+            badge_text = "REGISTERED" if is_reg else "DRAFT"
+            badge_bg = Theme.SUCCESS if is_reg else Theme.NEUTRAL_100
+            badge_color = "white" if is_reg else Theme.NEUTRAL_500
+            
+            badge = QLabel(badge_text)
+            badge.setStyleSheet(f"""
+                padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: bold;
+                background-color: {badge_bg}; color: {badge_color}; border: none;
+            """)
+            
+            oc_info = QLabel(f"OC: {entry['oc_no']}")
+            oc_info.setStyleSheet(f"color: {Theme.NEUTRAL_500}; font-size: 12px; border: none;")
+            
+            status_row.addWidget(badge)
+            status_row.addWidget(oc_info)
+            status_row.addStretch()
+            
+            info_layout.addWidget(title)
+            info_layout.addLayout(status_row)
+            l.addLayout(info_layout)
             l.addStretch()
             
+            # Actions
             edit_btn = QPushButton("View" if (is_scn_fin or is_reg) else "Edit")
-            edit_btn.setFixedWidth(60)
+            edit_btn.setFixedHeight(32)
+            edit_btn.setFixedWidth(80)
+            edit_btn.setStyleSheet(f"""
+                QPushButton {{ 
+                    background: transparent; border: 1px solid {Theme.NEUTRAL_200}; 
+                    color: {Theme.NEUTRAL_900}; border-radius: 6px; font-weight: bold;
+                }}
+                QPushButton:hover {{ background-color: {Theme.NEUTRAL_100}; }}
+            """)
             edit_btn.clicked.connect(lambda _, i=idx: self.edit_ph_entry(i))
             l.addWidget(edit_btn)
             
             del_btn = QPushButton("Delete")
-            del_btn.setFixedWidth(60)
-            del_btn.setStyleSheet("color: #e74c3c;")
+            del_btn.setFixedHeight(32)
+            del_btn.setFixedWidth(80)
+            del_btn.setStyleSheet(f"""
+                QPushButton {{ 
+                    background: transparent; border: none; 
+                    color: {Theme.DANGER}; font-weight: bold;
+                }}
+                QPushButton:hover {{ color: {Theme.DANGER_HOVER}; }}
+            """)
             del_btn.clicked.connect(lambda _, i=idx: self.delete_ph_entry(i))
-            # Disallow deletion after SCN finalization OR if registered
             if is_scn_fin or is_reg: del_btn.setEnabled(False)
             l.addWidget(del_btn)
             
             self.ph_list_layout.addWidget(card)
         
-        # Disable "Add" button if 3 entries exist OR SCN is finalized
-        if len(self.ph_entries) >= 3 or is_scn_fin:
-            self.ph_add_btn.setEnabled(False)
-            self.ph_add_btn.setToolTip("Maximum entries reached or Case Finalized")
-        else:
-            self.ph_add_btn.setEnabled(True)
+        self.ph_add_btn.setEnabled(not (len(self.ph_entries) >= 3 or is_scn_fin))
 
     def edit_ph_entry(self, index):
         """Load entry into form for editing"""
-        entry = self.ph_entries[index]
-        self.ph_editing_index = index
-        is_reg = entry.get('is_registered', False)
-        is_scn_fin = self.is_scn_finalized()
-        
-        self.ph_edit_oc.setText(entry['oc_no'])
-        self.ph_edit_oc_date.setDate(QDate.fromString(entry['issue_date'], "yyyy-MM-dd"))
-        self.ph_edit_date.setDate(QDate.fromString(entry['ph_date'], "yyyy-MM-dd"))
-        self.ph_edit_time.setText(entry['ph_time'])
-        self.ph_edit_venue.setText(entry['venue'])
-        self.ph_edit_copy_to.setText(entry['copy_to'])
-        
-        # Lock fields if registered or SCN finalized
-        locked = is_reg or is_scn_fin
-        self.ph_edit_oc.setReadOnly(locked)
-        self.ph_edit_oc_date.setReadOnly(locked)
-        self.ph_edit_date.setReadOnly(locked)
-        self.ph_edit_time.setReadOnly(locked)
-        self.ph_edit_venue.setReadOnly(locked)
-        self.ph_edit_copy_to.setReadOnly(locked)
-        
-        # Find buttons in editor card layout and toggle
-        for i in range(self.ph_editor_card.layout().count()):
-            item = self.ph_editor_card.layout().itemAt(i)
-            if isinstance(item.layout(), QHBoxLayout):
-                # This is the button layout
-                for j in range(item.layout().count()):
-                    w = item.layout().itemAt(j).widget()
-                    if isinstance(w, QPushButton) and w.text() != "Cancel":
-                        w.setEnabled(not locked)
-        
-        self.ph_editor_card.setVisible(True)
-        self.render_ph_preview()
+        try:
+            entry = self.ph_entries[index]
+            self.ph_editing_index = index
+            is_reg = entry.get('is_registered', False)
+            is_scn_fin = self.is_scn_finalized()
+            
+            print(f"DEBUG: Editing PH Entry {index}: {entry}")
+
+            # Safe Get with Defaults
+            self.ph_edit_oc.setText(entry.get('oc_no', ''))
+            
+            # Handle Dates (Robust parsing)
+            i_date = entry.get('issue_date', '')
+            p_date = entry.get('ph_date', '')
+            
+            if i_date: self.ph_edit_oc_date.setDate(QDate.fromString(i_date, "dd/MM/yyyy"))
+            else: self.ph_edit_oc_date.setDate(QDate.currentDate())
+                
+            if p_date: self.ph_edit_date.setDate(QDate.fromString(p_date, "dd/MM/yyyy"))
+            else: self.ph_edit_date.setDate(QDate.currentDate())
+                
+            self.ph_edit_time.setText(entry.get('ph_time', ''))
+            self.ph_edit_venue.setText(entry.get('venue', ''))
+            self.ph_edit_copy_to.setText(entry.get('copy_to', ''))
+            
+            # Restore Checkbox (Missing in previous version)
+            self.ph_show_lh.setChecked(entry.get('show_letterhead', False))
+            
+            # Lock fields if registered or SCN finalized
+            locked = is_reg or is_scn_fin
+            self.ph_edit_oc.setReadOnly(locked)
+            self.ph_edit_oc_date.setReadOnly(locked)
+            self.ph_edit_date.setReadOnly(locked)
+            self.ph_edit_time.setReadOnly(locked)
+            self.ph_edit_venue.setReadOnly(locked)
+            self.ph_edit_copy_to.setReadOnly(locked)
+            self.ph_show_lh.setEnabled(not locked)
+            
+            # Find buttons in editor card layout and toggle
+            for i in range(self.ph_editor_card.layout().count()):
+                item = self.ph_editor_card.layout().itemAt(i)
+                # Both grid layout and horizontal button layout need button locking
+                if isinstance(item.layout(), QHBoxLayout):
+                    for j in range(item.layout().count()):
+                        w = item.layout().itemAt(j).widget()
+                        if isinstance(w, QPushButton) and w.text() != "Cancel":
+                            w.setEnabled(not locked)
+            
+            self.ph_editor_card.setVisible(True)
+            self.render_ph_preview()
+        except Exception as e:
+            print(f"Error loading PH entry for edit: {e}")
+            traceback.print_exc()
+            QMessageBox.warning(self, "Error", "Failed to load entry details.")
 
     def delete_ph_entry(self, index):
         """Remove a PH entry"""
@@ -5185,15 +5489,28 @@ class ProceedingsWorkspace(QWidget):
             if self.ph_browser: self.ph_browser.setHtml("<h3>Select or Add a PH Entry to Preview</h3>")
 
     def render_ph_preview(self):
-        """Render the highlighted/active PH entry into WebEngine"""
+        """Render the highlighted/active PH entry into WebEngine with high-fidelity A4 simulation"""
         if not self.ph_entries:
-            self.ph_browser.setHtml("<h3>No PH Intimation Data</h3>")
+            self.ph_browser.setHtml("<div style='background: #f1f3f4; height: 100vh; display: flex; align-items: center; justify-content: center; font-family: sans-serif; color: #7f8c8d;'><h3>Select or Add a PH Entry to Preview</h3></div>")
             return
             
         # Preview the current entry being edited OR the last one
         idx = self.ph_editing_index if self.ph_editing_index != -1 else (len(self.ph_entries) - 1)
-        entry = self.ph_entries[idx]
+        entry = self.ph_entries[idx].copy()
         
+        # Reactive State: Override entry data with current form values for live preview
+        entry['show_letterhead'] = self.ph_show_lh.isChecked()
+        
+        if self.ph_editor_card.isVisible():
+            entry.update({
+                "oc_no": self.ph_edit_oc.text(),
+                "issue_date": self.ph_edit_oc_date.date().toString("dd/MM/yyyy"),
+                "ph_date": self.ph_edit_date.date().toString("dd/MM/yyyy"),
+                "ph_time": self.ph_edit_time.text(),
+                "venue": self.ph_edit_venue.text(),
+                "copy_to": self.ph_edit_copy_to.text()
+            })
+            
         # Gather case data
         case_data = {
             'gstin': self.proceeding_data.get('gstin', ''),
@@ -5207,18 +5524,28 @@ class ProceedingsWorkspace(QWidget):
         self.ph_browser.setHtml(html)
 
     def save_ph_data(self):
-        """Persist ph_entries to additional_details"""
-        current_details = self.proceeding_data.get('additional_details', {})
-        if isinstance(current_details, str):
-            try: current_details = json.loads(current_details)
-            except: current_details = {}
+        """Persist ph_entries to additional_details using safe merge"""
+        try:
+            details = copy.deepcopy(self.proceeding_data.get('additional_details', {}))
+            details['ph_entries'] = self.ph_entries
             
-        current_details['ph_entries'] = self.ph_entries
-        
-        self.db.update_proceeding(self.proceeding_id, {
-            "additional_details": json.dumps(current_details)
-        })
-        self.proceeding_data['additional_details'] = current_details
+            # [DEBUG]
+            print(f"DEBUG: save_ph_data [Pre-DB] Entries Count: {len(self.ph_entries)}")
+            print(f"DEBUG: save_ph_data [Pre-DB] Dumping details... (Keys: {list(details.keys())})")
+            
+            success = self.db.update_proceeding(self.proceeding_id, {
+                "additional_details": details
+            })
+            
+            if success:
+                print("DEBUG: save_ph_data [DB Update Success]")
+                self.proceeding_data['additional_details'] = details
+            else:
+                print("DEBUG: save_ph_data [DB Update FAILED]")
+                
+        except Exception as e:
+            print(f"DEBUG: save_ph_data CRITICAL FAILURE: {e}")
+            traceback.print_exc()
 
     def generate_ph_pdf(self):
         """Finalize and Generate PDF for active PH entry"""
@@ -5235,7 +5562,7 @@ class ProceedingsWorkspace(QWidget):
             'scn_date': self.scn_date_input.date().toString("dd/MM/yyyy")
         }
         
-        html = self.ph_generator.generate_html(case_data, entry, for_preview=False)
+        html = self.ph_generator.generate_html(case_data, entry, for_preview=False, for_pdf=True)
         
         safe_oc = "".join([c for c in entry['oc_no'] if c.isalnum() or c in ('-','_')])
         default_filename = f"PH_Intimation_{safe_oc}.pdf"
@@ -5245,15 +5572,133 @@ class ProceedingsWorkspace(QWidget):
             from src.utils.document_generator import DocumentGenerator
             import shutil
             import os
+            from PyQt6.QtWidgets import QApplication
             
             filename_only = os.path.splitext(os.path.basename(file_path))[0]
             doc_gen = DocumentGenerator()
-            generated_path = doc_gen.generate_pdf_from_html(html, filename_only)
             
-            if generated_path and os.path.exists(generated_path):
-                shutil.move(generated_path, file_path)
-                QMessageBox.information(self, "Success", f"PH Intimation PDF saved to: {file_path}")
-                os.startfile(file_path)
+            # [ULTRA-SAFE] UI Mitigation
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            # Disable triggering button if we had a direct reference, 
+            # but since this is a general handler we rely on the modal wait cursor.
+            
+            try:
+                generated_path = doc_gen.generate_pdf_from_html(html, filename_only)
+                
+                if generated_path and os.path.exists(generated_path):
+                    shutil.move(generated_path, file_path)
+                    QMessageBox.information(self, "Success", f"PH Intimation PDF saved to: {file_path}")
+                    os.startfile(file_path)
+                else:
+                    raise RuntimeError("File generation failed without error message.")
+                    
+            except Exception as e:
+                err_str = str(e)
+                if "MISSING_DEPENDENCY" in err_str:
+                    msg = ("PDF Generation Unavailable.\n\n"
+                           "The system is missing required rendering libraries (GTK3).\n"
+                           "Please install the dependencies or use 'Draft DOCX' instead.")
+                    QMessageBox.critical(self, "Dependency Error", msg)
+                elif "TIMEOUT" in err_str:
+                    QMessageBox.warning(self, "Timeout", "PDF generation took too long (20s limit) and was cancelled for safety.")
+                else:
+                    QMessageBox.critical(self, "Error", f"Failed to generate PDF: {err_str}")
+            finally:
+                QApplication.restoreOverrideCursor()
+
+    def generate_ph_docx(self):
+        """Generate DOCX Document for the active PH Intimation entry"""
+        if not self.ph_entries: return
+        
+        idx = self.ph_editing_index if self.ph_editing_index != -1 else (len(self.ph_entries) - 1)
+        entry = self.ph_entries[idx]
+        
+        # Build filename
+        safe_oc = "".join([c for c in entry['oc_no'] if c.isalnum() or c in ('-','_')])
+        default_filename = f"PH_Intimation_{safe_oc}.docx"
+        
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save PH Intimation DOCX", default_filename, "Word Documents (*.docx)")
+        if not file_path: return
+        
+        try:
+            from docx import Document
+            from docx.shared import Pt, Inches
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            
+            doc = Document()
+            
+            # Margins
+            for section in doc.sections:
+                section.top_margin = Inches(0.8)
+                section.bottom_margin = Inches(0.8)
+                section.left_margin = Inches(1)
+                section.right_margin = Inches(1)
+                
+            # Header Info
+            p = doc.add_paragraph()
+            p.add_run(f"O.C. No. {entry['oc_no']}").bold = True
+            tab_run = p.add_run("\t\t\t\t\t") # Basic spacing simulation
+            p.add_run(f"Date: {entry['issue_date']}").bold = True
+            
+            doc.add_paragraph()
+            
+            # To Address
+            doc.add_paragraph("To,")
+            p = doc.add_paragraph()
+            p.add_run(self.proceeding_data.get('legal_name', '')).bold = True
+            doc.add_paragraph(f"GSTIN: {self.proceeding_data.get('gstin', '')}")
+            doc.add_paragraph(self.proceeding_data.get('address', ''))
+            
+            doc.add_paragraph()
+            doc.add_paragraph("Gentlemen/Sir/Madam,")
+            doc.add_paragraph()
+            
+            # Subject
+            p = doc.add_paragraph()
+            p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            run = p.add_run("Subject: Intimation of Personal Hearing – reg")
+            run.bold = True
+            
+            doc.add_paragraph()
+            
+            # Reference
+            p = doc.add_paragraph()
+            p.add_run("References: ").bold = True
+            p.add_run(f"1. SCN reference number: {self.scn_no_input.text()} dated {self.scn_date_input.date().toString('dd/MM/yyyy')}")
+            
+            doc.add_paragraph()
+            
+            # Paragraphs
+            p1 = doc.add_paragraph("1. Please refer to the above mentioned SCN number issued by Office of the Superintendent Paravur Range.")
+            p1.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            
+            p2 = doc.add_paragraph(f"2. In this connection, it is to inform you that personal hearing in this case will be held at {entry['ph_time']} on {entry.get('ph_date', '')} before the Superintendent of Central Tax, Paravur Range Office.")
+            p2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            
+            p3 = doc.add_paragraph("3. You may therefore appear in person or through an authorized representative for the personal hearing on the above mentioned date and time as per your convenience, at the above mentioned address, without fail along with records/documents/evidences you wish to rely upon in support of your case.")
+            p3.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+            
+            doc.add_paragraph()
+            doc.add_paragraph()
+            
+            # Signature
+            sig = doc.add_paragraph()
+            sig.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            sig.add_run("VISHNU V\nSuperintendent").bold = True
+            
+            doc.add_paragraph()
+            
+            # Copy To
+            doc.add_paragraph("Copy submitted to:").bold = True
+            doc.add_paragraph(f"1. {entry['copy_to']}")
+            
+            doc.save(file_path)
+            QMessageBox.information(self, "Success", f"Word document saved to: {file_path}")
+            os.startfile(file_path)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to generate Word document: {e}")
+            traceback.print_exc()
 
     def confirm_order_finalization(self):
         """Finalize Order and Register OC"""
