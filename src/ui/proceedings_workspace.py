@@ -506,6 +506,67 @@ class ProceedingsWorkspace(QWidget):
         # Assign back atomically
         self.proceeding_data["additional_details"] = parsed
 
+    def hydrate_scn_grounds_data(self):
+        """
+        Ensure SCN grounds data exists and handle migration/defaults. (Safe Method)
+        Strategy:
+        - If 'scn_grounds' missing -> Initialize default (Manual Override ON for safety).
+        - Try to populate ASMT-10 details from snapshot if available.
+        - Updates self.proceeding_data in-place (memory only).
+        """
+        try:
+            import json
+            details = self.proceeding_data.get('additional_details', {})
+            if not details: details = {}
+            # details is already dict due to hydrate_proceeding_data, but be safe
+            if isinstance(details, str): return 
+
+            grounds = details.get('scn_grounds')
+            
+            # Initialize if missing (Legacy or New Case)
+            if not grounds:
+                print("SCN Grounds: Hydrating default structure.")
+                
+                # Fetch ASMT-10 Snapshot
+                asmt_snap = self.proceeding_data.get('asmt10_snapshot')
+                # Handle double-serialization or ensure_dict logic if needed
+                if asmt_snap and isinstance(asmt_snap, str):
+                    try: asmt_snap = json.loads(asmt_snap)
+                    except: asmt_snap = {}
+                elif not asmt_snap:
+                    asmt_snap = {}
+
+                # Create Structure
+                grounds = {
+                    "version": 1,
+                    "type": "scrutiny", # Future: derive from proceeding_data.get('origin')
+                    "manual_override": True, # Default to Manual for safety
+                    "manual_text": "",
+                    "data": {
+                        "financial_year": self.proceeding_data.get('financial_year', '-'),
+                        "docs_verified": ["GSTR-1", "GSTR-3B", "GSTR-2A"], # Standard Defaults
+                        "asmt10_ref": {
+                            "oc_no": asmt_snap.get('oc_number', ''),
+                            "date": asmt_snap.get('issue_date', ''),
+                            "officer_designation": "Proper Officer", # Placeholder
+                            "office_address": ""
+                        },
+                        "reply_ref": {
+                            "received": False, 
+                            "date": None
+                        }
+                    }
+                }
+                
+                details['scn_grounds'] = grounds
+                # Update main dict (pointer check)
+                self.proceeding_data['additional_details'] = details
+                
+        except Exception as e:
+            print(f"Error hydrating SCN grounds: {e}")
+            import traceback
+            traceback.print_exc()
+
     def load_proceeding(self, pid):
         # [FIX] State Persistence: Clear existing workspace first
         self._clear_scn_workspace_state()
@@ -523,6 +584,14 @@ class ProceedingsWorkspace(QWidget):
 
         # [PHASE 15] Centralized Hydration
         self.hydrate_proceeding_data()
+        self.hydrate_scn_grounds_data() # [NEW] Hydrate SCN Grounds
+        
+        # [NEW] Bind Data to Grounds Form if UI is ready
+        if hasattr(self, 'scn_grounds_form'):
+            details = self.proceeding_data.get('additional_details', {})
+            grounds_data = details.get('scn_grounds')
+            self.scn_grounds_form.set_data(grounds_data)
+            
         self.proceeding_data['taxpayer_details'] = self._ensure_dict(self.proceeding_data.get('taxpayer_details'))
         
 
@@ -1542,6 +1611,18 @@ class ProceedingsWorkspace(QWidget):
         grid.addWidget(date_label, 3, 0)
         grid.addWidget(self.scn_date_input, 3, 1, 1, 2)
         
+        # [NEW] Grounds Configuration Module
+        # Separator
+        sep_grounds = QFrame()
+        sep_grounds.setFrameShape(QFrame.Shape.HLine)
+        sep_grounds.setStyleSheet("color: #e0e0e0; margin-top: 10px; margin-bottom: 10px;")
+        grid.addWidget(sep_grounds, 4, 0, 1, 3)
+        
+        # Instantiate Form
+        from src.ui.components.grounds_forms import get_grounds_form
+        self.scn_grounds_form = get_grounds_form("scrutiny")
+        grid.addWidget(self.scn_grounds_form, 5, 0, 1, 3)
+        
         self.ref_card.addWidget(grid_widget)
         self.ref_card.content_layout.addStretch()
         
@@ -1766,6 +1847,11 @@ class ProceedingsWorkspace(QWidget):
             oc_no = self.scn_oc_input.text().strip()
             scn_date = self.scn_date_input.date().toString("yyyy-MM-dd")
             
+            # [NEW] Extract and Validate Grounds Data
+            grounds_data = None
+            if hasattr(self, 'scn_grounds_form'):
+                grounds_data = self.scn_grounds_form.get_data()
+            
             # 2. Update additional_details without touching other sections
             current_details = self.proceeding_data.get('additional_details', {})
             if isinstance(current_details, str):
@@ -1777,6 +1863,9 @@ class ProceedingsWorkspace(QWidget):
                 "scn_oc_number": oc_no,
                 "scn_date": scn_date
             })
+            
+            if grounds_data:
+                current_details['scn_grounds'] = grounds_data
             
             # 3. Persist to DB (Routed Logic)
             if self.proceeding_data.get('is_adjudication'):
@@ -4301,6 +4390,22 @@ class ProceedingsWorkspace(QWidget):
         model['copy_submitted_to'] = [line for line in copy_text.split('\n') if line.strip()]
         
         model['show_letterhead'] = self.show_letterhead_cb.isChecked()
+        
+        # [NEW] Introductory Narrative (Grounds)
+        try:
+            from src.utils.scn_generator import generate_intro_narrative
+            details = self.proceeding_data.get('additional_details', {})
+            # Ensure details is dict
+            if isinstance(details, str):
+                import json
+                try: details = json.loads(details)
+                except: details = {}
+                
+            grounds_data = details.get('scn_grounds')
+            model['intro_narrative'] = generate_intro_narrative(grounds_data)
+        except Exception as e:
+            print(f"Narrative Gen Error: {e}")
+            model['intro_narrative'] = "<b>[ERROR GENERATING INTRODUCTORY NARRATIVE]</b>"
         
         # Demand Text (Loaded from Tiles)
         if hasattr(self, 'demand_tiles') and self.demand_tiles:
