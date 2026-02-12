@@ -180,7 +180,10 @@ class ScrutinyGroundsForm(GroundsConfigurator):
         # Restore manual text cache
         self._cached_manual_text = payload.get("manual_text", "")
         if self._cached_manual_text:
+            # Block signals to prevent redundant cache sync loop
+            self.manual_editor.blockSignals(True)
             self.manual_editor.setPlainText(self._cached_manual_text)
+            self.manual_editor.blockSignals(False)
             
         # 2. Structured Data
         data = payload.get("data", {})
@@ -235,6 +238,13 @@ class ScrutinyGroundsForm(GroundsConfigurator):
              errors.append("Officer Designation is required.")
              
         return errors
+
+    def _sync_manual_text_cache(self):
+        """
+        Syncs manual editor content to internal cache.
+        Must NOT write to DB directly.
+        """
+        self._cached_manual_text = self.manual_editor.toPlainText()
 
     def _on_override_toggled(self, checked):
         """
