@@ -527,14 +527,24 @@ class ProceedingsWorkspace(QWidget):
             if not grounds:
                 print("SCN Grounds: Hydrating default structure.")
                 
-                # Fetch ASMT-10 Snapshot
-                asmt_snap = self.proceeding_data.get('asmt10_snapshot')
-                # Handle double-serialization or ensure_dict logic if needed
-                if asmt_snap and isinstance(asmt_snap, str):
-                    try: asmt_snap = json.loads(asmt_snap)
-                    except: asmt_snap = {}
-                elif not asmt_snap:
-                    asmt_snap = {}
+                # --- 1. Documents Verified Snapshot (First Draft Only) ---
+                # Fetch file paths from additional_details
+                file_paths = details.get('file_paths', {})
+                doc_list = []
+                
+                # Helper to map keys to readable names
+                # Logic: If key exists, add label.
+                if 'tax_liability_yearly' in file_paths: doc_list.append("Tax Liability Excel")
+                if any(k.startswith('gstr3b') for k in file_paths): doc_list.append("GSTR-3B")
+                if any(k.startswith('gstr1') for k in file_paths): doc_list.append("GSTR-1")
+                if any(k.startswith('gstr2a') for k in file_paths): doc_list.append("GSTR-2A")
+                if any(k.startswith('gstr2b') for k in file_paths): doc_list.append("GSTR-2B")
+                if any(k.startswith('gstr9') for k in file_paths): doc_list.append("GSTR-9")
+                if any(k.startswith('gstr9c') for k in file_paths): doc_list.append("GSTR-9C")
+                
+                # Fallback default if no files
+                if not doc_list:
+                    doc_list = ["GSTR-1", "GSTR-3B", "GSTR-2A"]
 
                 # Create Structure
                 grounds = {
@@ -544,10 +554,10 @@ class ProceedingsWorkspace(QWidget):
                     "manual_text": "",
                     "data": {
                         "financial_year": self.proceeding_data.get('financial_year', '-'),
-                        "docs_verified": ["GSTR-1", "GSTR-3B", "GSTR-2A"], # Standard Defaults
+                        "docs_verified": doc_list, 
                         "asmt10_ref": {
-                            "oc_no": asmt_snap.get('oc_number', ''),
-                            "date": asmt_snap.get('issue_date', ''),
+                            "oc_no": "", # Will be overlaid by UI/Gen (Generation-Time Linkage)
+                            "date": "",  # Will be overlaid by UI/Gen
                             "officer_designation": "Proper Officer", # Placeholder
                             "office_address": ""
                         },
@@ -590,7 +600,27 @@ class ProceedingsWorkspace(QWidget):
         if hasattr(self, 'scn_grounds_form'):
             details = self.proceeding_data.get('additional_details', {})
             grounds_data = details.get('scn_grounds')
-            self.scn_grounds_form.set_data(grounds_data)
+            
+            # [PHASE 18] UI Overlay (Generation-Time Linkage)
+            # Deep copy to avoid mutating stored JSON in memory
+            import copy
+            if grounds_data:
+                ui_view = copy.deepcopy(grounds_data)
+                # Overlay Authoritative Identifiers
+                if 'data' in ui_view:
+                    if 'asmt10_ref' not in ui_view['data']:
+                        ui_view['data']['asmt10_ref'] = {}
+                    
+                    # Fetch authoritative IDs
+                    auth_oc = self.proceeding_data.get('oc_number', '')
+                    auth_date = self.proceeding_data.get('notice_date', '')
+                    
+                    ui_view['data']['asmt10_ref']['oc_no'] = auth_oc
+                    ui_view['data']['asmt10_ref']['date'] = auth_date
+                    
+                self.scn_grounds_form.set_data(ui_view)
+            else:
+                 self.scn_grounds_form.set_data(None)
             
         self.proceeding_data['taxpayer_details'] = self._ensure_dict(self.proceeding_data.get('taxpayer_details'))
         
@@ -4402,7 +4432,29 @@ class ProceedingsWorkspace(QWidget):
                 except: details = {}
                 
             grounds_data = details.get('scn_grounds')
-            model['intro_narrative'] = generate_intro_narrative(grounds_data)
+            
+            # [PHASE 18] Generation-Time Linkage (Strict Overlay)
+            # Ensure SCN always cites the authoritative ASMT-10 Ref from Case Data
+            import copy
+            if grounds_data:
+                # 1. Deepcopy to prevent mutation of stored JSON
+                gen_view = copy.deepcopy(grounds_data)
+                
+                # 2. Overlay Authoritative Identifiers
+                auth_oc = self.proceeding_data.get('oc_number', '')
+                auth_date = self.proceeding_data.get('notice_date', '')
+                
+                if 'data' in gen_view:
+                    if 'asmt10_ref' not in gen_view['data']:
+                        gen_view['data']['asmt10_ref'] = {}
+                        
+                    gen_view['data']['asmt10_ref']['oc_no'] = auth_oc
+                    gen_view['data']['asmt10_ref']['date'] = auth_date
+                
+                # 3. Generate Narrative with guaranteed correct IDs
+                model['intro_narrative'] = generate_intro_narrative(gen_view)
+            else:
+                model['intro_narrative'] = ""
         except Exception as e:
             print(f"Narrative Gen Error: {e}")
             model['intro_narrative'] = "<b>[ERROR GENERATING INTRODUCTORY NARRATIVE]</b>"
