@@ -523,24 +523,26 @@ class ProceedingsWorkspace(QWidget):
 
             grounds = details.get('scn_grounds')
             
+            # --- PHASE 20/21: RECOVERY LOGIC for Blanched Cases ---
+            # If grounds exists BUT it has the 'Stale Default' list while files are now available,
+            # we should re-calculate to recover from the Metadata Blanching bug.
+            
+            def _get_current_file_doc_list(details_dict):
+                f_paths = details_dict.get('file_paths', {})
+                d_list = []
+                if 'tax_liability_yearly' in f_paths: d_list.append("Tax Liability Excel")
+                if any(k.startswith('gstr3b') for k in f_paths): d_list.append("GSTR-3B")
+                if any(k.startswith('gstr1') for k in f_paths): d_list.append("GSTR-1")
+                if any(k.startswith('gstr2a') for k in f_paths): d_list.append("GSTR-2A")
+                if any(k.startswith('gstr2b') for k in f_paths): d_list.append("GSTR-2B")
+                if any(k.startswith('gstr9') for k in f_paths): d_list.append("GSTR-9")
+                if any(k.startswith('gstr9c') for k in f_paths): d_list.append("GSTR-9C")
+                return d_list
+
             # Initialize if missing (Legacy or New Case)
             if not grounds:
                 print("SCN Grounds: Hydrating default structure.")
-                
-                # --- 1. Documents Verified Snapshot (First Draft Only) ---
-                # Fetch file paths from additional_details
-                file_paths = details.get('file_paths', {})
-                doc_list = []
-                
-                # Helper to map keys to readable names
-                # Logic: If key exists, add label.
-                if 'tax_liability_yearly' in file_paths: doc_list.append("Tax Liability Excel")
-                if any(k.startswith('gstr3b') for k in file_paths): doc_list.append("GSTR-3B")
-                if any(k.startswith('gstr1') for k in file_paths): doc_list.append("GSTR-1")
-                if any(k.startswith('gstr2a') for k in file_paths): doc_list.append("GSTR-2A")
-                if any(k.startswith('gstr2b') for k in file_paths): doc_list.append("GSTR-2B")
-                if any(k.startswith('gstr9') for k in file_paths): doc_list.append("GSTR-9")
-                if any(k.startswith('gstr9c') for k in file_paths): doc_list.append("GSTR-9C")
+                doc_list = _get_current_file_doc_list(details)
                 
                 # Fallback default if no files
                 if not doc_list:
@@ -549,28 +551,40 @@ class ProceedingsWorkspace(QWidget):
                 # Create Structure
                 grounds = {
                     "version": 1,
-                    "type": "scrutiny", # Future: derive from proceeding_data.get('origin')
-                    "manual_override": True, # Default to Manual for safety
+                    "type": "scrutiny",
+                    "manual_override": True,
                     "manual_text": "",
                     "data": {
                         "financial_year": self.proceeding_data.get('financial_year', '-'),
                         "docs_verified": doc_list, 
                         "asmt10_ref": {
-                            "oc_no": "", # Will be overlaid by UI/Gen (Generation-Time Linkage)
-                            "date": "",  # Will be overlaid by UI/Gen
-                            "officer_designation": "Proper Officer", # Placeholder
+                            "oc_no": "", 
+                            "date": "",
+                            "officer_designation": "Proper Officer",
                             "office_address": ""
                         },
                         "reply_ref": {
-                            "received": False, 
+                            "received": False,
                             "date": None
                         }
                     }
                 }
-                
                 details['scn_grounds'] = grounds
-                # Update main dict (pointer check)
                 self.proceeding_data['additional_details'] = details
+            else:
+                # [RECOVERY] Check if it's a blanched draft
+                current_docs = grounds.get('data', {}).get('docs_verified', [])
+                STALE_DEFAULT = ["GSTR-1", "GSTR-3B", "GSTR-2A"]
+                
+                if current_docs == STALE_DEFAULT:
+                    fresh_list = _get_current_file_doc_list(details)
+                    # If we found more files now (due to Deep Merge Fix), update!
+                    if fresh_list and fresh_list != STALE_DEFAULT:
+                        print("SCN Grounds: Recovering blanched doc list.")
+                        grounds['data']['docs_verified'] = fresh_list
+                        # Update the pointer just in case
+                        details['scn_grounds'] = grounds
+                        self.proceeding_data['additional_details'] = details
                 
         except Exception as e:
             print(f"Error hydrating SCN grounds: {e}")

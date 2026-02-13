@@ -1166,10 +1166,41 @@ class DatabaseManager:
                         source_data = dict(source_row)
                         self._parse_proceeding_json_fields(source_data)
                         
+                        # [PHASE 20] Ensure adj_data is also parsed before deep-merge
+                        self._parse_proceeding_json_fields(adj_data)
+                        
                         # Merge Data: Adjudication overrides Scrutiny
-                        # We want the ID to be the Adjudication ID for workspace context
+                        # [FIX - PHASE 20] Deep Merge additional_details to prevent "Metadata Blanching"
+                        
                         final_data = source_data.copy()
+                        
+                        def _ensure_dict(val):
+                            if not val: return {}
+                            if isinstance(val, dict): return val
+                            if isinstance(val, str):
+                                try:
+                                    parsed = json.loads(val)
+                                    if isinstance(parsed, str): # Handle double-serialization
+                                        parsed = json.loads(parsed)
+                                    return parsed if isinstance(parsed, dict) else {}
+                                except: return {}
+                            return {}
+
+                        # Store original Scrutiny and Adjudication details
+                        src_details = _ensure_dict(source_data.get('additional_details'))
+                        adj_details = _ensure_dict(adj_data.get('additional_details'))
+                        
+                        # Combine Adjudication data overall
                         final_data.update(adj_data)
+                        
+                        # Specialized Re-Merging for JSON sub-dictionaries
+                        from copy import deepcopy
+                        merged_details = deepcopy(src_details) if src_details else {}
+                        if isinstance(adj_details, dict) and adj_details:
+                            merged_details.update(adj_details)
+                        
+                        final_data['additional_details'] = merged_details
+                        
                         final_data['id'] = pid # Ensure ID is Adjudication ID
                         final_data['scrutiny_id'] = source_id # Keep ref
                         final_data['is_adjudication'] = True

@@ -63,7 +63,7 @@ class ScrutinyGroundsForm(GroundsConfigurator):
         # B. Documents Verified
         self.input_docs = QLineEdit()
         self.input_docs.setPlaceholderText("e.g. GSTR-1, GSTR-3B, GSTR-2A")
-        self.input_docs.setText("GSTR-1, GSTR-3B, GSTR-2A") # Default
+        self.input_docs.setToolTip("Auto-filled from case uploads. Edit manually if required.")
         config_layout.addWidget(QLabel("Documents Verified:"))
         config_layout.addWidget(self.input_docs)
         
@@ -74,8 +74,13 @@ class ScrutinyGroundsForm(GroundsConfigurator):
         
         self.input_asmt_oc = QLineEdit()
         self.input_asmt_oc.setPlaceholderText("OC No.")
+        self.input_asmt_oc.setReadOnly(True) 
+        self.input_asmt_oc.setStyleSheet("background-color: #f8f9fa; color: #495057; border: 1px solid #ced4da;")
+        
         self.input_asmt_date = QDateEdit()
         self.input_asmt_date.setCalendarPopup(True)
+        self.input_asmt_date.setReadOnly(True)
+        self.input_asmt_date.setStyleSheet("background-color: #f8f9fa; color: #495057; border: 1px solid #ced4da;")
         self.input_asmt_date.setDate(QDate.currentDate())
         
         self.input_officer_desg = QLineEdit()

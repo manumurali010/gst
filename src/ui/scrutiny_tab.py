@@ -1748,8 +1748,10 @@ class ScrutinyTab(QWidget):
         }
         
         if new_state not in valid_map.get(current, []):
+             self.log_event("ERROR", f"ILLEGAL STATE TRANSITION: {current} -> {new_state}")
              raise RuntimeError(f"ILLEGAL STATE TRANSITION: {current} -> {new_state}")
                  
+        self.log_event("INFO", f"STATE TRANSITION SUCCESS: {current} -> {new_state}")
         self.case_state = new_state
 
     def derive_case_state(self, proc):
@@ -2723,6 +2725,12 @@ class ScrutinyTab(QWidget):
         if has_primary or has_gstr9:
             self.analyze_btn.setEnabled(True)
             
+        # [FIX - PHASE 22] Proactive Transition to READY
+        # This ensures lifecycle consistency after successful upload
+        if getattr(self, 'case_state', 'INIT') == 'INIT':
+            self.log_event("INFO", "UPLOAD SUCCESS: Triggering Transition INIT -> READY")
+            self._transition_case_state('READY')
+            
         # PERSIST: File paths mutated
         self._persist_additional_details()
 
@@ -2849,7 +2857,12 @@ class ScrutinyTab(QWidget):
                 # PERSIST: Immediate State Consistency for Analysis Completion
                 self._persist_additional_details()
                 
-                # STATE TRANSITION
+                # STATE TRANSITION 
+                # [FIX - PHASE 22] Auto-Recovery for blanched INIT state
+                if getattr(self, 'case_state', 'INIT') == 'INIT':
+                    self.log_event("WARN", "RECOVERY: State was INIT during analysis. Forcing READY first.")
+                    self._transition_case_state("READY")
+
                 self._transition_case_state("ANALYZED")
                 
                 # INVARIANT ASSERTION
