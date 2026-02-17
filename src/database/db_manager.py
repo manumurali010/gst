@@ -1039,7 +1039,69 @@ class DatabaseManager:
         self.db_file = DB_FILE
         if not DatabaseManager._initialized:
             init_db()
+            
+            # [MIGRATION] Schema Update for Scrutiny Dashboard (Strategic Refactor)
+            # Ensure 'description' column exists in issues_master
+            try:
+                conn = sqlite3.connect(self.db_file)
+                cursor = conn.cursor()
+                cursor.execute("PRAGMA table_info(issues_master)")
+                columns = [info[1] for info in cursor.fetchall()]
+                
+                if "description" not in columns:
+                    print("[MIGRATION] Adding 'description' column to issues_master...")
+                    cursor.execute("ALTER TABLE issues_master ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+                    conn.commit()
+                    print("[MIGRATION] Success. 'description' column added.")
+                conn.close()
+            except Exception as e:
+                print(f"[CRITICAL] Schema Migration Failed: {e}")
+                # We enforce a hard crash if schema is invalid to prevent silent data corruption
+                raise RuntimeError(f"Database Schema Migration Failed: {e}")
+
             DatabaseManager._initialized = True
+
+    def get_dashboard_catalog(self):
+        """
+        [REPOSITORY PATTERN] Content Catalog for Scrutiny Dashboard.
+        Single Source of Truth: issues_master
+        Strict Validation: Fails loudly if content is missing.
+        """
+        try:
+            conn = self._get_conn()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # [STRICT ORDERING] Enforce SOP sequence
+            cursor.execute("""
+                SELECT issue_id, issue_name, description, sop_point 
+                FROM issues_master 
+                WHERE active = 1 
+                ORDER BY sop_point ASC
+            """)
+            rows = cursor.fetchall()
+            conn.close()
+            
+            result = []
+            for row in rows:
+                item = dict(row)
+                
+                # [VALIDATION] Fail Loudly on Empty Description
+                desc = item.get("description")
+                if not desc or not str(desc).strip():
+                    raise RuntimeError(f"Data Integrity Violation: Issue '{item['issue_id']}' has missing/empty description.")
+                
+                result.append(item)
+                
+            if not result:
+                raise RuntimeError("Dashboard Catalog is empty! Database may need seeding.")
+                
+            return result
+            
+        except Exception as e:
+            print(f"[CRITICAL] Failed to load Dashboard Catalog: {e}")
+            raise e
+
 
     # ---------------- SQLite Methods for New Architecture ----------------
 

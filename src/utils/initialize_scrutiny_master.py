@@ -354,29 +354,29 @@ def get_grid_schema_sop9_sec16_4():
     return {"columns": columns, "rows": rows, "row_policy": "dynamic"}
 
 issues = [
-    {"issue_id": "LIABILITY_3B_R1", "issue_name": "Outward Liability Mismatch (GSTR 3B vs GSTR 1)", "sop_point": 1, "grid_data": get_grid_schema_sop1(), 
+    {"issue_id": "LIABILITY_3B_R1", "issue_name": "Tax Liability Mismatch (GSTR-1 vs GSTR-3B)", "description": "Comparison of Table 3.1(a)/(b) of GSTR-3B against Tables 4, 5, 6, 7, 9, 10 & 11 of GSTR-1.", "sop_point": 1, "grid_data": get_grid_schema_sop1(), 
      "table_definition": get_strict_table_def_point_1(), "analysis_type": "auto", "sop_version": "CBIC_SCRUTINY_SOP_2024.1", "applicable_from_fy": "2017-18",
      "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
-    {"issue_id": "RCM_LIABILITY_ITC", "issue_name": "RCM Liability mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 2, "grid_data": get_grid_schema_summary_3x4(["Description", "IGST", "CGST", "SGST", "Cess"]),
+    {"issue_id": "RCM_LIABILITY_ITC", "issue_name": "RCM (3.1(d) vs 4(A)(2) & 4(A)(3) of GSTR-3B)", "description": "Inward supplies liable to reverse charge (RCM) vs ITC & Cash Ledger payments.", "sop_point": 2, "grid_data": get_grid_schema_summary_3x4(["Description", "IGST", "CGST", "SGST", "Cess"]),
      "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
-    {"issue_id": "ISD_CREDIT_MISMATCH", "issue_name": "ISD Credit mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 3, "grid_data": get_grid_schema_sop3(),
+    {"issue_id": "ISD_CREDIT_MISMATCH", "issue_name": "ISD Credit (GSTR-3B vs GSTR-2B)", "description": "ITC from Input Service Distributors (ISD) in Table 4(A)(4) vs GSTR-2B.", "sop_point": 3, "grid_data": get_grid_schema_sop3(),
      "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
-    {"issue_id": "ITC_3B_2B_OTHER", "issue_name": "All Other ITC Mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 4, "grid_data": get_grid_schema_sop4(),
+    {"issue_id": "ITC_3B_2B_OTHER", "issue_name": "GSTR-3B vs GSTR-2B (excess availment i.r.o \"All other ITC\")", "description": "ITC auto-drafted vs claimed for inward supplies from registered persons (Forward Charge).", "sop_point": 4, "grid_data": get_grid_schema_sop4(),
      "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
-    {"issue_id": "TDS_TCS_MISMATCH", "issue_name": "TDS/TCS Credit mismatch (GSTR 3B vs GSTR 2B)", "sop_point": 5, "grid_data": get_grid_schema_sop5(),
+    {"issue_id": "TDS_TCS_MISMATCH", "issue_name": "TDS/TCS (GSTR-3B vs GSTR-2A)", "description": "Liability in Table 3.1(a) vs Taxable values on which TDS/TCS was deducted.", "sop_point": 5, "grid_data": get_grid_schema_sop5(),
      "liability_config": {"model": "multiple_rows", "row_indices": [4, 10], "column_heads": ["Amount"]}},
-    {"issue_id": "EWAY_BILL_MISMATCH", "issue_name": "E-Waybill Comparison (GSTR 3B vs E-Waybill)", "sop_point": 6, "grid_data": []},
-    {"issue_id": "CANCELLED_SUPPLIERS", "issue_name": "ITC from Cancelled Suppliers", "sop_point": 7, "grid_data": get_grid_schema_sop7_cancelled(),
+    {"issue_id": "EWAY_BILL_MISMATCH", "issue_name": "E-Waybill Comparison (GSTR 3B vs E-Waybill)", "description": "Liability declared in GSTR-3B vs Tax Liability generated in E-Way Bills (EWB Summary).", "sop_point": 6, "grid_data": []},
+    {"issue_id": "CANCELLED_SUPPLIERS", "issue_name": "ITC passed on by Cancelled TPs", "description": "ITC claimed from suppliers whose GST registration has been cancelled retrospectively.", "sop_point": 7, "grid_data": get_grid_schema_sop7_cancelled(),
      "liability_config": {"model": "sum_of_rows", "row_indices": "all_data_rows", "column_heads": ["IGST", "CGST", "SGST"]}},
-    {"issue_id": "NON_FILER_SUPPLIERS", "issue_name": "ITC from Non-Filing Suppliers", "sop_point": 8, "grid_data": get_grid_schema_sop8_non_filer(),
+    {"issue_id": "NON_FILER_SUPPLIERS", "issue_name": "ITC passed on by suppliers who have not filed GSTR-3B", "description": "ITC claimed from suppliers who have not filed their GSTR-3B returns for the period(s).", "sop_point": 8, "grid_data": get_grid_schema_sop8_non_filer(),
      "liability_config": {"model": "sum_of_rows", "row_indices": "all_data_rows", "column_heads": ["IGST", "CGST", "SGST"]}},
-    {"issue_id": "SEC_16_4_VIOLATION", "issue_name": "Section 16(4) ITC Violation", "sop_point": 9, "grid_data": get_grid_schema_sop9_sec16_4(),
+    {"issue_id": "SEC_16_4_VIOLATION", "issue_name": "Ineligible Availment of ITC [Violation of Section 16(4)]", "description": "ITC claimed after the statutory time limit (after Nov following the FY or Annual Return).", "sop_point": 9, "grid_data": get_grid_schema_sop9_sec16_4(),
      "liability_config": {"model": "sum_of_rows", "row_indices": "all_data_rows", "column_heads": ["IGST", "CGST", "SGST"]}},
-    {"issue_id": "IMPORT_ITC_MISMATCH", "issue_name": "Import ITC Mismatch (GSTR 3B vs ICEGATE)", "sop_point": 10, "grid_data": get_grid_schema_sop10(),
+    {"issue_id": "IMPORT_ITC_MISMATCH", "issue_name": "Import of Goods (4(A)(1) of GSTR-3B vs Credit received in GSTR-2B)", "description": "ITC on Import of Goods (GSTR-3B Table 4(A)(1)) vs Auto-drafted values from ICEGATE (2A Table 10/11).", "sop_point": 10, "grid_data": get_grid_schema_sop10(),
      "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST"]}},
-    {"issue_id": "RULE_42_43_VIOLATION", "issue_name": "Rule 42/43 Reversal Mismatch", "sop_point": 11, "grid_data": get_grid_schema_sop11(),
+    {"issue_id": "RULE_42_43_VIOLATION", "issue_name": "Rule 42 & 43 ITC Reversals", "description": "Verification whether required ITC reversals (Personal/Exempt usage) have been performed.", "sop_point": 11, "grid_data": get_grid_schema_sop11(),
      "liability_config": {"model": "single_column", "row_indices": [7], "column_heads": ["Amount"]}},
-    {"issue_id": "ITC_3B_2B_9X4", "issue_name": "GSTR 3B vs 2B (discrepancy identified from GSTR 9)", "sop_point": 12, "grid_data": get_grid_schema_point_12(),
+    {"issue_id": "ITC_3B_2B_9X4", "issue_name": "GSTR-3B vs GSTR-2B (discrepancy identified from GSTR-9)", "description": "Scrutiny of Table 8 of GSTR 9 to identify excess ITC availment.", "sop_point": 12, "grid_data": get_grid_schema_point_12(),
      "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
 ]
 
@@ -400,6 +400,19 @@ for issue in issues:
 def run_init():
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
+    
+    # [MIGRATION] Schema Update Check (Self-Contained)
+    try:
+        c.execute("PRAGMA table_info(issues_master)")
+        columns = [info[1] for info in c.fetchall()]
+        if "description" not in columns:
+            print("[INIT] Adding 'description' column to issues_master...")
+            c.execute("ALTER TABLE issues_master ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+            conn.commit()
+    except Exception as e:
+        print(f"[INIT] Schema Check Failed: {e}")
+        return
+
     for issue in issues:
         # Defaults
         tbl_def = json.dumps(issue.get('table_definition', {}))
@@ -408,16 +421,32 @@ def run_init():
         app_fy = issue.get('applicable_from_fy')
 
         c.execute("""
-            INSERT OR REPLACE INTO issues_master (
-                issue_id, issue_name, category, sop_point, 
+            INSERT INTO issues_master (
+                issue_id, issue_name, description, category, sop_point, 
                 table_definition, analysis_type, sop_version, applicable_from_fy,
                 templates, grid_data, liability_config, tax_demand_mapping,
                 active, updated_at
             ) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+            ON CONFLICT(issue_id) DO UPDATE SET
+                issue_name = excluded.issue_name,
+                description = excluded.description,
+                category = excluded.category,
+                sop_point = excluded.sop_point,
+                table_definition = excluded.table_definition,
+                analysis_type = excluded.analysis_type,
+                sop_version = excluded.sop_version,
+                applicable_from_fy = excluded.applicable_from_fy,
+                templates = excluded.templates,
+                grid_data = excluded.grid_data,
+                liability_config = excluded.liability_config,
+                tax_demand_mapping = excluded.tax_demand_mapping,
+                active = excluded.active,
+                updated_at = excluded.updated_at
         """, (
             issue['issue_id'], 
             issue['issue_name'], 
+            issue['description'],
             "Scrutiny Summary", 
             issue['sop_point'],
             tbl_def, an_type, sop_ver, app_fy,

@@ -1,4 +1,4 @@
-# import fitz  # PyMuPDF Deferred to functions to prevent Python 3.14 startup crashes
+import fitz  # PyMuPDF
 import re
 import os
 import logging

@@ -3,267 +3,71 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>Personal Hearing Intimation</title>
     <style>
-/* [A4 SIMULATION] Professional Workspace Aesthetics - SHARED */
-body {
-    background-color: #f1f5f9;
-    /* Light Gray Workspace */
-    margin: 0;
-    padding: 0;
-    -webkit-font-smoothing: antialiased;
-}
+        @page {
+            size: A4;
+            margin: 1cm;
+        }
 
-.page-wrapper {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 40px 0;
-    min-height: 100vh;
-    box-sizing: border-box;
-}
-
-/* [A4 SIMULATION] Discrete Page Styling */
-.a4-page {
-    width: 794px;
-    /* Strictly A4 Width @ 96dpi */
-    height: 1123px;
-    /* Strictly A4 Height @ 96dpi */
-    background: white;
-    margin: 0 auto 30px auto;
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    /* Soft premium shadow */
-    box-sizing: border-box;
-    overflow: hidden;
-    position: relative;
-    padding: 15mm;
-}
-
-/* Aggressive Containment */
-.doc-content,
-.letterhead-container,
-table {
-    max-width: 100% !important;
-    box-sizing: border-box !important;
-}
-
-.letterhead-container * {
-    max-width: 100% !important;
-}
-
-.letterhead-container img {
-    max-width: 100% !important;
-    height: auto !important;
-    display: block;
-    margin: 0 auto;
-}
-
-/* Base Document Styling */
-.doc-content {
-    font-family: 'Bookman Old Style', serif;
-    font-size: 11pt;
-    line-height: 1.6;
-    color: black;
-    text-align: justify;
-}
-
-.issue-group,
-.issue-block {
-    page-break-inside: avoid !important;
-    margin-bottom: 25px;
-    width: 100%;
-}
-
-.doc-content p,
-.para-content p {
-    text-align: justify;
-    font-size: 11pt;
-    line-height: 1.6;
-    margin-bottom: 12px;
-    margin-top: 0;
-}
-
-.letterhead-container {
-    width: 100%;
-    margin-bottom: 20px;
-    text-align: center;
-}
-
-/* Heading Hierarchy */
-.doc-content h3 {
-    font-size: 11pt;
-    font-weight: bold;
-    text-decoration: underline;
-    text-align: left;
-    margin-top: 15px;
-    margin-bottom: 10px;
-}
-
-.doc-header {
-    text-align: center;
-    font-weight: bold;
-    font-size: 11pt;
-    margin-bottom: 15px;
-}
-
-/* [TABLES] Professional Document Tables */
-table {
-    border-collapse: collapse;
-    width: 100%;
-    margin-bottom: 15px;
-    font-size: 10pt;
-    /* Smaller font for tables */
-    border: 1.2px solid black;
-    page-break-inside: avoid !important;
-}
-
-tr {
-    page-break-inside: avoid !important;
-}
-
-.para-table {
-    border: none;
-    margin-bottom: 10px;
-    font-size: 11pt;
-    /* Paragraph containers keep body size */
-}
-
-.para-table td {
-    border: none;
-    padding: 2px 0;
-}
-
-.para-num {
-    width: 30px;
-    font-weight: bold;
-    vertical-align: top;
-}
-
-.para-content {
-    text-align: justify;
-    vertical-align: top;
-}
-
-/* Calculation Table Specifics */
-.data-table,
-.calc-table {
-    border: 1.2px solid black;
-}
-
-.data-table th,
-.data-table td,
-.calc-table th,
-.calc-table td {
-    border: 1px solid black;
-    padding: 5px;
-    text-align: center;
-    word-break: break-word;
-}
-
-.data-table th,
-.calc-table th {
-    background-color: #f8fafc;
-    font-weight: bold;
-}
-
-/* Media Query for Print Parity (PDF) */
-@media print {
-    @page {
-        size: A4;
-        margin: 20mm;
-
-        @bottom-center {
-            content: "Page " counter(page);
+        body {
             font-family: 'Bookman Old Style', serif;
+            font-size: 11pt;
+            line-height: 1.5;
+            text-align: justify;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+
+        .sub-header {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10px 0;
             font-size: 10pt;
         }
-    }
 
-    body,
-    .page-wrapper {
-        background: white !important;
-        padding: 0 !important;
-        display: block !important;
-    }
-
-    .a4-page,
-    .a4-page-static {
-        box-shadow: none !important;
-        margin: 0 !important;
-        width: 100% !important;
-        height: auto !important;
-        padding: 0 !important;
-        /* Let @page handle margins */
-        page-break-after: always;
-        overflow: visible !important;
-    }
-
-    /* Improve header repeating for long tables */
-    thead {
-        display: table-header-group;
-    }
-
-    tfoot {
-        display: table-footer-group;
-    }
-
-    /* Hide the pagination injection wrapper if printing raw content */
-    #scn-preview-wrapper,
-    #asmt-preview-wrapper {
-        display: none !important;
-    }
-
-    /* Show the source content when printing */
-    #scn-source-content,
-    #asmt-source-content {
-        display: block !important;
-        visibility: visible !important;
-        position: static !important;
-        width: 100% !important;
-    }
-}
-
-</style>
-    <style>
-        .header-line {
-            display: flex;
-            justify-content: space-between;
-            font-weight: bold;
+        td,
+        th {
+            border: 1px solid black;
+            padding: 5px;
+            text-align: center;
+            vertical-align: top;
         }
 
-        .address-block p {
-            margin: 0;
-            line-height: 1.4;
-        }
-
-        .subject {
-            text-align: justify;
-        }
-
-        .signature-block {
-            margin-left: 60%;
+        .left-align {
             text-align: left;
         }
 
-        .copy-block p {
-            margin: 2px 0;
+        .right-align {
+            text-align: right;
+        }
+
+        .bold {
+            font-weight: bold;
+        }
+
+        .section-title {
+            font-weight: bold;
+            margin-top: 15px;
+            margin-bottom: 5px;
         }
     </style>
 </head>
 
 <body>
-    
-
-    <!-- A4 Simulator Wrapper (Only for Preview) -->
-    
-    <!-- Static PDF Rendering (WeasyPrint) -->
-    <div class="a4-page-static">
-        <div class="doc-content">
-            
-    <!-- Letterhead -->
-    
-    <div class="letterhead-container">
-        <!DOCTYPE html>
+    <!-- Letterhead Placeholder -->
+    <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -275,75 +79,159 @@ tr {
     <div id="form-header-placeholder"></div>
 </body>
 </html>
+
+    <table style="border: none; width: 100%; margin-bottom: 20px;">
+        <tbody>
+            <tr style="border: none;">
+                <td style="border: none; text-align: left; width: 50%;">
+                    <strong>OC No:</strong> 4/2026
+                </td>
+                <td style="border: none; text-align: right; width: 50%;">
+                    <strong>Date:</strong> 16/02/2026
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="header">
+        FORM GST DRC-01A<br>
+        [See rule 142(1A)]<br>
+        Intimation of tax ascertained as being payable under section 73(5)/74(5)
     </div>
-    
 
-    <!-- OC No and Date Row -->
-    <div class="header-line">
-        <div>O.C. No. DRAFT3</div>
-        <div>Date: 2026-02-04</div>
-    </div>
+    <table style="border: none; width: 100%;">
+        <tbody>
+            <tr style="border: none;">
+                <td style="border: none; text-align: right; width: 100%;">
+                    <strong>Financial Year:</strong> 2023-24<br>
+                    <strong>Period:</strong>  to 
+                </td>
+            </tr>
+        </tbody>
+    </table>
 
-    <br><br>
+    <p style="text-align: left;"><strong>To,</strong><br>
+        LIC AGENTS CO OPERATIVE SOCIETY<br>
+        LIC AGENTS CO OPERATIVE SOCIETY<br>
+        GSTIN: 32AAAAL5072G1ZY<br>
+        Address: VII/76, SREEDHAREEYAM BUILDING, NORTH PARAVUR, Ernakulam, Kerala, 683513 </p>
 
-    <div class="address-block">
-        <p>To,</p>
-        <p>MADAVANA ELECTRONICS AND HOME APPLIANCES.</p>
-        <p>GSTIN: 32AAMFM4610Q1Z0</p>
-        <p>X/85A,85B, DEVASWOM NADA, CHERAI, Ernakulam, Kerala, 683514 </p>
-    </div>
+    <p style="text-align: left;"><strong>Sub.: Intimation of liability under section 74(5) – reg</strong></p>
 
-    <br>
-
-    <p>Gentlemen/Sir/Madam,</p>
-
-    <br>
-
-    <p class="subject">
-        <strong>Subject: Intimation of Personal Hearing – reg</strong>
+    <p style="text-align: justify;">
+        Please refer to the above proceedings. In this regard, the amount of tax/interest/penalty payable by you under
+        section 74(5) with reference to the said case as ascertained by the undersigned in terms of the
+        available information, as is given below:
     </p>
 
-    <br>
+    <div class="section-title">Tax Demand Details:</div>
+    <table>
+        <thead>
+            <tr>
+                <th style="vertical-align: middle;">Act</th>
+                <th>Tax Period From</th>
+                <th>Tax Period To</th>
+                <th>Tax (₹)</th>
+                <th>Interest (₹)</th>
+                <th>Penalty (₹)</th>
+                <th>Total (₹)</th>
+            </tr>
+        </thead>
+        <tbody>
+            
+                <tr>
+                    <td style="border: 1px solid black; padding: 8px;">Total</td>
+                    <td style="border: 1px solid black; padding: 8px;">-</td>
+                    <td style="border: 1px solid black; padding: 8px;">-</td>
+                    <td style="border: 1px solid black; padding: 8px; text-align: right;">0</td>
+                    <td style="border: 1px solid black; padding: 8px; text-align: right;">0</td>
+                    <td style="border: 1px solid black; padding: 8px; text-align: right;">0</td>
+                    <td style="border: 1px solid black; padding: 8px; text-align: right;">0</td>
+                </tr>
+                
+        </tbody>
+    </table>
 
-    <p>
-        <strong>References:</strong>
-        1. SCN reference number: 02 dated 12/02/2026
+    <div class="section-title">Issue:</div>
+    <div><!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
+<html><head><meta name="qrichtext" content="1" /><meta charset="utf-8" /><style type="text/css">
+p, li { white-space: pre-wrap; }
+hr { height: 1px; border-width: 0; }
+li.unchecked::marker { content: "\2610"; }
+li.checked::marker { content: "\2612"; }
+</style></head><body style=" font-family:'Segoe UI','Roboto','sans-serif'; font-size:14px; font-weight:400; font-style:normal;">
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Brief Facts:</span><br />Discrepancy identified in Outward Liability Mismatch (GSTR 3B vs GSTR 1). </p>
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Grounds:</span><br /></p>
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Legal Provisions:</span><br /></p>
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Conclusion:</span><br /></p></body></html>
+            <div style="margin-bottom: 20px; margin-top: 15px;">
+                <p style="font-weight: bold; margin-bottom: 8px; font-size: 11pt;">Calculation Table</p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 10pt; font-family: 'Bookman Old Style', serif; border: 2px solid #000;">
+            <tr><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">Description</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">CGST</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">SGST</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">IGST</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">Cess</th></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'>Tax Liability Declared as per GSTR-1</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'>Tax Liability as per GSTR-3B</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'>Difference (Declared - Reported)</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'>Liability (Positive Only)</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td></tr>
+                </table>
+            </div>
+            <br><hr><br><!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
+<html><head><meta name="qrichtext" content="1" /><meta charset="utf-8" /><style type="text/css">
+p, li { white-space: pre-wrap; }
+hr { height: 1px; border-width: 0; }
+li.unchecked::marker { content: "\2610"; }
+li.checked::marker { content: "\2612"; }
+</style></head><body style=" font-family:'Segoe UI','Roboto','sans-serif'; font-size:14px; font-weight:400; font-style:normal;">
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Brief Facts:</span><br />Discrepancy identified in ISD Credit mismatch (GSTR 3B vs GSTR 2B). </p>
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Grounds:</span><br /></p>
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Legal Provisions:</span><br /></p>
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Conclusion:</span><br /></p></body></html>
+            <div style="margin-bottom: 20px; margin-top: 15px;">
+                <p style="font-weight: bold; margin-bottom: 8px; font-size: 11pt;">Calculation Table</p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 10pt; font-family: 'Bookman Old Style', serif; border: 2px solid #000;">
+            <tr><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">Description</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">CGST</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">SGST</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">IGST</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">Cess</th></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'>ITC availed i.r.o of 'Inward Supplies from ISD' in Table 4(A)(4) of GSTR-3B</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'>ITC as per GSTR-2B ISD</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'>Difference (Claimed - Available)</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'>Liability (Positive Shortfall)</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: right;'>0.0</td></tr>
+                </table>
+            </div>
+            <br><hr><br><!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
+<html><head><meta name="qrichtext" content="1" /><meta charset="utf-8" /><style type="text/css">
+p, li { white-space: pre-wrap; }
+hr { height: 1px; border-width: 0; }
+li.unchecked::marker { content: "\2610"; }
+li.checked::marker { content: "\2612"; }
+</style></head><body style=" font-family:'Segoe UI','Roboto','sans-serif'; font-size:14px; font-weight:400; font-style:normal;">
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Brief Facts:</span><br />Discrepancy identified in ITC from Cancelled Suppliers. </p>
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Grounds:</span><br /></p>
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Legal Provisions:</span><br /></p>
+<p style=" margin-top:0px; margin-bottom:15px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-weight:700;">Conclusion:</span><br /></p></body></html>
+            <div style="margin-bottom: 20px; margin-top: 15px;">
+                <p style="font-weight: bold; margin-bottom: 8px; font-size: 11pt;">Calculation Table</p>
+                <table style="width: 100%; border-collapse: collapse; font-size: 10pt; font-family: 'Bookman Old Style', serif; border: 2px solid #000;">
+            <tr><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">GSTIN</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">Invoice No.</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">Invoice Date</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">Effective Date of Cancellation</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">CGST</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">SGST</th><th style="border: 1px solid black; padding: 6px; text-align: center; background-color: #f2f2f2; font-weight: bold; font-size: 10pt;">IGST</th></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td></tr><tr><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td><td style='border: 1px solid black; padding: 4px 6px; font-size: 10pt;text-align: left;'></td></tr>
+                </table>
+            </div>
+            <br><hr><br></div>
+
+    <div class="section-title">Sections Violated:</div>
+    <div><!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
+<html><head><meta name="qrichtext" content="1" /><meta charset="utf-8" /><style type="text/css">
+p, li { white-space: pre-wrap; }
+hr { height: 1px; border-width: 0; }
+li.unchecked::marker { content: "\2610"; }
+li.checked::marker { content: "\2612"; }
+</style></head><body style=" font-family:'Segoe UI','Roboto','sans-serif'; font-size:14px; font-weight:400; font-style:normal;">
+<p style="-qt-paragraph-type:empty; margin-top:0px; margin-bottom:0px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><br /></p></body></html></div>
+
+    <p style="margin-top: 30px;">
+        You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest and penalty under section 74(5) by 18/03/2026, failing which Show Cause Notice will be issued under section 74(1).
     </p>
 
-    <br>
-
-    <p>
-        1. Please refer to the above mentioned SCN number issued by Office of the Superintendent Paravur Range.
+    <p style="margin-top: 20px;">
+        In case you wish to file any submissions against the above ascertainment, the same may be furnished by
+        18/03/2026 in Part B of this Form.
     </p>
 
-    <p>
-        2. In this connection, it is to inform you that personal hearing in this case will be held at 11:00 AM
-        on 2026-02-04 before the Superintendent of Central Tax, Paravur Range Office.
+    <p style="margin-top: 50px; text-align: right;">
+        <strong>Proper Officer</strong><br>
+        (Signature)<br>
+        Name: ____________________<br>
+        Designation: ____________________<br>
+        Jurisdiction: ____________________
     </p>
-
-    <p>
-        3. You may therefore appear in person or through an authorized representative for the personal hearing on
-        the above mentioned date and time as per your convenience, at the above mentioned address, without fail
-        along with records/documents/evidences you wish to rely upon in support of your case.
-    </p>
-
-    <br><br><br>
-
-    <div class="signature-block">
-        <p>VISHNU V</p>
-        <p>Superintendent</p>
-    </div>
-
-    <br><br>
-
-    <div class="copy-block">
-        <p><strong>Copy submitted to:</strong></p>
-        <p>1. The Assistant Commissioner, Central Tax, Paravur Division</p>
-    </div>
-    
-        </div>
-    </div>
-    
 </body>
 
 </html>

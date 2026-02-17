@@ -1140,10 +1140,18 @@ class CompliancePointCard(QFrame):
 
 class ComplianceDashboard(QScrollArea):
     """Container for the 13 SOP compliance cards in a list view."""
-    def __init__(self, parent=None):
+    def __init__(self, db_manager=None, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setStyleSheet("QScrollArea { border: none; background: #f8fafc; }")
+        
+        # [DEPENDENCY INJECTION]
+        if not db_manager:
+            raise RuntimeError("ComplianceDashboard requires a valid DatabaseManager instance.")
+        self.db = db_manager
+        
+        # [ROBUSTNESS] Initialize empty container immediately
+        self.cards = {}
         
         self.container = QWidget()
         self.container.setStyleSheet(".QWidget { background: transparent; }")
@@ -1173,28 +1181,28 @@ class ComplianceDashboard(QScrollArea):
         self.list_layout.setContentsMargins(0, 0, 0, 0)
         self.list_layout.setSpacing(8)
         
-        self.params = [
-            (1, "Outward Liability (GSTR 3B vs GSTR 1)", "Comparison of Table 3.1(a)/(b) of GSTR-3B against Tables 4, 5, 6, 7, 9, 10 & 11 of GSTR-1."),
-            (2, "RCM (GSTR 3B vs GSTR 2B)", "Inward supplies liable to reverse charge (RCM) vs ITC & Cash Ledger payments."),
-            (3, "ISD Credit (GSTR 3B vs GSTR 2B)", "ITC from Input Service Distributors (ISD) in Table 4(A)(4) vs GSTR-2B."),
-            (4, "All Other ITC (GSTR 3B vs GSTR 2B)", "ITC auto-drafted vs claimed for inward supplies from registered persons (Forward Charge)."),
-            (5, "TDS/TCS (GSTR 3B vs GSTR 2B)", "Liability in Table 3.1(a) vs Taxable values on which TDS/TCS was deducted."),
-            (6, "E-Waybill Comparison (GSTR 3B vs E-Waybill)", "Liability declared in GSTR-3B vs Tax Liability generated in E-Way Bills (EWB Summary)."),
-            (7, "ITC passed on by Cancelled TPs", "ITC claimed from suppliers whose GST registration has been cancelled retrospectively."),
-            (8, "ITC passed on by Suppliers who have not filed GSTR 3B", "ITC claimed from suppliers who have not filed their GSTR-3B returns for the period(s)."),
-            (9, "Ineligible Availment of ITC [Violation of Section 16(4)]", "ITC claimed after the statutory time limit (after Nov following the FY or Annual Return)."),
-            (10, "Import of Goods (3B vs ICEGATE)", "ITC on Import of Goods (GSTR-3B Table 4(A)(1)) vs Auto-drafted values from ICEGATE (2A Table 10/11)."),
-            (11, "Rule 42 & 43 ITC Reversals", "Verification whether required ITC reversals (Personal/Exempt usage) have been performed."),
-            (12, "GSTR 3B vs 2B (discrepancy identified from GSTR 9)", "Scrutiny of Table 8 of GSTR 9 to identify excess ITC availment.")
-        ]
-        
-        self.cards = {}
-        for num, title, desc in self.params:
-            card = CompliancePointCard(num, title, desc)
-            self.cards[num] = card
-            self.list_layout.addWidget(card)
+        # [STRATEGIC REFACTOR] Fetch from Single Source of Truth
+        try:
+            catalog = self.db.get_dashboard_catalog()
+            
+            for item in catalog:
+                num = item['sop_point']
+                title = item['issue_name']
+                desc = item['description']
+                
+                card = CompliancePointCard(num, title, desc)
+                self.cards[num] = card
+                self.list_layout.addWidget(card)
+                
+        except Exception as e:
+            # Fatal UI Failure to prevent silent degradation
+            err_lbl = QLabel(f"CRITICAL ERROR: Failed to load compliance points.\n{str(e)}")
+            err_lbl.setStyleSheet("color: red; font-weight: bold; font-size: 16px;")
+            self.list_layout.addWidget(err_lbl)
+            print(f"[UI FATAL] Dashboard load failed: {e}")
             
         self.layout.addWidget(self.list_container)
+        self.layout.addStretch()
         self.layout.addStretch()
         
         self.setWidget(self.container)
@@ -1204,6 +1212,10 @@ class ComplianceDashboard(QScrollArea):
             self.cards[num].set_status(status, value_text, details)
             
     def reset_all(self):
+        # [ROBUSTNESS] Guard against crashes if DB load failed
+        if not hasattr(self, 'cards') or not self.cards:
+            return
+            
         for card in self.cards.values():
             card.reset()
 
@@ -2450,7 +2462,7 @@ class ScrutinyTab(QWidget):
         self.content_stack.addWidget(upload_page)
 
         # Page 1: SOP Compliance Dashboard
-        self.compliance_dashboard = ComplianceDashboard()
+        self.compliance_dashboard = ComplianceDashboard(db_manager=self.db)
         self.content_stack.addWidget(self.compliance_dashboard)
 
         # Page 2: Executive Summary

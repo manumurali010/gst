@@ -1,5 +1,9 @@
-import sys
 import os
+import sys
+# [PERFORMANCE FIX] Disable GPU compositing to prevent startup hangs/slowness on Windows
+os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--disable-gpu --disable-software-rasterizer"
+os.environ["QT_XCB_GL_INTEGRATION"] = "none"
+
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, QCoreApplication
 

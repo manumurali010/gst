@@ -5,7 +5,7 @@ import json
 import openpyxl
 import logging
 import warnings
-# import fitz # PyMuPDF Deferred to prevention Python 3.14 startup crashes
+import fitz # PyMuPDF
 import re
 from src.utils.date_utils import normalize_financial_year, validate_fy_sanity, get_fy_end_year
 from src.utils.pdf_parsers import parse_gstr3b_pdf_table_3_1_a, parse_gstr1_pdf_total_liability, parse_gstr3b_pdf_table_3_1_d, parse_gstr3b_pdf_table_4_a_2_3, parse_gstr3b_pdf_table_4_a_4, parse_gstr3b_pdf_table_4_a_5, parse_gstr3b_metadata, parse_gstr3b_pdf_table_4_a_1, parse_gstr3b_pdf_table_3_1_b, parse_gstr3b_pdf_table_3_1_c, parse_gstr3b_pdf_table_3_1_e, parse_gstr3b_pdf_table_4_b_1, parse_gstr3b_sop9_identifiers
@@ -2082,7 +2082,9 @@ class ScrutinyParser:
         except Exception as e:
             print(f"GSTR 9 Parse Error: {e}")
             return {
+                "issue_id": "ITC_3B_2B_9X4",  # [SEMANTIC ENFORCEMENT]
                 "category": "GSTR 3B vs 2B (discrepancy identified from GSTR 9)",
+                "description": "Scrutiny of Table 8 of GSTR 9 to identify excess ITC availment.",
                 "total_shortfall": 0,
                 "status": "info",
                 "status_msg": f"Error: {str(e)}"
