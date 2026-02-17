@@ -5,7 +5,7 @@ import json
 import openpyxl
 import logging
 import warnings
-import fitz # PyMuPDF
+# import fitz # PyMuPDF Deferred to prevention Python 3.14 startup crashes
 import re
 from src.utils.date_utils import normalize_financial_year, validate_fy_sanity, get_fy_end_year
 from src.utils.pdf_parsers import parse_gstr3b_pdf_table_3_1_a, parse_gstr1_pdf_total_liability, parse_gstr3b_pdf_table_3_1_d, parse_gstr3b_pdf_table_4_a_2_3, parse_gstr3b_pdf_table_4_a_4, parse_gstr3b_pdf_table_4_a_5, parse_gstr3b_metadata, parse_gstr3b_pdf_table_4_a_1, parse_gstr3b_pdf_table_3_1_b, parse_gstr3b_pdf_table_3_1_c, parse_gstr3b_pdf_table_3_1_e, parse_gstr3b_pdf_table_4_b_1, parse_gstr3b_sop9_identifiers
@@ -2551,6 +2551,7 @@ class ScrutinyParser:
         SOP-11: Rule 42/43 Reversal Mismatch.
         Sources: GSTR-3B PDF (Tables 3.1, 4A, 4B).
         """
+        import fitz
         from src.utils.pdf_parsers import (
             parse_gstr3b_pdf_table_3_1_a, parse_gstr3b_pdf_table_3_1_b, parse_gstr3b_pdf_table_3_1_c, 
             parse_gstr3b_pdf_table_3_1_d, parse_gstr3b_pdf_table_3_1_e,

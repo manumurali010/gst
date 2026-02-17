@@ -1327,7 +1327,7 @@ class ProceedingsWorkspace(QWidget):
         # Connect Signals
         self.drc_fin_panel.cancel_btn.clicked.connect(self.hide_drc01a_finalization_panel)
         self.drc_fin_panel.finalize_btn.clicked.connect(self.confirm_drc01a_finalization)
-        self.drc_fin_panel.preview_btn.clicked.connect(self.generate_pdf)
+        self.drc_fin_panel.pdf_btn.clicked.connect(self.generate_pdf)
         
         self.drc01a_finalization_layout.addWidget(self.drc_fin_panel)
         print("FinalizationPanel Attached (Direct Adjudication)")
@@ -1457,13 +1457,18 @@ class ProceedingsWorkspace(QWidget):
         if not template:
             return
             
-        card.valuesChanged.connect(self.calculate_grand_totals)
+        from src.ui.issue_card import IssueCard
+        card = IssueCard(template, mode="DRC-01A")
+        
+        # Connect signals
         card.removeClicked.connect(lambda: self.remove_issue_card(card))
+        card.valuesChanged.connect(self.calculate_grand_totals)
         
         self.issues_layout.addWidget(card)
         self.issue_cards.append(card)
         
         # Trigger initial calculation and preview
+        card.calculate_values()
         self.calculate_grand_totals()
         
 

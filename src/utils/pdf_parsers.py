@@ -1,4 +1,4 @@
-import fitz  # PyMuPDF
+# import fitz  # PyMuPDF Deferred to functions to prevent Python 3.14 startup crashes
 import re
 import os
 import logging
@@ -97,6 +97,7 @@ def parse_gstr3b_pdf_table_3_1_a(file_path):
     if not file_path: return results
 
     try:
+        import fitz
         doc = fitz.open(file_path)
         full_text = ""
         for page in doc:
@@ -150,6 +151,7 @@ def parse_gstr1_pdf_total_liability(file_path):
     results = { "igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0 }
     
     try:
+        import fitz
         doc = fitz.open(file_path)
         full_text = ""
         for page in doc:
@@ -203,6 +205,7 @@ def parse_gstr3b_pdf_table_3_1_d(file_path):
     results = { "igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0 }
     
     try:
+        import fitz
         doc = fitz.open(file_path)
         full_text = ""
         for page in doc:
@@ -244,6 +247,7 @@ def parse_gstr3b_pdf_table_4_a_2_3(file_path):
     results = { "igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0 }
     
     try:
+        import fitz
         doc = fitz.open(file_path)
         full_text = ""
         for page in doc:
@@ -316,6 +320,7 @@ def parse_gstr3b_pdf_table_4_a_4(file_path):
     results = { "igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0 }
     
     try:
+        import fitz
         doc = fitz.open(file_path)
         full_text = ""
         for page in doc:
@@ -504,6 +509,7 @@ def parse_gstr3b_pdf_table_4_a_1(file_path):
     if not file_path: return results
 
     try:
+        import fitz
         doc = fitz.open(file_path)
         full_text = ""
         for page in doc: full_text += page.get_text() + "\n"
@@ -543,6 +549,7 @@ def parse_gstr3b_metadata(file_path):
     if not file_path: return meta
 
     try:
+        import fitz
         doc = fitz.open(file_path)
         full_text = ""
         # Scan first 2 pages for metadata (Robuistness)
@@ -593,6 +600,7 @@ def parse_gstr1_pdf_metadata(file_path):
     meta = {"gstin": None, "fy": None, "return_period": None}
     if not file_path: return meta
     try:
+        import fitz
         doc = fitz.open(file_path)
         text = ""
         for i in range(min(2, len(doc))):
@@ -623,6 +631,7 @@ def parse_gstr9_pdf_metadata(file_path):
     meta = {"gstin": None, "fy": None}
     if not file_path: return meta
     try:
+        import fitz
         doc = fitz.open(file_path)
         text = ""
         for i in range(min(2, len(doc))):
@@ -650,6 +659,7 @@ def _parse_3_1_row(file_path, row_regex):
     """
     vals = {'taxable_value': 0.0, 'igst': 0.0, 'cgst': 0.0, 'sgst': 0.0, 'cess': 0.0}
     try:
+        import fitz
         doc = fitz.open(file_path)
         
         row_found = False
@@ -733,6 +743,7 @@ def parse_gstr3b_pdf_table_4_b_1(file_path):
     """
     vals = {'igst': 0.0, 'cgst': 0.0, 'sgst': 0.0, 'cess': 0.0}
     try:
+        import fitz
         doc = fitz.open(file_path)
         full_text = ""
         for page in doc:
@@ -800,6 +811,7 @@ def parse_gstr3b_sop9_identifiers(file_path):
         return meta
 
     try:
+        import fitz
         doc = fitz.open(file_path)
         # SCOPE: 2 PAGES
         p_text = ""
