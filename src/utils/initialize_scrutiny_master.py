@@ -18,19 +18,25 @@ def get_strict_table_def_point_1():
         "rows": [
             {
                 "row_id": "r1", 
-                "label": "Tax Liability (GSTR-1)", 
+                "label": "Tax Liability Declared as per GSTR-1", 
                 "source": "facts.gstr1"
             },
             {
                 "row_id": "r2", 
-                "label": "Tax Paid (GSTR-3B)", 
+                "label": "Tax Liability as per GSTR-3B", 
                 "source": "facts.gstr3b"
             },
             {
                 "row_id": "r3", 
-                "label": "Shortfall / (Excess)", 
+                "label": "Difference (Declared - Reported)", 
                 "source": "facts.shortfall", 
                 "semantics": {"emphasis": "primary", "severity": "critical", "condition": "is_positive"}
+            },
+            {
+                "row_id": "r4", 
+                "label": "Liability (Positive Only)", 
+                "source": "facts.liability",
+                "semantics": {"emphasis": "danger", "severity": "blocking"}
             }
         ]
     }
@@ -377,6 +383,14 @@ issues = [
     {"issue_id": "RULE_42_43_VIOLATION", "issue_name": "Rule 42 & 43 ITC Reversals", "description": "Verification whether required ITC reversals (Personal/Exempt usage) have been performed.", "sop_point": 11, "grid_data": get_grid_schema_sop11(),
      "liability_config": {"model": "single_column", "row_indices": [7], "column_heads": ["Amount"]}},
     {"issue_id": "ITC_3B_2B_9X4", "issue_name": "GSTR-3B vs GSTR-2B (discrepancy identified from GSTR-9)", "description": "Scrutiny of Table 8 of GSTR 9 to identify excess ITC availment.", "sop_point": 12, "grid_data": get_grid_schema_point_12(),
+     "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
+    {"issue_id": "RCM_3B_VS_CASH", "issue_name": "RCM Liability (3.1(d)) vs Cash Paid (6.1)", "description": "Validation of RCM Liability payment via Cash.", "sop_point": 13, "grid_data": get_grid_schema_summary_3x4(["Description", "IGST", "CGST", "SGST", "Cess"]),
+     "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
+    {"issue_id": "RCM_ITC_VS_CASH", "issue_name": "RCM ITC (4A(2)+4A(3)) vs Cash Paid (6.1)", "description": "Validation of RCM ITC claim against Cash Payment.", "sop_point": 14, "grid_data": get_grid_schema_summary_3x4(["Description", "IGST", "CGST", "SGST", "Cess"]),
+     "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
+    {"issue_id": "RCM_ITC_VS_2B", "issue_name": "RCM ITC (4A(2)+4A(3)) vs GSTR-2B", "description": "Validation of RCM ITC claim against GSTR-2B.", "sop_point": 15, "grid_data": get_grid_schema_summary_3x4(["Description", "IGST", "CGST", "SGST", "Cess"]),
+     "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
+    {"issue_id": "RCM_CASH_VS_2B", "issue_name": "RCM Liability (GSTR-2B) vs Cash Paid (6.1)", "description": "Validation of RCM Liability (GSTR-2B) against Cash Payment.", "sop_point": 16, "grid_data": get_grid_schema_summary_3x4(["Description", "IGST", "CGST", "SGST", "Cess"]),
      "liability_config": {"model": "single_row", "row_indices": [3], "column_heads": ["IGST", "CGST", "SGST", "Cess"]}},
 ]
 

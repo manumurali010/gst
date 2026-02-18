@@ -24,6 +24,8 @@ def update_master():
         templates = json.dumps(issue.get('templates', {}))
         sop_point = issue.get('sop_point')
         
+        table_definition = json.dumps(issue.get('table_definition', {}))
+        
         # Verify grid data has content
         if not issue.get('grid_data'):
             print(f"Warning: {issue_id} has empty grid_data")
@@ -38,16 +40,16 @@ def update_master():
         try:
             cursor.execute("""
                 UPDATE issues_master 
-                SET grid_data = ?, templates = ?, sop_point = ?, updated_at = ?
+                SET grid_data = ?, templates = ?, sop_point = ?, table_definition = ?, updated_at = ?
                 WHERE issue_id = ?
-            """, (grid_data, templates, sop_point, datetime.now(), issue_id))
+            """, (grid_data, templates, sop_point, table_definition, datetime.now(), issue_id))
             
             if cursor.rowcount == 0:
                 print(f"Issue {issue_id} not found in DB - Inserting...")
                 cursor.execute("""
-                    INSERT INTO issues_master (issue_id, issue_name, category, sop_point, grid_data, templates, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (issue_id, issue['issue_name'], issue.get('issue_name'), sop_point, grid_data, templates, datetime.now()))
+                    INSERT INTO issues_master (issue_id, issue_name, category, sop_point, grid_data, templates, table_definition, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (issue_id, issue['issue_name'], issue.get('issue_name'), sop_point, grid_data, templates, table_definition, datetime.now()))
             
             count += 1
         except Exception as e:

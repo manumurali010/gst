@@ -2851,8 +2851,20 @@ class ScrutinyTab(QWidget):
                 # Correctly wire the signal BEFORE passing to parser
                 self.gstr2a_analyzer.ambiguity_detected.connect(self.resolve_header_ambiguity)
 
+            # [FIX] Fetch latest schemas from DB to ensure UI matches Admin Console
+            try:
+                active_issues = self.db.get_issue_templates()
+                # Build schema map: {issue_id: table_definition_dict}
+                db_schemas = {}
+                for issue in active_issues:
+                    if issue.get('table_definition'):
+                        db_schemas[issue['issue_id']] = issue['table_definition']
+            except Exception as e:
+                print(f"Error fetching DB schemas: {e}")
+                db_schemas = None
+
             # Run All Analysis
-            results = self.parser.parse_file(main_file, self.file_paths, configs, gstr2a_analyzer=self.gstr2a_analyzer)
+            results = self.parser.parse_file(main_file, self.file_paths, configs, gstr2a_analyzer=self.gstr2a_analyzer, db_schemas=db_schemas)
             
             if "error" in results:
                 QMessageBox.critical(self, "Analysis Failed", results["error"])
@@ -3253,7 +3265,11 @@ class ScrutinyTab(QWidget):
             'SEC_16_4_VIOLATION': 9,
             'IMPORT_ITC_MISMATCH': 10,
             'RULE_42_43_VIOLATION': 11,
-            'ITC_3B_2B_9X4': 12
+            'ITC_3B_2B_9X4': 12,
+            'RCM_3B_VS_CASH': 13,
+            'RCM_ITC_VS_CASH': 14,
+            'RCM_ITC_VS_2B': 15,
+            'RCM_CASH_VS_2B': 16
         }
 
         enriched = []
