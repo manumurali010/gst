@@ -1545,17 +1545,31 @@ class ProceedingsWorkspace(QWidget):
         actions_desc_align = Qt.AlignmentFlag.AlignCenter
         finalize_desc.setAlignment(actions_desc_align)
         actions_layout.addWidget(finalize_desc)
+
+        # [PHASE 5] Inline Preview Browser (Wizard Step 3)
+        self.step3_browser = QWebEngineView()
+        self.step3_browser.setMinimumHeight(500)
+        self.step3_browser.setStyleSheet("border: 1px solid #bdc3c7;")
+        self.step3_browser.setHtml("<div style='text-align:center; padding:50px; color:#7f8c8d;'>Click 'Refresh Preview' to generate draft.</div>")
+        actions_layout.addWidget(self.step3_browser)
         
         # Action Buttons
         btn_row = QHBoxLayout()
         btn_row.addStretch()
+        
+        # Refresh Button (New)
+        refresh_btn = QPushButton("🔄 Refresh Preview")
+        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Use lambda to trigger render logic manually
+        refresh_btn.clicked.connect(self.refresh_step3_preview)
+        btn_row.addWidget(refresh_btn)
         
         save_btn = QPushButton("Save Draft")
         save_btn.setFixedSize(120, 40)
         save_btn.clicked.connect(self.save_drc01a)
         btn_row.addWidget(save_btn)
         
-        finalize_btn = QPushButton("Finalize & Issue")
+        finalize_btn = QPushButton("Proceed to Finalize") # Renamed for clarity
         finalize_btn.setFixedSize(150, 40)
         finalize_btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         finalize_btn.clicked.connect(self.show_drc01a_finalization_panel)
@@ -1591,6 +1605,12 @@ class ProceedingsWorkspace(QWidget):
         view_msg = QLabel("This document has been finalized and issued. Changes are no longer permitted.")
         view_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         view_layout.addWidget(view_msg)
+        
+        # [PHASE 5] Snapshot Browser
+        self.drc01a_browser = QWebEngineView()
+        # Set a default background or initial content
+        self.drc01a_browser.setHtml("<h3 style='text-align:center; color:#7f8c8d; margin-top:50px;'>Document content will appear here.</h3>")
+        view_layout.addWidget(self.drc01a_browser, 1) # Give it all remaining space
         view_layout.addStretch()
         
         # Wrapper
@@ -1627,6 +1647,19 @@ class ProceedingsWorkspace(QWidget):
         self.drc01a_finalization_layout = layout # Keep reference if needed
         return container
 
+    def refresh_step3_preview(self):
+        """Manually trigger preview generation for Wizard Step 3"""
+        try:
+            drc_model = self._get_drc01a_model()
+            if not drc_model:
+                 raise ValueError("Model generation failed.")
+            
+            html = self.render_drc01a_html(drc_model)
+            self.step3_browser.setHtml(html)
+        except Exception as e:
+            self.step3_browser.setHtml(f"<h3 style='color:red; text-align:center;'>Preview Error: {str(e)}</h3>")
+            print(f"Preview Error: {e}")
+
     def show_drc01a_finalization_panel(self):
         """Review and Show Finalization Panel"""
         # 1. Validate Issues Exist
@@ -1644,42 +1677,63 @@ class ProceedingsWorkspace(QWidget):
         # Date Logic Check (Reply Date > OC Date)
         oc_date = self.oc_date_input.date()
         reply_date = self.reply_deadline_input.date()
+        payment_date = self.payment_deadline_input.date()
+        
         if reply_date <= oc_date:
             errors.append("Reply Date must be after OC Date.")
+        
+        if payment_date <= oc_date:
+            errors.append("Payment Date must be after OC Date.")
             
         if errors:
             QMessageBox.warning(self, "Validation Error", "\n".join(errors))
             return
             
-        # 3. Build Model & Render Preview
-        drc_model = self._get_drc01a_model()
-        html_preview = self._render_drc01a_preview(drc_model)
-        
-        # 4. Load into Panel
-        self.drc_fin_panel.load_data(
-            proceeding_data=self.proceeding_data,
-            issues_list=self.issue_cards, 
-            doc_type="DRC-01A",
-            doc_no=drc_model['oc_no'],
-            doc_date=drc_model['oc_date'],
-            ref_no="-" 
-        )
-        
-        # 5. Set HTML Preview (Browser)
-        self.drc_fin_panel.set_preview_html(html_preview)
+        try:
+            # 3. Build Model
+            drc_model = self._get_drc01a_model()
+            
+            if not drc_model:
+                 raise ValueError("Failed to generate data model. Processing data might be missing.")
 
-        # 6. Switch View
-        self.drc01a_draft_container.hide()
-        self.drc01a_view_container.hide()
-        self.drc01a_finalization_container.show()
+            # [STRICT] Zero Liability Check
+            if drc_model.get('grand_total_val', 0) <= 0:
+                QMessageBox.critical(self, "Liability Error", "Cannot issue DRC-01A with Zero Liability.\nPlease add tax amounts to issues.")
+                return
+
+            # 4. Render Preview (Single Source)
+            html_preview = self.render_drc01a_html(drc_model)
+            
+            # 5. Load into Panel
+            self.drc_fin_panel.load_data(
+                proceeding_data=self.proceeding_data,
+                issues_list=self.issue_cards, 
+                doc_type="DRC-01A",
+                doc_no=drc_model['oc_no'],
+                doc_date=drc_model['oc_date'],
+                ref_no="-" 
+            )
+            
+            # 6. Set HTML Preview (Browser)
+            self.drc_fin_panel.set_preview_html(html_preview)
+
+            # 7. Switch View
+            self.drc01a_draft_container.hide()
+            self.drc01a_view_container.hide()
+            self.drc01a_finalization_container.show()
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Preview Validation Error", f"Failed to generate preview:\n{str(e)}")
         
     def finalize_drc01a_issuance(self):
         """
         Execute Strict Issuance Logic:
-        1. Save to DB (Persistent)
-        2. Generate PDF Snapshot
-        3. Update Workflow Stage -> DRC01A_ISSUED
-        4. Lock UI
+        1. Save Final State to DB
+        2. Generate & Save HTML Snapshot (Freeze)
+        3. Generate PDF from Snapshot
+        4. Update Workflow Stage -> DRC01A_ISSUED
         """
         reply = QMessageBox.question(self, "Confirm Issuance", 
                                    "Are you sure you want to issue DRC-01A?\n\nThis action is IRREVERSIBLE. The document will be locked.",
@@ -1692,16 +1746,53 @@ class ProceedingsWorkspace(QWidget):
              # 1. Save Final State
              self.save_drc01a() 
              
-             # 2. Update Workflow State (Atomic Transaction ideally)
+             # 2. Generate Final HTML Snapshot
+             drc_model = self._get_drc01a_model()
+             html_content = self.render_drc01a_html(drc_model)
+             
+             # Create Snapshot Directory
+             import os
+             base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+             output_dir = os.path.join(base_dir, "data", "generated_documents")
+             os.makedirs(output_dir, exist_ok=True)
+             
+             # Save HTML File
+             safe_oc = "".join([c for c in drc_model['oc_no'] if c.isalnum() or c in ('-','_')])
+             filename_base = f"DRC-01A_{safe_oc}"
+             html_filename = f"{filename_base}.html"
+             html_path = os.path.join(output_dir, html_filename)
+             
+             with open(html_path, 'w', encoding='utf-8') as f:
+                 f.write(html_content)
+                 
+             print(f"Snapshot saved: {html_path}")
+
+             # 3. Generate PDF (From Snapshot Logic)
+             from PyQt6.QtPrintSupport import QPrinter
+             from PyQt6.QtGui import QTextDocument
+             
+             pdf_filename = f"{filename_base}.pdf"
+             pdf_path = os.path.join(output_dir, pdf_filename)
+             
+             printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+             printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+             printer.setOutputFileName(pdf_path)
+             
+             doc = QTextDocument()
+             doc.setHtml(html_content)
+             doc.print(printer)
+             
+             # 4. Update Workflow State (Atomic Transaction)
              if self.transition_to(WorkflowStage.DRC01A_ISSUED):
-                 QMessageBox.information(self, "Success", "DRC-01A Issued Successfully.\n\nWorkflow advanced to SCN Draft.")
+                 QMessageBox.information(self, "Success", f"DRC-01A Issued Successfully.\n\nSaved to: {pdf_path}")
                  
-                 # 3. Refresh UI to show View Mode (Locked)
+                 try:
+                    os.startfile(pdf_path)
+                 except: pass
+
+                 # 5. Refresh UI to show View Mode (Locked)
                  self.drc01a_finalization_container.hide()
-                 self.toggle_view_mode("drc01a", True) # Switch to View Container
-                 
-                 # 4. Trigger auto-generation of SCN draft? (Optional)
-                 # self.create_scn_tab() # Refresh SCN tab availability
+                 self.toggle_view_mode("drc01a", True) 
              else:
                  QMessageBox.critical(self, "Error", "Failed to update workflow stage.")
                  
@@ -1725,38 +1816,46 @@ class ProceedingsWorkspace(QWidget):
             'legal_name': tp.get('legal_name', self.proceeding_data.get('legal_name', '-')),
             'trade_name': tp.get('trade_name', '-'),
             'address': tp.get('address', 'Address not available'),
+            'case_id': self.proceeding_data.get('case_id', '-'),
             
             'oc_no': self.oc_number_input.text(),
             'oc_date': self.oc_date_input.date().toString("dd/MM/yyyy"),
             'reply_date': self.reply_deadline_input.date().toString("dd/MM/yyyy"),
             'payment_date': self.payment_deadline_input.date().toString("dd/MM/yyyy"),
+            
             'officer_name': self.officer_name_input.text(),
+            # Placeholder for designation/jurisdiction if not in DB
             
             'financial_year': self.proceeding_data.get('financial_year', '-'),
-            'section': self.proceeding_data.get('adjudication_section', '-'),
-            
-            # Context Flags
-            'is_direct': self.proceeding_data.get('source_type') == 'ADJUDICATION' and not self.proceeding_data.get('source_scrutiny_id'),
-            'asmt10_ref': self.proceeding_data.get('source_scrutiny_id', '-'),
+            'section_num': self.proceeding_data.get('adjudication_section', '-'),
             
             'issues': [],
+            'tax_rows': [],
             'total_tax': 0.0,
             'total_interest': 0.0,
             'total_penalty': 0.0,
-            'grand_total': 0.0
+            'grand_total_val': 0.0, # Raw value for validation
+            'grand_total': "0.00"
         }
         
         # 3. Issues & Financials
         from src.utils.formatting import format_indian_number
         
+        acts = ['IGST', 'CGST', 'SGST', 'Cess']
+        agg = {act: {'t':0,'i':0,'p':0} for act in acts}
+        
+        total_tax_val = 0.0
+        total_int_val = 0.0
+        total_pen_val = 0.0
+        
         for idx, card in enumerate(self.issue_cards):
-            # Prefer calculated breakdown
             breakdown = card.get_tax_breakdown() if hasattr(card, 'get_tax_breakdown') else {}
             
             # Helper to sum issue totals
             i_tax = sum(v.get('tax', 0) for v in breakdown.values())
             i_int = sum(v.get('interest', 0) for v in breakdown.values())
             i_pen = sum(v.get('penalty', 0) for v in breakdown.values())
+            i_total = i_tax + i_int + i_pen
             
             issue_data = {
                 'index': idx + 1,
@@ -1765,162 +1864,85 @@ class ProceedingsWorkspace(QWidget):
                 'tax': i_tax,
                 'interest': i_int,
                 'penalty': i_pen,
-                'total': i_tax + i_int + i_pen,
+                'total': i_total,
+                'total_fmt': format_indian_number(i_total, prefix_rs=False),
                 'breakdown': breakdown
             }
             model['issues'].append(issue_data)
             
-            model['total_tax'] += i_tax
-            model['total_interest'] += i_int
-            model['total_penalty'] += i_pen
-            model['grand_total'] += issue_data['total']
-            
-        model['grand_total_fmt'] = format_indian_number(model['grand_total'], prefix_rs=True)
-        return model
-
-    def _render_drc01a_preview(self, model):
-        """Generate HTML for DRC-01A Preview"""
-        html = f"""
-        <html>
-        <head>
-            <style>
-                body {{ font-family: 'Segoe UI', sans-serif; padding: 40px; color: #333; }}
-                h1 {{ text-align: center; color: #2c3e50; font-size: 18pt; margin-bottom: 5px; }}
-                .subtitle {{ text-align: center; font-size: 12pt; font-weight: bold; margin-bottom: 30px; }}
-                .meta-table {{ width: 100%; margin-bottom: 20px; border-collapse: collapse; }}
-                .meta-table td {{ padding: 5px; vertical-align: top; }}
-                .section-header {{ background-color: #f8f9fa; padding: 8px; font-weight: bold; border-left: 4px solid #3498db; margin-top: 20px; }}
-                table.demand {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
-                table.demand th, table.demand td {{ border: 1px solid #ddd; padding: 8px; text-align: right; }}
-                table.demand th {{ background-color: #f1f2f6; text-align: center; }}
-                .footer {{ margin-top: 40px; text-align: right; font-weight: bold; }}
-            </style>
-        </head>
-        <body>
-            <h1>FORM GST DRC-01A</h1>
-            <div class="subtitle">Intimation of tax ascertained as being payable under section 73(5)/74(5)</div>
-            
-            <table class='meta-table'>
-                <tr>
-                    <td width="50%">
-                        <b>Taxpayer Details:</b><br>
-                        GSTIN: {model['gstin']}<br>
-                        Legal Name: {model['legal_name']}<br>
-                        Trade Name: {model['trade_name']}
-                    </td>
-                    <td width="50%" style="text-align: right">
-                        <b>Case Details:</b><br>
-                        Case ID: {self.proceeding_id}<br>
-                        Financial Year: {model['financial_year']}<br>
-                        Intimation No.: {model['oc_no']}<br>
-                        Date: {model['oc_date']}
-                    </td>
-                </tr>
-            </table>
-
-            <div class="section-header">Brief Facts of the Case</div>
-            <p>
-                Based on the verification of returns and other details, discrepancies have been noticed for the tax period 
-                {model['financial_year']}. The details are as follows:
-            </p>
-            <ul>
-        """
-        
-        for issue in model['issues']:
-            html += f"<li><b>{issue['title']}</b>: Liability determined: ₹{issue['total']:,.2f}</li>"
-            
-        html += """
-            </ul>
-            
-            <div class="section-header">Summary of Tax Liability</div>
-            <table class='demand'>
-                <tr>
-                    <th>Act</th>
-                    <th>Tax</th>
-                    <th>Interest</th>
-                    <th>Penalty</th>
-                    <th>Total</th>
-                </tr>
-        """
-        
-        # Aggregate Breakdown for Table
-        acts = ['IGST', 'CGST', 'SGST', 'Cess']
-        agg = {act: {'t':0,'i':0,'p':0} for act in acts}
-        
-        for issue in model['issues']:
-            bd = issue['breakdown']
+            # Aggregate for global table
             for act in acts:
-                if act in bd:
-                    agg[act]['t'] += bd[act].get('tax', 0)
-                    agg[act]['i'] += bd[act].get('interest', 0)
-                    agg[act]['p'] += bd[act].get('penalty', 0)
-        
+                if act in breakdown:
+                    agg[act]['t'] += breakdown[act].get('tax', 0)
+                    agg[act]['i'] += breakdown[act].get('interest', 0)
+                    agg[act]['p'] += breakdown[act].get('penalty', 0)
+                    
+            total_tax_val += i_tax
+            total_int_val += i_int
+            total_pen_val += i_pen
+            model['grand_total_val'] += i_total
+
+        # Format Aggregates for Template
         for act in acts:
             t, i, p = agg[act]['t'], agg[act]['i'], agg[act]['p']
             if t+i+p > 0:
-                html += f"""
-                <tr>
-                    <td style='text-align:left'><b>{act}</b></td>
-                    <td>{t:,.2f}</td>
-                    <td>{i:,.2f}</td>
-                    <td>{p:,.2f}</td>
-                    <td><b>{(t+i+p):,.2f}</b></td>
-                </tr>
-                """
-                
-        html += f"""
-                <tr style='background-color: #ecf0f1;'>
-                    <td style='text-align:left'><b>Total</b></td>
-                    <td><b>{model['total_tax']:,.2f}</b></td>
-                    <td><b>{model['total_interest']:,.2f}</b></td>
-                    <td><b>{model['total_penalty']:,.2f}</b></td>
-                    <td><b>{model['grand_total']:,.2f}</b></td>
-                </tr>
-            </table>
+                row = {
+                    'act': act,
+                    'tax': format_indian_number(t),
+                    'interest': format_indian_number(i),
+                    'penalty': format_indian_number(p),
+                    'total': format_indian_number(t+i+p)
+                }
+                model['tax_rows'].append(row)
             
-            <div class="footer">
-                Proper Officer<br>
-                (Signature & Name)
-            </div>
-        </body>
-        </html>
+        model['total_tax'] = format_indian_number(total_tax_val, prefix_rs=True)
+        model['total_interest'] = format_indian_number(total_int_val, prefix_rs=True)
+        model['total_penalty'] = format_indian_number(total_pen_val, prefix_rs=True)
+        model['grand_total'] = format_indian_number(model['grand_total_val'], prefix_rs=True)
+        
+        return model
+
+    def render_drc01a_html(self, model=None, for_pdf=False):
         """
-        return html
-
-    def generate_pdf(self, doc_type="DRC-01A"):
-        """Generate PDF for the specified document type"""
-        if doc_type == "DRC-01A":
+        Single Source of Truth Renderer for DRC-01A.
+        Uses Jinja2 template 'drc01a.html'.
+        """
+        if model is None:
             model = self._get_drc01a_model()
-            html_content = self._render_drc01a_preview(model)
-            filename = f"DRC-01A_{model['oc_no'].replace('/', '_') or 'DRAFT'}.pdf"
-        elif doc_type == "SCN":
-             # Placeholder for SCN
-             QMessageBox.information(self, "Info", "SCN PDF Generation is handled separately.")
-             return
-        else:
-             return
-
-        from PyQt6.QtPrintSupport import QPrinter
-        from PyQt6.QtGui import QTextDocument
-        from PyQt6.QtWidgets import QFileDialog
-
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save PDF", filename, "PDF Files (*.pdf)")
-        if not file_path: return
-
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
-        printer.setOutputFileName(file_path)
-        
-        doc = QTextDocument()
-        doc.setHtml(html_content)
-        doc.print(printer)
-        
-        QMessageBox.information(self, "Success", f"PDF saved successfully to:\n{file_path}")
-        import os
+            
         try:
-            os.startfile(file_path)
-        except: pass
+            # Locate Template
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # Work up to src/templates
+            template_dir = os.path.join(os.path.dirname(os.path.dirname(current_dir)), "src", "templates")
+            
+            # [PHASE 5] Template Path Fix
+            # Locate PROJECT_ROOT/templates (Where scn.html lives)
+            current_dir = os.path.dirname(os.path.abspath(__file__)) # src/ui
+            src_dir = os.path.dirname(current_dir) # src
+            root_dir = os.path.dirname(src_dir) # gst (Project Root)
+            template_dir = os.path.join(root_dir, "templates")
 
+            print(f"DEBUG: Loading Templates from Root: {template_dir}")
+            
+            if not os.path.exists(os.path.join(template_dir, 'drc01a.html')):
+                 print(f"CRITICAL: drc01a.html NOT FOUND in {template_dir}")
+                 # Fallback for dev environment oddities
+                 if os.path.exists("D:/gst/templates/drc01a.html"):
+                     template_dir = "D:/gst/templates"
+
+            env = Environment(loader=FileSystemLoader(template_dir))
+            template = env.get_template('drc01a.html')
+            
+            rendered = template.render(**model)
+            print(f"DEBUG: Rendered HTML Length: {len(rendered)}")
+            return rendered
+            
+        except Exception as e:
+            print(f"Error rendering DRC-01A: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"<h3>Render Error: {str(e)}</h3>"
     def load_sections(self):
         """Populate Adjudication Sections"""
         if not hasattr(self, 'section_combo'): return
@@ -5061,7 +5083,7 @@ class ProceedingsWorkspace(QWidget):
         copy_text = self.copy_to_editor.toPlainText()
         model['copy_submitted_to'] = [line for line in copy_text.split('\n') if line.strip()]
         
-        model['show_letterhead'] = self.show_letterhead_cb.isChecked()
+        model['show_letterhead'] = self.show_letterhead_cb.isChecked() if hasattr(self, 'show_letterhead_cb') else False
         
         # [NEW] Introductory Narrative (Grounds)
         try:
@@ -5878,6 +5900,24 @@ class ProceedingsWorkspace(QWidget):
                 # REQUESTING VIEW MODE
                 self.drc01a_draft_container.hide()
                 self.drc01a_view_container.show()
+                
+                # [PHASE 5] Snapshot Freeze Logic
+                if self.get_current_stage() >= WorkflowStage.DRC01A_ISSUED:
+                    try:
+                        oc_no = self.oc_number_input.text().strip()
+                        safe_oc = "".join([c for c in oc_no if c.isalnum() or c in ('-','_')])
+                        filename = f"DRC-01A_{safe_oc}.html"
+                        
+                        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                        file_path = os.path.join(base_dir, "data", "generated_documents", filename)
+                        
+                        if os.path.exists(file_path):
+                            from PyQt6.QtCore import QUrl
+                            self.drc01a_browser.setUrl(QUrl.fromLocalFile(file_path))
+                        else:
+                            self.drc01a_browser.setHtml(f"<h3 style='color:red; text-align:center'>Snapshot File Not Found: {filename}</h3>")
+                    except Exception as e:
+                        self.drc01a_browser.setHtml(f"<h3 style='color:red; text-align:center'>Error loading snapshot: {str(e)}</h3>")
                 
         elif doc_type == "scn":
              # SCN Logic (Placeholder for future hardening)

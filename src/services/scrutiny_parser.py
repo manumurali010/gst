@@ -32,7 +32,11 @@ class ScrutinyParser:
         "IMPORT_ITC_MISMATCH": {"type": "tiered", "alert_limit": 50},
         "RULE_42_43_VIOLATION": {"type": "tiered", "alert_limit": 50},
         "ITC_3B_2B_9X4": {"type": "tiered", "alert_limit": 50},
-        "SECTION_16_4_VIOLATION": {"type": "binary", "tolerance": 0} # Strict 0 tolerance
+        "SECTION_16_4_VIOLATION": {"type": "binary", "tolerance": 0},
+        "RCM_3B_VS_CASH": {"type": "binary", "tolerance": 0},
+        "RCM_ITC_VS_CASH": {"type": "binary", "tolerance": 0},
+        "RCM_ITC_VS_2B": {"type": "binary", "tolerance": 0},
+        "RCM_CASH_VS_2B": {"type": "binary", "tolerance": 0}
     }
 
     # [UI STANDARDIZATION] Reason Registry (Strict Keys)
@@ -2829,8 +2833,9 @@ class ScrutinyParser:
                   
                   # Aggregation Guard Logging
                   if len(self.analyzers) > 1:
-                      print(f"WARNING [SOP-4]: Aggregating 'All Other ITC' from {len(self.analyzers)} 2B files. Ensure distinct periods.")
-                  
+                      # Internal logging only
+                      pass
+                      
                   for a in self.analyzers:
                        res = a.get_all_other_itc_raw_data()
                        if res is not None:
@@ -2842,6 +2847,64 @@ class ScrutinyParser:
                   
                   if not found_any: return None
                   return {'igst': total_igst, 'cgst': total_cgst, 'sgst': total_sgst, 'cess': total_cess}
+
+             def get_rcm_inward_supplies(self):
+                  """
+                  Aggregates RCM Inward Supplies from all child analyzers.
+                  Sum tax heads -> Round at end.
+                  """
+                  total = {'igst': 0.0, 'cgst': 0.0, 'sgst': 0.0, 'cess': 0.0}
+                  found_any = False
+                  
+                  for a in self.analyzers:
+                       res = a.get_rcm_inward_supplies()
+                       if res:
+                           found_any = True
+                           for k in total:
+                               total[k] += res.get(k, 0)
+                  
+                  if not found_any: return None
+                  return {k: int(round(v)) for k, v in total.items()}
+
+             def get_rcm_credit_notes(self):
+                  """
+                  Aggregates RCM Credit Notes from all child analyzers.
+                  """
+                  total = {'igst': 0.0, 'cgst': 0.0, 'sgst': 0.0, 'cess': 0.0}
+                  found_any = False
+                  
+                  for a in self.analyzers:
+                       res = a.get_rcm_credit_notes()
+                       if res:
+                           found_any = True
+                           for k in total:
+                               total[k] += res.get(k, 0)
+                               
+                  if not found_any: return None
+                  return {k: int(round(v)) for k, v in total.items()}
+
+
+             def get_rcm_summary(self):
+                  total = {"igst": 0, "cgst": 0, "sgst": 0, "cess": 0}
+                  found = False
+                  for a in self.analyzers:
+                       if hasattr(a, 'get_rcm_summary'):
+                            res = a.get_rcm_summary()
+                            if res:
+                                 found = True
+                                 for k in total: total[k] += res.get(k, 0)
+                  return total if found else None
+
+             def get_rcm_credit_notes(self):
+                  total = {"igst": 0, "cgst": 0, "sgst": 0, "cess": 0}
+                  found = False
+                  for a in self.analyzers:
+                       if hasattr(a, 'get_rcm_credit_notes'):
+                            res = a.get_rcm_credit_notes()
+                            if res:
+                                 found = True
+                                 for k in total: total[k] += res.get(k, 0)
+                  return total if found else None
 
         gstr2b_composite = CompositeGSTR2B(gstr2b_analyzers) if gstr2b_analyzers else None
         
@@ -3265,6 +3328,28 @@ class ScrutinyParser:
              if res_sop9.get("status") != "info": analyzed_count += 1
 
         
+             if res_sop9.get("status") != "info": analyzed_count += 1
+
+        # 13-16. RCM & Interest
+        # Master Data Extraction
+        sop_data_13_16 = self._extract_sop_13_16_data(gstr3b_pdf_list, gstr2b_composite)
+        
+        # SOP-13
+        res_13 = self._parse_sop_13(sop_data_13_16, db_schema=db_schemas.get("RCM_3B_VS_CASH") if db_schemas else None)
+        if res_13: issues.append(res_13); analyzed_count += 1
+        
+        # SOP-14
+        res_14 = self._parse_sop_14(sop_data_13_16, db_schema=db_schemas.get("RCM_ITC_VS_CASH") if db_schemas else None)
+        if res_14: issues.append(res_14); analyzed_count += 1
+        
+        # SOP-15
+        res_15 = self._parse_sop_15(sop_data_13_16, db_schema=db_schemas.get("RCM_ITC_VS_2B") if db_schemas else None)
+        if res_15: issues.append(res_15); analyzed_count += 1
+        
+        # SOP-16
+        res_16 = self._parse_sop_16(sop_data_13_16, db_schema=db_schemas.get("RCM_CASH_VS_2B") if db_schemas else None)
+        if res_16: issues.append(res_16); analyzed_count += 1
+
         summary = {
             "total_issues": len([i for i in issues if isinstance(i, dict) and i.get('total_shortfall', 0) > 0]),
             "total_tax_shortfall": sum([i.get("total_shortfall", 0) for i in issues if isinstance(i, dict)]),
@@ -3284,3 +3369,298 @@ class ScrutinyParser:
             "issues": issues,
             "summary": summary
         }
+
+    # ==========================================
+    # SOP 13-16 Implementation (RCM & Interest)
+    # ==========================================
+
+    def _extract_sop_13_16_data(self, gstr3b_pdf_list, gstr2b_composite):
+        """
+        Master Data Extractor for SOPs 13-16.
+        Aggregates data from 3B PDFs and 2B Excel/Composite.
+        Returns a 'clean' data object for logic consumption.
+        """
+        from src.utils.pdf_parsers import (
+            parse_gstr3b_pdf_table_3_1_d, 
+            parse_gstr3b_pdf_table_4_a_2_3, 
+            parse_gstr3b_pdf_table_6_1_cash
+        )
+
+        data = {
+            "3b_3_1_d": {"igst": 0, "cgst": 0, "sgst": 0, "cess": 0},
+            "3b_4a_2_3": {"igst": 0, "cgst": 0, "sgst": 0, "cess": 0},
+            "3b_6_1_cash": {"igst": 0, "cgst": 0, "sgst": 0, "cess": 0},
+            "2b_rcm_inward": {"igst": 0, "cgst": 0, "sgst": 0, "cess": 0}, # Gross Inward
+            "2b_rcm_cn": {"igst": 0, "cgst": 0, "sgst": 0, "cess": 0},     # Credit Notes
+            "flags": {
+                "3b_found": False,
+                "3b_6_1_found": False,
+                "2b_found": False
+            }
+        }
+
+        # 1. GSTR-3B Aggregation
+        if gstr3b_pdf_list:
+            for pdf in gstr3b_pdf_list:
+                try:
+                    # Table 3.1(d) - RCM Liability
+                    r_31d = parse_gstr3b_pdf_table_3_1_d(pdf)
+                    if r_31d:
+                        data["flags"]["3b_found"] = True
+                        for k in data["3b_3_1_d"]: data["3b_3_1_d"][k] += int(round(r_31d.get(k, 0.0)))
+
+                    # Table 4(A)(2)+(3) - RCM ITC
+                    r_4a = parse_gstr3b_pdf_table_4_a_2_3(pdf)
+                    if r_4a:
+                        for k in data["3b_4a_2_3"]: data["3b_4a_2_3"][k] += int(round(r_4a.get(k, 0.0)))
+
+                    # Table 6.1 - Cash Paid
+                    r_61 = parse_gstr3b_pdf_table_6_1_cash(pdf)
+                    if r_61:
+                        data["flags"]["3b_6_1_found"] = True
+                        for k in data["3b_6_1_cash"]: data["3b_6_1_cash"][k] += int(round(r_61.get(k, 0.0)))
+                        
+                except Exception as e:
+                    print(f"SOP 13-16 3B Parse Warning: {e}")
+
+        # 2. GSTR-2B Extraction
+        if gstr2b_composite:
+            try:
+                # Use new split methods
+                if hasattr(gstr2b_composite, 'get_rcm_inward_supplies'):
+                    r_2b_inward = gstr2b_composite.get_rcm_inward_supplies()
+                    if r_2b_inward:
+                        data["flags"]["2b_found"] = True
+                        for k in data["2b_rcm_inward"]: data["2b_rcm_inward"][k] += int(round(r_2b_inward.get(k, 0)))
+
+                if hasattr(gstr2b_composite, 'get_rcm_credit_notes'):
+                    r_cn = gstr2b_composite.get_rcm_credit_notes()
+                    if r_cn:
+                        for k in data["2b_rcm_cn"]: data["2b_rcm_cn"][k] += int(round(r_cn.get(k, 0)))
+            except Exception as e:
+                print(f"SOP 13-16 2B Parse Warning: {e}")
+
+        return data
+
+    def _check_missing_data(self, data, required_flags, issue_id):
+        """Helper to return Alert payload if data missing."""
+        missing = []
+        if "3b_found" in required_flags and not data["flags"]["3b_found"]: missing.append("GSTR-3B PDF")
+        if "3b_6_1_found" in required_flags and not data["flags"]["3b_6_1_found"]: missing.append("Table 6.1 in 3B")
+        if "2b_found" in required_flags and not data["flags"]["2b_found"]: missing.append("GSTR-2B Data")
+        
+        if missing:
+            return {
+                "issue_id": issue_id,
+                "status": "alert",
+                "status_msg": f"Data Missing: {', '.join(missing)}",
+                "total_shortfall": 0
+            }
+        return None
+
+    def _parse_sop_13(self, data, db_schema=None):
+        """SOP-13: RCM Liability (3.1.d) vs Cash Paid (6.1)."""
+        issue_id = "RCM_3B_VS_CASH"
+        alert = self._check_missing_data(data, ["3b_found", "3b_6_1_found"], issue_id)
+        if alert: return alert
+
+        vals_liab = data["3b_3_1_d"]
+        vals_cash = data["3b_6_1_cash"]
+        
+        diff = {k: vals_liab[k] - vals_cash[k] for k in vals_liab}
+        # Liability: Declared - Cash. If Declared > Cash, Shortfall.
+        shortfall = {k: max(0, diff[k]) for k in diff}
+        total_sf = sum(shortfall.values())
+
+        status, msg = self._determine_status(total_sf, issue_id)
+        
+        rows = [
+            {"col0": {"value": "RCM Liability declared in Table 3.1(d)"}, "col1": {"value": vals_liab['cgst']}, "col2": {"value": vals_liab['sgst']}, "col3": {"value": vals_liab['igst']}, "col4": {"value": vals_liab['cess']}},
+            {"col0": {"value": "Tax discharged by cash as per Table 6.1(B)"}, "col1": {"value": vals_cash['cgst']}, "col2": {"value": vals_cash['sgst']}, "col3": {"value": vals_cash['igst']}, "col4": {"value": vals_cash['cess']}},
+            {"col0": {"value": "Difference"}, "col1": {"value": diff['cgst']}, "col2": {"value": diff['sgst']}, "col3": {"value": diff['igst']}, "col4": {"value": diff['cess']}},
+            {"col0": {"value": "Short Payment (Liability)"}, "col1": {"value": shortfall['cgst']}, "col2": {"value": shortfall['sgst']}, "col3": {"value": shortfall['igst']}, "col4": {"value": shortfall['cess']}}
+        ]
+        
+        res = {
+            "issue_id": issue_id,
+            "category": "RCM Payment Verification",
+            "description": "Validation of RCM Liability payment via Cash",
+            "total_shortfall": total_sf,
+            "status": status,
+            "status_msg": msg,
+            "summary_table": {"columns": ["Description", "CGST", "SGST", "IGST", "Cess"], "rows": rows}
+        }
+        
+        if db_schema:
+            var = {}
+            for k in ["cgst", "sgst", "igst", "cess"]:
+                var[f"row1_{k}"] = vals_liab[k]
+                var[f"row2_{k}"] = vals_cash[k]
+                var[f"row3_{k}"] = diff[k]
+                var[f"row4_{k}"] = shortfall[k]
+            h = self._hydrate_table(db_schema, var, issue_id)
+            if h: res["summary_table"] = h
+            
+        return res
+
+    def _parse_sop_14(self, data, db_schema=None):
+        """SOP-14: RCM ITC (4A2+3) vs Cash Paid (6.1)."""
+        issue_id = "RCM_ITC_VS_CASH"
+        alert = self._check_missing_data(data, ["3b_found", "3b_6_1_found"], issue_id)
+        if alert: return alert
+
+        vals_itc = data["3b_4a_2_3"]
+        vals_cash = data["3b_6_1_cash"]
+        
+        diff = {k: vals_itc[k] - vals_cash[k] for k in vals_itc}
+        # If ITC Claimed > Cash Paid, potential excess ITC (if not paid).
+        shortfall = {k: max(0, diff[k]) for k in diff}
+        total_sf = sum(shortfall.values())
+
+        status, msg = self._determine_status(total_sf, issue_id)
+        
+        rows = [
+            {"col0": {"value": "ITC availed in respect of 4(A)(2) and 4(A)(3) of GSTR 3B"}, "col1": {"value": vals_itc['cgst']}, "col2": {"value": vals_itc['sgst']}, "col3": {"value": vals_itc['igst']}, "col4": {"value": vals_itc['cess']}},
+            {"col0": {"value": "Tax discharged by cash as per Table 6.1(B)"}, "col1": {"value": vals_cash['cgst']}, "col2": {"value": vals_cash['sgst']}, "col3": {"value": vals_cash['igst']}, "col4": {"value": vals_cash['cess']}},
+            {"col0": {"value": "Difference"}, "col1": {"value": diff['cgst']}, "col2": {"value": diff['sgst']}, "col3": {"value": diff['igst']}, "col4": {"value": diff['cess']}},
+            {"col0": {"value": "Liability"}, "col1": {"value": shortfall['cgst']}, "col2": {"value": shortfall['sgst']}, "col3": {"value": shortfall['igst']}, "col4": {"value": shortfall['cess']}}
+        ]
+        
+        res = {
+            "issue_id": issue_id,
+            "category": "RCM ITC Verification",
+            "description": "Validation of RCM ITC claim against Cash Payment",
+            "total_shortfall": total_sf,
+            "status": status,
+            "status_msg": msg,
+            "summary_table": {"columns": ["Description", "CGST", "SGST", "IGST", "Cess"], "rows": rows}
+        }
+        
+        if db_schema:
+            var = {}
+            for k in ["cgst", "sgst", "igst", "cess"]:
+                var[f"row1_{k}"] = vals_itc[k]
+                var[f"row2_{k}"] = vals_cash[k]
+                var[f"row3_{k}"] = diff[k]
+                var[f"row4_{k}"] = shortfall[k]
+            h = self._hydrate_table(db_schema, var, issue_id)
+            if h: res["summary_table"] = h
+            
+        return res
+
+    def _parse_sop_15(self, data, db_schema=None):
+        """SOP-15: RCM ITC (4A2+3) vs GSTR-2B."""
+        issue_id = "RCM_ITC_VS_2B"
+        alert = self._check_missing_data(data, ["3b_found", "2b_found"], issue_id)
+        if alert: return alert
+
+        vals_itc = data["3b_4a_2_3"]
+        vals_2b_inward = data["2b_rcm_inward"]
+        vals_cn = data["2b_rcm_cn"]
+        
+        # Net 2B Logic: (Inward - CN)
+        # We need to present them as separate rows but calculate difference based on steps
+        
+        # Row 4: Difference = Row 1 - (Row 2 - Row 3)
+        # Row 5: Liability (If Difference > 0)
+        
+        diff = {}
+        shortfall = {}
+        
+        for k in vals_itc:
+             net_2b = vals_2b_inward[k] - vals_cn[k]
+             d = vals_itc[k] - net_2b
+             diff[k] = d
+             shortfall[k] = max(0, d)
+             
+        total_sf = sum(shortfall.values())
+
+        status, msg = self._determine_status(total_sf, issue_id)
+        
+        rows = [
+            {"col0": {"value": "ITC availed in respect of 4(A)(2) and 4(A)(3) of GSTR 3B"}, "col1": {"value": vals_itc['cgst']}, "col2": {"value": vals_itc['sgst']}, "col3": {"value": vals_itc['igst']}, "col4": {"value": vals_itc['cess']}},
+            {"col0": {"value": "Inward Supplies Liable for Reverse Charge as per GSTR-2B"}, "col1": {"value": vals_2b_inward['cgst']}, "col2": {"value": vals_2b_inward['sgst']}, "col3": {"value": vals_2b_inward['igst']}, "col4": {"value": vals_2b_inward['cess']}},
+            {"col0": {"value": "ITC pertaining to credit notes (Reverse Charge)"}, "col1": {"value": vals_cn['cgst']}, "col2": {"value": vals_cn['sgst']}, "col3": {"value": vals_cn['igst']}, "col4": {"value": vals_cn['cess']}},
+            {"col0": {"value": "Difference"}, "col1": {"value": diff['cgst']}, "col2": {"value": diff['sgst']}, "col3": {"value": diff['igst']}, "col4": {"value": diff['cess']}},
+            {"col0": {"value": "Liability"}, "col1": {"value": shortfall['cgst']}, "col2": {"value": shortfall['sgst']}, "col3": {"value": shortfall['igst']}, "col4": {"value": shortfall['cess']}}
+        ]
+        
+        res = {
+            "issue_id": issue_id,
+            "category": "RCM ITC vs GSTR-2B",
+            "description": "Validation of RCM ITC claim against GSTR-2B",
+            "total_shortfall": total_sf,
+            "status": status,
+            "status_msg": msg,
+            "summary_table": {"columns": ["Description", "CGST", "SGST", "IGST", "Cess"], "rows": rows}
+        }
+        
+        if db_schema:
+            var = {}
+            for k in ["cgst", "sgst", "igst", "cess"]:
+                var[f"row1_{k}"] = vals_itc[k]
+                var[f"row2_{k}"] = vals_2b_inward[k]
+                var[f"row3_{k}"] = vals_cn[k]
+                var[f"row4_{k}"] = diff[k]
+                var[f"row5_{k}"] = shortfall[k]
+            h = self._hydrate_table(db_schema, var, issue_id)
+            if h: res["summary_table"] = h
+            
+        return res
+
+    def _parse_sop_16(self, data, db_schema=None):
+        """SOP-16: RCM Liability (2B) vs Cash Paid (6.1)."""
+        issue_id = "RCM_CASH_VS_2B"
+        alert = self._check_missing_data(data, ["3b_6_1_found", "2b_found"], issue_id)
+        if alert: return alert
+
+        vals_cash = data["3b_6_1_cash"]
+        vals_2b_inward = data["2b_rcm_inward"]
+        vals_cn = data["2b_rcm_cn"]
+        
+        # Logic: Net 2B - Cash
+        # Row 4 Difference = (Row 2 - Row 3) - Row 1
+        
+        diff = {}
+        shortfall = {}
+        
+        for k in vals_cash:
+            net_2b = vals_2b_inward[k] - vals_cn[k]
+            d = net_2b - vals_cash[k]
+            diff[k] = d
+            shortfall[k] = max(0, d)
+            
+        total_sf = sum(shortfall.values())
+
+        status, msg = self._determine_status(total_sf, issue_id)
+        
+        rows = [
+            {"col0": {"value": "Tax discharged by cash as per Table 6.1(B)"}, "col1": {"value": vals_cash['cgst']}, "col2": {"value": vals_cash['sgst']}, "col3": {"value": vals_cash['igst']}, "col4": {"value": vals_cash['cess']}},
+            {"col0": {"value": "Inward Supplies Liable for Reverse Charge as per GSTR-2B"}, "col1": {"value": vals_2b_inward['cgst']}, "col2": {"value": vals_2b_inward['sgst']}, "col3": {"value": vals_2b_inward['igst']}, "col4": {"value": vals_2b_inward['cess']}},
+            {"col0": {"value": "ITC pertaining to credit notes (Reverse Charge)"}, "col1": {"value": vals_cn['cgst']}, "col2": {"value": vals_cn['sgst']}, "col3": {"value": vals_cn['igst']}, "col4": {"value": vals_cn['cess']}},
+            {"col0": {"value": "Difference"}, "col1": {"value": diff['cgst']}, "col2": {"value": diff['sgst']}, "col3": {"value": diff['igst']}, "col4": {"value": diff['cess']}},
+            {"col0": {"value": "Liability"}, "col1": {"value": shortfall['cgst']}, "col2": {"value": shortfall['sgst']}, "col3": {"value": shortfall['igst']}, "col4": {"value": shortfall['cess']}}
+        ]
+        
+        res = {
+            "issue_id": issue_id,
+            "category": "RCM Liability vs GSTR-2B",
+            "description": "Validation of RCM Liability (GSTR-2B) against Cash Payment",
+            "total_shortfall": total_sf,
+            "status": status,
+            "status_msg": msg,
+            "summary_table": {"columns": ["Description", "CGST", "SGST", "IGST", "Cess"], "rows": rows}
+        }
+        
+        if db_schema:
+            var = {}
+            for k in ["cgst", "sgst", "igst", "cess"]:
+                var[f"row1_{k}"] = vals_cash[k]
+                var[f"row2_{k}"] = vals_2b_inward[k]
+                var[f"row3_{k}"] = vals_cn[k]
+                var[f"row4_{k}"] = diff[k]
+                var[f"row5_{k}"] = shortfall[k]
+            h = self._hydrate_table(db_schema, var, issue_id)
+            if h: res["summary_table"] = h
+            
+        return res

@@ -38,4 +38,18 @@ FORMS_MAP = {
     "Default": ["DRC-01", "DRC-01A", "DRC-02", "DRC-03", "DRC-07", "RFD-01", "REG-17", "SCN", "Order"]
 }
 
-TAX_TYPES = ["CGST", "SGST", "IGST", "CESS"]
+# Tax Constants
+TAX_TYPES = ["IGST", "CGST", "SGST", "Cess"]
+
+from enum import IntEnum
+
+class WorkflowStage(IntEnum):
+    ASMT10_DRAFT = 10
+    ASMT10_ISSUED = 20
+    DRC01A_DRAFT = 30
+    DRC01A_ISSUED = 40
+    SCN_DRAFT = 50
+    SCN_ISSUED = 60
+    PH_SCHEDULED = 70
+    PH_COMPLETED = 75
+    ORDER_ISSUED = 80

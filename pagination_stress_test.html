@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            background: #f0f0f0;
+            font-family: 'Segoe UI', serif;
+            margin: 0;
+        }
+
+        .a4-page {
+            width: 210mm;
+            height: 297mm;
+            padding: 20mm;
+            /* PHASE A Standard */
+            background: white;
+            margin: 10px auto;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            box-sizing: border-box;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #scn-source-content {
+            display: none;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+
+        th,
+        td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            font-size: 10pt;
+        }
+
+        h3 {
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+        }
+
+        .signature-block {
+            margin-top: 50px;
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="scn-preview-wrapper"></div>
+
+    <!-- Source Content for 15+ Issues -->
+    <div id="scn-source-content">
+        <h1>SHOW CAUSE NOTICE</h1>
+        <p id="intro">This is a long introductory paragraph designed to sit near the first page break. It contains much
+            filler text to push the content down. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do
+            eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud
+            exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit
+            in voluptate velit esse cillum dolore eu fugiat nulla pariatur.</p>
+
+        <div id="issues-list"></div>
+
+        <div class="signature-block">
+            <p>Yours faithfully,</p>
+            <p>(Proper Officer)<br>Designation: State Tax Officer<br>Address: Circle I, Kochi</p>
+        </div>
+    </div>
+
+    <script>
+        // Populate 16 issues
+        const issuesContainer = document.getElementById('issues-list');
+        for (let i = 1; i <= 16; i++) {
+            const div = document.createElement('div');
+            div.innerHTML = `<h3>Issue ${i}: Complex Tax Discrepancy</h3>
+            <p>Detailed findings for issue ${i}. This issue involves a significant discrepancy in ITC claims.</p>
+            <table>
+                <tr><th>Description</th><th>Amount</th><th>Interest</th></tr>
+                <tr><td>Tax Shortfall</td><td>${i * 1000}</td><td>${i * 100}</td></tr>
+                <tr><td>Penalty Clause ${i}</td><td>500</td><td>0</td></tr>
+            </table>`;
+            issuesContainer.appendChild(div);
+        }
+
+        // --- Core Pagination Engine (Copied from scn.html) ---
+        const PAGE_HEIGHT = 1123;
+        let CONTENT_MAX_HEIGHT = 0;
+
+        function calculateMetrics() {
+            const probe = document.createElement('div');
+            probe.className = 'a4-page';
+            probe.style.visibility = 'hidden';
+            probe.style.position = 'absolute';
+            document.body.appendChild(probe);
+            const style = window.getComputedStyle(probe);
+            CONTENT_MAX_HEIGHT = PAGE_HEIGHT - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+            document.body.removeChild(probe);
+            console.log("METRICS_CALC: CONTENT_MAX_HEIGHT =" + CONTENT_MAX_HEIGHT);
+        }
+
+        function createNewPage() {
+            const page = document.createElement('div');
+            page.className = 'a4-page';
+            document.getElementById('scn-preview-wrapper').appendChild(page);
+            return page;
+        }
+
+        function paginate() {
+            calculateMetrics();
+            const source = document.getElementById('scn-source-content');
+            const wrapper = document.getElementById('scn-preview-wrapper');
+            wrapper.innerHTML = '';
+            source.style.display = 'block';
+            source.style.width = '680px';
+
+            let currentPage = createNewPage();
+            Array.from(source.children).forEach(child => {
+                const childHeight = child.offsetHeight;
+                const currentHeight = currentPage.scrollHeight; // Simulating page content height
+
+                if (currentHeight + childHeight <= CONTENT_MAX_HEIGHT) {
+                    currentPage.appendChild(child.cloneNode(true));
+                } else {
+                    currentPage = createNewPage();
+                    currentPage.appendChild(child.cloneNode(true));
+                }
+            });
+            source.style.display = 'none';
+            console.log("PAGINATION_COMPLETE: Total Pages =" + wrapper.children.length);
+        }
+
+        window.onload = paginate;
+    </script>
+</body>
+
+</html>

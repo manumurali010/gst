@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page {
+            size: A4;
+            margin: 0;
+        }
+
+        body {
+            font-family: 'Bookman Old Style', serif;
+            font-size: 11pt;
+            line-height: 1.5;
+            text-align: justify;
+            margin: 0;
+            padding: 40px;
+            background-color: #525659;
+            /* PDF Viewer Dark Grey */
+            color: #333;
+        }
+
+        .paper {
+            background-color: white;
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto;
+            padding: 20mm;
+            /* Elevated Shadow Effect */
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            box-sizing: border-box;
+            position: relative;
+        }
+
+        /* Print Override: Hide Background, Remove Shadow */
+        @media print {
+            body {
+                background-color: white;
+                padding: 0;
+            }
+
+            .paper {
+                box-shadow: none;
+                margin: 0;
+                width: 100%;
+                min-height: auto;
+                padding: 10mm;
+            }
+        }
+
+        .header {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            color: #000;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 10px 0;
+            font-size: 10pt;
+        }
+
+        td,
+        th {
+            border: 1px solid black;
+            padding: 5px;
+            text-align: center;
+            vertical-align: top;
+            color: #000;
+        }
+
+        /* Inner tables usually have headers */
+        th {
+            background-color: #f2f2f2;
+        }
+
+        .left-align {
+            text-align: left;
+        }
+
+        .right-align {
+            text-align: right;
+        }
+
+        .center-align {
+            text-align: center;
+        }
+
+        .bold {
+            font-weight: bold;
+        }
+
+        .section-title {
+            font-weight: bold;
+            margin-top: 15px;
+            margin-bottom: 5px;
+            text-decoration: underline;
+            color: #000;
+        }
+
+        ul.issues {
+            padding-left: 20px;
+            margin-top: 5px;
+        }
+
+        ul.issues li {
+            margin-bottom: 15px;
+        }
+
+        p {
+            margin-bottom: 10px;
+            color: #000;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="paper">
+        <!-- Header Table (OC No / Date) -->
+        <table style="border: none; width: 100%; margin-bottom: 10px;">
+            <tbody>
+                <tr style="border: none;">
+                    <td style="border: none; text-align: left; width: 50%;">
+                        <strong>OC No:</strong> {{ oc_no }}
+                    </td>
+                    <td style="border: none; text-align: right; width: 50%;">
+                        <strong>Date:</strong> {{ oc_date }}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="header">
+            FORM GST DRC-01A<br>
+            [See rule 142(1A)]<br>
+            Intimation of tax ascertained as being payable under section {{ section }}
+        </div>
+
+        <table style="border: none; width: 100%;">
+            <tbody>
+                <tr style="border: none;">
+                    <td style="border: none; text-align: right; width: 100%;">
+                        <strong>Financial Year:</strong> {{ financial_year }}<br>
+                        <strong>Case ID:</strong> {{ case_id }}
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p style="text-align: left;"><strong>To,</strong><br>
+            {{ legal_name }}<br>
+            {{ trade_name }}<br>
+            <strong>GSTIN:</strong> {{ gstin }}<br>
+            <strong>Address:</strong> {{ address }}
+        </p>
+
+        <p style="text-align: left;">
+            <strong>Sub.: Intimation of liability under section {{ section_num }} – reg</strong>
+        </p>
+
+        <p style="text-align: justify;">
+            Please refer to the above proceedings. In this regard, the amount of tax/interest/penalty payable by you
+            under
+            section {{ section_num }} with reference to the said case as ascertained by the undersigned in terms of the
+            available information, is given below:
+        </p>
+
+        <div class="section-title">1. Brief Facts of the Case</div>
+        <ul class="issues">
+            {% for issue in issues %}
+            <li>
+                <strong>{{ issue.title }}</strong><br>
+                {{ issue.description }}
+                {% if issue.total > 0 %}
+                <br><i>Liability determined: ₹{{ issue.total_fmt }}</i>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+
+        <div class="section-title">2. Tax Demand Details</div>
+        <table>
+            <thead>
+                <tr>
+                    <th style="vertical-align: middle;">Act</th>
+                    <th>Tax (₹)</th>
+                    <th>Interest (₹)</th>
+                    <th>Penalty (₹)</th>
+                    <th>Total (₹)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in tax_rows %}
+                <tr>
+                    <td class="left-align"><strong>{{ row.act }}</strong></td>
+                    <td>{{ row.tax }}</td>
+                    <td>{{ row.interest }}</td>
+                    <td>{{ row.penalty }}</td>
+                    <td><strong>{{ row.total }}</strong></td>
+                </tr>
+                {% endfor %}
+                <tr style="background-color: #e0e0e0;">
+                    <td class="left-align"><strong>Total</strong></td>
+                    <td><strong>{{ total_tax }}</strong></td>
+                    <td><strong>{{ total_interest }}</strong></td>
+                    <td><strong>{{ total_penalty }}</strong></td>
+                    <td><strong>{{ grand_total }}</strong></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <p style="margin-top: 20px;">
+            You are hereby advised to pay the amount of tax as ascertained above along with the amount of applicable
+            interest and penalty by <strong>{{ payment_date }}</strong>, failing which Show Cause Notice will be issued
+            under section {{ section_num }}.
+        </p>
+
+        <p style="margin-top: 10px;">
+            In case you wish to file any submissions against the above ascertainment, the same may be furnished by
+            <strong>{{ reply_date }}</strong> in Part B of this Form.
+        </p>
+
+        <br><br>
+        <p style="text-align: right;">
+            <strong>Proper Officer</strong><br>
+            (Signature)<br>
+            Name: <strong>{{ officer_name }}</strong><br>
+            Designation: {{ designation }}<br>
+            Jurisdiction: {{ jurisdiction }}
+        </p>
+    </div>
+</body>
+
+</html>

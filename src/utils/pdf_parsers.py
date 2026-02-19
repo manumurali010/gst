@@ -864,3 +864,123 @@ def parse_gstr3b_sop9_identifiers(file_path):
         print(f"SOP-9 Metadata Parse Error: {e}")
 
     return meta
+
+# ==========================================
+# New Parsers for SOP 13-16 (RCM/Cash/Interest)
+# ==========================================
+
+def _extract_period_strict(text):
+    """
+    Safeguard: Strict extraction of Financial Period from file content.
+    Returns: "YYYY-YY" string.
+    Raises: ValueError if indeterminate.
+    """
+    # 1. Look for definitive "Year: 2022-23" or "2022-23" ID pattern
+    match = re.search(r"(?:Year|Period)\s*[:\-\s]*(\d{4}-\d{2})", text, re.IGNORECASE)
+    if match:
+        return match.group(1)
+    
+    # 2. Fallback: Search for any YYYY-YY pattern in header area (first 1000 chars)
+    header = text[:1000]
+    match = re.search(r"\\b(20\d{2}-\d{2})\\b", header)
+    if match:
+        return match.group(1)
+        
+    raise ValueError("Could not strictly determine Financial Year from file content.")
+
+def parse_gstr3b_pdf_table_6_1_cash(file_path):
+    """
+    Extracts 'Paid in Cash' columns from Table 6.1 of GSTR-3B.
+    Anchor: '6.1 Payment of Tax'
+    Row: '(B) Reverse charge'
+    Target: Column group for 'Paid in Cash'.
+    
+    Standard 3B 6.1 Row Structure for 'Reverse Charge':
+    1. Description (Text)
+    2. Tax Payable (I)
+    3. Tax Payable (C)
+    4. Tax Payable (S)
+    5. Tax Payable (Cess)
+    6. Paid through ITC (I) [Usually Empty/Zero for RCM]
+    7. Paid through ITC (C)
+    8. Paid through ITC (S)
+    9. Paid through ITC (Cess)
+    10. Paid in Cash (I) [TARGET]
+    11. Paid in Cash (C) [TARGET]
+    12. Paid in Cash (S) [TARGET]
+    13. Paid in Cash (Cess) [TARGET]
+    
+    So indices 10,11,12,13 in 1-based column counting.
+    In 0-indexed number list (excluding description text), we expect:
+    Indices 8, 9, 10, 11 to be Cash.
+    """
+    results = {
+        "igst": 0, "cgst": 0, "sgst": 0, "cess": 0
+    }
+    
+    try:
+        import fitz
+        doc = fitz.open(file_path)
+        full_text = ""
+        for page in doc: full_text += page.get_text() + "\n"
+        doc.close()
+        
+        # 1. Period Safeguard
+        try:
+            full_text_meta = full_text[:2000] 
+            results["period"] = _extract_period_strict(full_text_meta)
+        except ValueError:
+            print(f"WARNING: Strict Period Check Failed for {file_path}")
+            return None 
+
+        # 2. Anchor to Table 6.1
+        start_marker = re.search(r"6\.1\s*Payment\s*of\s*tax", full_text, re.IGNORECASE)
+        if not start_marker:
+            return None
+            
+        table_text = full_text[start_marker.start():]
+        
+        # 3. Find Row (B) Section
+        row_regex = r"\(B\)\s*Reverse\s*charge.*"
+        
+        match = re.search(row_regex, table_text, re.IGNORECASE)
+        if match:
+            # Limit scope to max 2000 chars to cover all tax heads
+            section_b_text = table_text[match.end():match.end()+2000]
+            
+            # Helper to extract Cash from a Tax Head Row
+            # Strategy: Find row label, get numbers. Cash is usually Col 7 (idx 6) or near end.
+            # RCM rows often have 8 numbers: Pay, ITC(4 empty?), Cash, Int, Fee.
+            # If 8 numbers: Cash is at index 5 (0-1-2-3-4-5-6-7)? 
+            # 19840 (0), 0(1), 0(2), 0(3), 0(4), 19840(5), 0(6), 0(7).
+            # Yes, Index 5 (6th number) seems to be Cash.
+            # Alternatively: Index -3.
+            
+            def extract_cash_from_row(label_pattern, text_block):
+                m = re.search(label_pattern, text_block, re.IGNORECASE)
+                if m:
+                    # Get text until next newline or reasonable length needed for numbers
+                    # Numbers might be on next line or same line.
+                    # We grab a chunk after the label.
+                    post_label = text_block[m.end():m.end()+300]
+                    nums = _extract_numbers_from_text(post_label)
+                    
+                    # RCM Rows have 8 numbers: Pay, ITC(4), Cash, Int, Fee.
+                    # Cash is the 6th number (Index 5).
+                    if len(nums) >= 6: 
+                        val_str = nums[5]
+                        return int(round(_clean_amount(val_str)))
+                return 0
+
+            results["igst"] = extract_cash_from_row(r"Integrated\s*Tax", section_b_text)
+            results["cgst"] = extract_cash_from_row(r"Central\s*Tax", section_b_text)
+            results["sgst"] = extract_cash_from_row(r"State(?:/UT)?\s*Tax", section_b_text)
+            results["cess"] = extract_cash_from_row(r"Cess", section_b_text)
+            
+            return results
+                
+        return None
+        
+    except Exception as e:
+        print(f"Error parsing 6.1: {e}")
+        return None

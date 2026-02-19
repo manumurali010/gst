@@ -18,18 +18,15 @@ body {
 
 /* [A4 SIMULATION] Discrete Page Styling */
 .a4-page {
-    width: 794px;
-    /* Strictly A4 Width @ 96dpi */
-    height: 1123px;
-    /* Strictly A4 Height @ 96dpi */
+    width: 794px; /* Strictly A4 Width @ 96dpi */
+    height: 1123px; /* Strictly A4 Height @ 96dpi */
     background: white;
     margin: 0 auto 30px auto;
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-    /* Soft premium shadow */
     box-sizing: border-box;
     overflow: hidden;
     position: relative;
-    padding: 15mm;
+    padding: 20mm; /* Standardized to 20mm */
 }
 
 /* Aggressive Containment */

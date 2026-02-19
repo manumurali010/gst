@@ -4,12 +4,16 @@ import os
 import json
 import uuid
 from datetime import datetime
-from src.utils.constants import TAXPAYERS_FILE, CASES_FILE, CASE_FILES_FILE
+from src.utils.constants import TAXPAYERS_FILE, CASES_FILE, CASE_FILES_FILE, WorkflowStage
+
+class DatabaseError(Exception): pass
+class ConcurrencyError(DatabaseError): pass
 
 class DatabaseManager:
     _initialized = False
 
-    def __init__(self):
+    def __init__(self, db_path=None):
+        self.db_path = db_path
         self.ensure_files_exist()
         self.init_sqlite()
 
@@ -240,11 +244,10 @@ class DatabaseManager:
 
     # ---------------- Case File Register Methods ----------------
 
-    def create_case_file(self, data):
+    def _legacy_create_case_file_csv(self, data):
         """
-        Creates a new entry in the Case File Register.
-        data: dict containing GSTIN, Legal Name, Trade Name, Section, Status, etc.
-        Returns: case_id (str) or None if failed
+        [LEGACY] Creates a new entry in the Case File Register (CSV).
+        renamed to prevent accidental usage in modern flows.
         """
         try:
             import uuid
@@ -1036,9 +1039,12 @@ class DatabaseManager:
     def init_sqlite(self):
         """Initialize SQLite database"""
         from src.database.schema import init_db, DB_FILE
-        self.db_file = DB_FILE
+        
+        # Use injected path or default
+        self.db_file = self.db_path if self.db_path else DB_FILE
+        
         if not DatabaseManager._initialized:
-            init_db()
+            init_db(self.db_file)
             
             # [MIGRATION] Schema Update for Scrutiny Dashboard (Strategic Refactor)
             # Ensure 'description' column exists in issues_master
@@ -1105,9 +1111,82 @@ class DatabaseManager:
 
     # ---------------- SQLite Methods for New Architecture ----------------
 
+    @staticmethod
+    def generate_canonical_hash(data: dict) -> str:
+        """
+        Generate a deterministic SHA256 hash from a dictionary.
+        Uses canonical JSON serialization (sorted keys) and UTF-8 encoding.
+        """
+        import hashlib
+        import json
+        if not data: return ""
+        # Canonical string: sorted keys, no extra whitespace
+        canonical_str = json.dumps(data, sort_keys=True, separators=(',', ':')).encode('utf-8')
+        return hashlib.sha256(canonical_str).hexdigest()
+
+    def save_proceeding_draft(self, proceeding_id, snapshot_data):
+        """
+        Save a full snapshot to proceeding_drafts with 5-version rotation.
+        Transaction-safe pruning and insertion.
+        Deduplication: Skips save if hash matches the latest snapshot.
+        """
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # 1. Generate snapshot hash
+            snapshot_json = json.dumps(snapshot_data)
+            snapshot_hash = self.generate_canonical_hash(snapshot_data)
+            
+            # Deduplication Check: Fetch latest hash for this proceeding
+            cursor.execute("""
+                SELECT hash FROM proceeding_drafts 
+                WHERE proceeding_id = ? 
+                ORDER BY created_at DESC LIMIT 1
+            """, (proceeding_id,))
+            latest_hash_row = cursor.fetchone()
+            if latest_hash_row and latest_hash_row[0] == snapshot_hash:
+                print(f"SCN Governance: Snapshot for {proceeding_id} is identical to latest. Skipping redundant save.")
+                return True # Success (No-op)
+            
+            cursor.execute("BEGIN TRANSACTION;")
+            
+            # 2. Pruning Logic: Keep only last 5 snapshots per proceeding
+            cursor.execute("""
+                SELECT draft_id FROM proceeding_drafts 
+                WHERE proceeding_id = ? 
+                ORDER BY created_at ASC
+            """, (proceeding_id,))
+            
+            existing_drafts = cursor.fetchall()
+            
+            # If we already have 5, delete the oldest
+            if len(existing_drafts) >= 5:
+                # Prune until we have 4 (allowing 1 new insert)
+                to_remove_count = len(existing_drafts) - 4
+                to_delete = existing_drafts[:to_remove_count]
+                for draft in to_delete:
+                    cursor.execute("DELETE FROM proceeding_drafts WHERE draft_id = ?", (draft[0],))
+            
+            # 3. Insert New Draft
+            cursor.execute("""
+                INSERT INTO proceeding_drafts (proceeding_id, snapshot_json, hash)
+                VALUES (?, ?, ?)
+            """, (proceeding_id, snapshot_json, snapshot_hash))
+            
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error saving proceeding draft: {e}")
+            if 'conn' in locals():
+                conn.rollback()
+            return False
+
     def _get_conn(self):
         import sqlite3
-        return sqlite3.connect(self.db_file)
+        conn = sqlite3.connect(self.db_file)
+        conn.execute("PRAGMA foreign_keys = ON;")
+        return conn
 
     def generate_case_id(self, cursor):
         """Generate a unique Case ID: CASE/YYYY/ADJ/XXXX"""
@@ -1130,8 +1209,11 @@ class DatabaseManager:
         new_seq = max_seq + 1
         return f"CASE/{year}/ADJ/{new_seq:04d}"
 
-    def create_proceeding(self, data):
-        """Create a new proceeding in SQLite"""
+    def create_proceeding(self, data, source_type='SCRUTINY'):
+        """
+        Create a new proceeding with Transactional Registry Constraints.
+        source_type: 'SCRUTINY' (Default) or 'ADJUDICATION'.
+        """
         import uuid
         import json
         
@@ -1140,148 +1222,146 @@ class DatabaseManager:
             cursor = conn.cursor()
             
             pid = str(uuid.uuid4())
-            case_id = self.generate_case_id(cursor)
             
-            # Ensure taxpayer_details is a dict before dumping
-            tp_details = data.get('taxpayer_details', {})
-            if isinstance(tp_details, str):
-                try: tp_details = json.loads(tp_details)
-                except: tp_details = {}
-
-            # Explicitly initialize ASMT-10 status to Clean Draft
-            asmt_status = 'Draft'
-            asmt_final_on = None
-            asmt_final_by = None
-            adj_case_id = None
-
+            # 1. Transaction Start (Implicit via first INSERT)
+            
+            # 2. Registry Insert (The Anchor)
+            if source_type not in ['SCRUTINY', 'ADJUDICATION']:
+                raise ValueError("Invalid source_type")
+                
             cursor.execute("""
-                INSERT INTO proceedings (
-                    id, case_id, gstin, legal_name, trade_name, address, financial_year, 
-                    initiating_section, form_type, status, demand_details, selected_issues, 
-                    taxpayer_details, additional_details, last_date_to_reply, created_by,
-                    asmt10_status, asmt10_finalised_on, asmt10_finalised_by, adjudication_case_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                pid,
-                case_id,
-                data.get('gstin'),
-                data.get('legal_name'),
-                data.get('trade_name'),
-                data.get('address'),
-                data.get('financial_year'),
-                data.get('initiating_section'),
-                data.get('form_type'),
-                data.get('status', 'Draft'),
-                json.dumps(data.get('demand_details', [])),
-                json.dumps(data.get('selected_issues', [])),
-                json.dumps(tp_details),
-                json.dumps(data.get('additional_details', {})),
-                data.get('last_date_to_reply'),
-                data.get('created_by', 'System'),
-                asmt_status,
-                asmt_final_on,
-                asmt_final_by,
-                adj_case_id
-            ))
+                INSERT INTO case_registry (id, source_type) VALUES (?, ?)
+            """, (pid, source_type))
             
-            # Log creation event
-            self.log_event(pid, "CASE_CREATED", f"Proceeding created. Case ID: {case_id}", conn)
-            
+            # 3. Branching Insert Logic
+            if source_type == 'SCRUTINY':
+                case_id = self.generate_case_id(cursor) # Scrutiny uses generated IDs
+                tp_details = data.get('taxpayer_details', {})
+                if isinstance(tp_details, str):
+                    try: tp_details = json.loads(tp_details)
+                    except: tp_details = {}
+
+                cursor.execute("""
+                    INSERT INTO proceedings (
+                        id, case_id, gstin, legal_name, trade_name, address, financial_year, 
+                        initiating_section, form_type, status, demand_details, selected_issues, 
+                        taxpayer_details, additional_details, last_date_to_reply, created_by,
+                        asmt10_status, adjudication_case_id, version_no, workflow_stage
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+                """, (
+                    pid,
+                    case_id,
+                    data.get('gstin'),
+                    data.get('legal_name'),
+                    data.get('trade_name'),
+                    data.get('address'),
+                    data.get('financial_year'),
+                    data.get('initiating_section'),
+                    data.get('form_type'),
+                    data.get('status', 'Draft'),
+                    json.dumps(data.get('demand_details', [])),
+                    json.dumps(data.get('selected_issues', [])),
+                    json.dumps(tp_details),
+                    json.dumps(data.get('additional_details', {})),
+                    data.get('last_date_to_reply'),
+                    data.get('created_by', 'System'),
+                    'Draft',
+                    None,
+                    WorkflowStage.ASMT10_DRAFT.value # Default for Scrutiny
+                ))
+                self.log_event(pid, "CASE_CREATED", f"Proceeding created. Case ID: {case_id}", conn)
+                
+            elif source_type == 'ADJUDICATION':
+                # Deep Copy / Validation for Direct Adjudication
+                required = ['gstin', 'financial_year', 'section'] # Section maps to adjudication_section
+                for f in required:
+                    if not data.get(f):
+                        raise ValueError(f"Missing mandatory Adjudication field: {f}")
+
+                cursor.execute("""
+                    INSERT INTO adjudication_cases (
+                        id, source_scrutiny_id, gstin, legal_name, financial_year, 
+                        adjudication_section, status, created_at, 
+                        additional_details, taxpayer_details, demand_details, 
+                        selected_issues, version_no, is_active, workflow_stage
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, 1, 1, ?)
+                """, (
+                    pid,
+                    None, # Direct Adjudication has no source scrutiny
+                    data.get('gstin'),
+                    data.get('legal_name'),
+                    data.get('financial_year'),
+                    data.get('section'), # Mapped from inputs
+                    'Pending',
+                    json.dumps(data.get('additional_details', {})),
+                    json.dumps(data.get('taxpayer_details', {})),
+                    json.dumps(data.get('demand_details', [])),
+                    json.dumps(data.get('selected_issues', [])),
+                    WorkflowStage.DRC01A_DRAFT.value # Default for Direct Adjudication
+                ))
+                self.log_event(pid, "ADJ_CASE_CREATED", f"Direct Adjudication created via {data.get('section')}", conn)
+
             conn.commit()
             conn.close()
             return pid
         except Exception as e:
             print(f"Error creating proceeding: {e}")
+            if 'conn' in locals():
+                conn.rollback()
+            return None
+        except Exception as e:
+            print(f"Error creating proceeding: {e}")
+            if 'conn' in locals():
+                conn.rollback()
             return None
 
     def get_proceeding(self, pid):
-        """Get proceeding details (scans both proceedings and adjudication_cases)"""
+        """
+        Get proceeding details via Registry-First Resolution.
+        Determine source_type from case_registry, then fetch from appropriate table.
+        """
         import json
         try:
             conn = self._get_conn()
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            # 1. Try Proceedings Table (Scrutiny)
-            cursor.execute("SELECT * FROM proceedings WHERE id = ?", (pid,))
-            row = cursor.fetchone()
+            # 1. Registry Lookup (The Truth)
+            cursor.execute("SELECT source_type FROM case_registry WHERE id = ?", (pid,))
+            reg_row = cursor.fetchone()
             
-            if row:
-                d = dict(row)
-                self._parse_proceeding_json_fields(d)
+            if not reg_row:
                 conn.close()
-                return d
+                return None # Registration missing = Case doesn't exist mainly
                 
-            # 2. Try Adjudication Cases Table
-            cursor.execute("SELECT * FROM adjudication_cases WHERE id = ?", (pid,))
-            adj_row = cursor.fetchone()
+            source_type = reg_row['source_type']
             
-            if adj_row:
-                adj_data = dict(adj_row)
-                source_id = adj_data.get('source_scrutiny_id')
-                
-                # Fetch Source Scrutiny Data for context
-                if source_id:
-                    cursor.execute("SELECT * FROM proceedings WHERE id = ?", (source_id,))
-                    source_row = cursor.fetchone()
-                    if source_row:
-                        source_data = dict(source_row)
-                        self._parse_proceeding_json_fields(source_data)
-                        
-                        # [PHASE 20] Ensure adj_data is also parsed before deep-merge
-                        self._parse_proceeding_json_fields(adj_data)
-                        
-                        # Merge Data: Adjudication overrides Scrutiny
-                        # [FIX - PHASE 20] Deep Merge additional_details to prevent "Metadata Blanching"
-                        
-                        final_data = source_data.copy()
-                        
-                        def _ensure_dict(val):
-                            if not val: return {}
-                            if isinstance(val, dict): return val
-                            if isinstance(val, str):
-                                try:
-                                    parsed = json.loads(val)
-                                    if isinstance(parsed, str): # Handle double-serialization
-                                        parsed = json.loads(parsed)
-                                    return parsed if isinstance(parsed, dict) else {}
-                                except: return {}
-                            return {}
-
-                        # Store original Scrutiny and Adjudication details
-                        src_details = _ensure_dict(source_data.get('additional_details'))
-                        adj_details = _ensure_dict(adj_data.get('additional_details'))
-                        
-                        # Combine Adjudication data overall
-                        final_data.update(adj_data)
-                        
-                        # Specialized Re-Merging for JSON sub-dictionaries
-                        from copy import deepcopy
-                        merged_details = deepcopy(src_details) if src_details else {}
-                        if isinstance(adj_details, dict) and adj_details:
-                            merged_details.update(adj_details)
-                        
-                        final_data['additional_details'] = merged_details
-                        
-                        final_data['id'] = pid # Ensure ID is Adjudication ID
-                        final_data['scrutiny_id'] = source_id # Keep ref
-                        final_data['is_adjudication'] = True
-                        
-                        # Explicitly ensure adjudication_section is present if in adj_data
-                        if 'adjudication_section' in adj_data and adj_data['adjudication_section']:
-                            final_data['adjudication_section'] = adj_data['adjudication_section']
-                        
-                        conn.close()
-                        return final_data
-            
-            # If Adjudication case found but no source scrutiny (Direct Adjudication)
-            if adj_row and not adj_data.get('source_scrutiny_id'):
-                conn.close()
-                d = dict(adj_row)
-                d['is_adjudication'] = True
-                d['source_scrutiny_id'] = None
-                return d
-
+            # 2. Branch Logic
+            if source_type == 'SCRUTINY':
+                cursor.execute("SELECT * FROM proceedings WHERE id = ?", (pid,))
+                row = cursor.fetchone()
+                if row:
+                    d = dict(row)
+                    d['source_type'] = 'SCRUTINY' # Explicitly set
+                    self._parse_proceeding_json_fields(d)
+                    conn.close()
+                    return d
+                    
+            elif source_type == 'ADJUDICATION':
+                cursor.execute("SELECT * FROM adjudication_cases WHERE id = ?", (pid,))
+                row = cursor.fetchone()
+                if row:
+                    d = dict(row)
+                    d['source_type'] = 'ADJUDICATION' # Explicitly set
+                    
+                    # If this is a linked adjudication case (Scrutiny Origin), we might want some source context
+                    # BUT we do not merge blindly. We allow the UI to request source data if needed.
+                    # This ensures "Snapshot Integrity".
+                    
+                    self._parse_proceeding_json_fields(d)
+                    conn.close()
+                    return d
+                    
             conn.close()
             return None
         except Exception as e:
@@ -1311,51 +1391,66 @@ class DatabaseManager:
             elif val is None:
                 d[field] = {} if field in ['taxpayer_details', 'additional_details'] else []
 
-    def update_proceeding(self, pid, data):
-        """Update proceeding details (Smart: Handles Proceedings and Adjudication Cases)"""
+    def update_proceeding(self, pid, data, version_no=None):
+        """Update proceeding details (Canonical: Branches by Registry source_type)"""
         import json
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
             
+            # 1. Determine Source Table via Registry
+            cursor.execute("SELECT source_type FROM case_registry WHERE id = ?", (pid,))
+            registry_row = cursor.fetchone()
+            
+            if not registry_row:
+                print(f"DB Error: Registry entry missing for ID {pid}")
+                conn.close()
+                return False
+            
+            source_type = registry_row[0]
+            
+            if source_type == 'ADJUDICATION':
+                conn.close()
+                return self.update_adjudication_case(pid, data, version_no=version_no)
+            
+            # 2. Update PROCEEDINGS (SCRUTINY)
             fields = []
             values = []
-            
-            # Local copy to prevent mutation if we need to pass to failover
-            data_processed = data.copy()
-            
-            for k, v in data_processed.items():
+            for k, v in data.items():
                 if k in ['demand_details', 'selected_issues', 'taxpayer_details', 'additional_details']:
                     v = json.dumps(v)
                 fields.append(f"{k} = ?")
                 values.append(v)
             
+            # Optimistic Locking Increment
+            fields.append("version_no = version_no + 1")
+            
             values.append(pid)
+            where_clause = "WHERE id = ?"
+            if version_no is not None:
+                where_clause += " AND version_no = ?"
+                values.append(version_no)
             
-            # 1. Try updating PROCEEDINGS table
-            query = f"UPDATE proceedings SET {', '.join(fields)}, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-            
-            # [DEBUG] Trace SQL Update
-            print(f"DB: update_proceeding (Primary) for {pid}")
+            query = f"UPDATE proceedings SET {', '.join(fields)}, updated_at = CURRENT_TIMESTAMP {where_clause}"
             
             cursor.execute(query, values)
-            rows_affected = cursor.rowcount
+            
+            if cursor.rowcount == 0:
+                if version_no is not None:
+                     raise ConcurrencyError(f"Update failed for {pid}: Version mismatch.")
+                return False
             
             conn.commit()
-            conn.close()
-            
-            if rows_affected > 0:
-                return True
-            
-            # 2. If 0 rows, Failover to ADJUDICATION_CASES
-            print(f"DB WARNING: update_proceeding modified 0 rows in proceedings! PID={pid}")
-            print(f"DB: Failing over to update_adjudication_case...")
-            
-            return self.update_adjudication_case(pid, data)
+            return True
 
         except Exception as e:
+            if 'conn' in locals():
+                 conn.rollback()
             print(f"Error updating proceeding: {e}")
-            return False
+            raise e
+        finally:
+            if 'conn' in locals():
+                 conn.close()
 
     def delete_proceeding(self, pid):
         """Delete a proceeding and all related data, including orphan adjudication cases."""
@@ -1399,8 +1494,11 @@ class DatabaseManager:
             print(f"Error deleting proceeding: {e}")
             return False
 
-    def update_adjudication_case(self, adj_id, data):
-        """Update fields in adjudication_cases table with full JSON support"""
+    def update_adjudication_case(self, adj_id, data, version_no=None):
+        """
+        Update adjudication_cases with Optimistic Locking & Active State Management.
+        version_no: Required for concurrency control.
+        """
         import json
         try:
             conn = self._get_conn()
@@ -1412,35 +1510,59 @@ class DatabaseManager:
             updates = []
             values = []
             
+            # 1. Automatic is_active Management
+            if 'status' in data:
+                CLOSURE_STATUSES = ['Order Issued', 'Dropped', 'Closed']
+                is_active = 0 if data['status'] in CLOSURE_STATUSES else 1
+                updates.append("is_active = ?")
+                values.append(is_active)
+
             for k, v in data.items():
-                # Allow status, section, and all JSON fields
-                # Security: We implicitly allow columns that exist. 
-                # Ideally check against schema, but for now we trust caller logic + DB error if col missing
-                
                 if k in json_fields and isinstance(v, (dict, list)):
                     v = json.dumps(v)
+                
+                # Filter out immutable fields if passed by mistake (Trigger will also catch this)
+                if k in ['gstin', 'financial_year', 'adjudication_section']:
+                    continue
                     
                 updates.append(f"{k} = ?")
                 values.append(v)
             
+            # Optimistic Locking Increment
+            updates.append("version_no = version_no + 1")
+            
             if not updates:
+                conn.close()
                 return False
                 
             values.append(adj_id)
-            query = f"UPDATE adjudication_cases SET {', '.join(updates)} WHERE id = ?"
+            
+            # Concurrency Check Clause
+            where_clause = "WHERE id = ?"
+            if version_no is not None:
+                where_clause += " AND version_no = ?"
+                values.append(version_no)
+            
+            query = f"UPDATE adjudication_cases SET {', '.join(updates)} {where_clause}"
             
             cursor.execute(query, tuple(values))
             
-            # Check if any row was actually updated
+            # Check for Optimistic Lock Failure
             if cursor.rowcount == 0:
-                print(f"Warning: update_adjudication_case touched 0 rows for ID {adj_id}")
+                if version_no is not None:
+                     raise ConcurrencyError(f"Update failed for {adj_id}: Version mismatch.")
+                return False
             
             conn.commit()
-            conn.close()
             return True
         except Exception as e:
+            if 'conn' in locals():
+                 conn.rollback()
             print(f"Error updating adjudication case: {e}")
-            return False
+            raise e
+        finally:
+            if 'conn' in locals():
+                 conn.close()
 
     def save_document(self, data):
         """Save a document draft or final version"""
@@ -2135,6 +2257,7 @@ class DatabaseManager:
         import uuid
         import datetime
         import json
+        from src.utils.constants import WorkflowStage
         
         try:
             conn = self._get_conn()
@@ -2166,16 +2289,23 @@ class DatabaseManager:
             # Prepare Snapshot JSON
             snapshot_json = json.dumps(snapshot) if snapshot else None
             
-            # 2. Update Proceeding Status & Snapshot
+            # 2. Update Proceeding Status & Snapshot & Workflow Stage
             cursor.execute("""
                 UPDATE proceedings 
                 SET asmt10_status = 'finalised', 
                     asmt10_finalised_on = CURRENT_TIMESTAMP, 
                     asmt10_finalised_by = ?,
                     adjudication_case_id = ?,
-                    asmt10_snapshot = ?
+                    asmt10_snapshot = ?,
+                    workflow_stage = ?
                 WHERE id = ?
-            """, (user_id, adj_id, snapshot_json, pid))
+            """, (
+                user_id, 
+                adj_id, 
+                snapshot_json, 
+                WorkflowStage.ASMT10_ISSUED.value, # Explicit Stage Set
+                pid
+            ))
             
             if cursor.rowcount == 0:
                 raise Exception(f"Proceeding {pid} not found or update failed.")
@@ -2198,15 +2328,19 @@ class DatabaseManager:
             
             # 5. Adjudication Case
             cursor.execute("""
-                INSERT INTO adjudication_cases (id, source_scrutiny_id, gstin, legal_name, financial_year, status)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO adjudication_cases (
+                    id, source_scrutiny_id, gstin, legal_name, financial_year, status,
+                    workflow_stage
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 adj_id,
                 adj_data.get('source_scrutiny_id'), # This is the pid
                 adj_data.get('gstin'),
                 adj_data.get('legal_name'),
                 adj_data.get('financial_year'),
-                'Pending'
+                'Pending',
+                WorkflowStage.SCN_DRAFT.value # Default: Scrutiny Origin starts at SCN Draft
             ))
             
             conn.commit()
@@ -2323,13 +2457,22 @@ class DatabaseManager:
             return False, str(e)
 
     def create_adjudication_case(self, data):
-        """Create a linked Adjudication Case from Scrutiny."""
+        """Create a linked Adjudication Case from Scrutiny with Registry Anchor"""
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
             
             adj_id = str(uuid.uuid4())
             
+            # 1. Transaction Start
+            cursor.execute("BEGIN TRANSACTION;")
+            
+            # 2. Registry First (Anchor)
+            cursor.execute("""
+                INSERT INTO case_registry (id, source_type) VALUES (?, 'ADJUDICATION')
+            """, (adj_id,))
+            
+            # 3. Main Adjudication Entry
             cursor.execute("""
                 INSERT INTO adjudication_cases (id, source_scrutiny_id, gstin, legal_name, financial_year, status)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -2347,6 +2490,8 @@ class DatabaseManager:
             return adj_id
         except Exception as e:
             print(f"Error creating adjudication case: {e}")
+            if 'conn' in locals():
+                conn.rollback()
             return None
 
     def get_valid_adjudication_cases(self):

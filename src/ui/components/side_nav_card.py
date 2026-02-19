@@ -116,6 +116,15 @@ class SideNavCard(QFrame):
         self.is_enabled_flag = enabled
         self.update_appearance()
 
+    # [COMPATIBILITY] Proxy methods for QAbstractButton interface
+    def setChecked(self, checked):
+        """Proxy for set_active to match QPushButton interface"""
+        self.set_active(checked)
+
+    def isChecked(self):
+        """Proxy for is_active"""
+        return self.is_active
+
     def mousePressEvent(self, event):
         if self.is_enabled_flag:
             self.clicked.emit(self.index)

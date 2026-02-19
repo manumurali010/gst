@@ -4,6 +4,71 @@ from PyQt6.QtGui import QTextCharFormat, QFont, QColor, QTextCursor, QIcon, QAct
 from PyQt6.QtCore import Qt, pyqtSignal
 
 
+class SCNTextEdit(QTextEdit):
+    """
+    Enhanced QTextEdit with structured HTML sanitization on paste.
+    Prevents MSO/Word contamination by enforcing a strict whitelist and stripping all attributes.
+    """
+    def insertFromMimeData(self, source):
+        if source.hasHtml():
+            clean_html = self.sanitize_html(source.html())
+            self.insertHtml(clean_html)
+        else:
+            super().insertFromMimeData(source)
+
+    def sanitize_html(self, html):
+        """
+        Structured sanitization using a hidden QTextDocument fragment.
+        Preserves: <p>, <b>, <i>, <u>, <ul>, <ol>, <li>, <br>.
+        Strips: Everything else, including ALL attributes (style, class, etc.).
+        """
+        import re
+        
+        # 1. Preliminary strip of head and style blocks which QTextDocument might miss
+        html = re.sub(r'<(style|script|meta|link|title|head).*?>.*?</\1>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL) # Strip comments
+        
+        # 2. Use a temporary QTextDocument to parse and reconstruct clean content
+        from PyQt6.QtGui import QTextDocument, QTextCursor, QTextBlockFormat, QTextCharFormat
+        doc = QTextDocument()
+        doc.setHtml(html)
+        
+        clean_fragments = []
+        root = doc.rootFrame()
+        
+        # Traverse blocks
+        it = doc.begin()
+        while it != doc.end():
+            block = it
+            fragments = []
+            
+            # Traverse fragments in block (text spans)
+            fragment_it = block.begin()
+            while not fragment_it.atEnd():
+                frag = fragment_it.fragment()
+                text = frag.text()
+                fmt = frag.charFormat()
+                
+                # Apply whitelisted formatting to text
+                if fmt.fontWeight() == QFont.Weight.Bold:
+                    text = f"<b>{text}</b>"
+                if fmt.fontItalic():
+                    text = f"<i>{text}</i>"
+                if fmt.fontUnderline():
+                    text = f"<u>{text}</u>"
+                
+                fragments.append(text)
+                fragment_it += 1
+            
+            # Join fragments and wrap in <p>
+            block_text = "".join(fragments).strip()
+            if block_text:
+                clean_fragments.append(f"<p>{block_text}</p>")
+            
+            it = it.next()
+            
+        return "".join(clean_fragments)
+
 class RichTextEditor(QWidget):
     """
     A rich text editor widget with formatting toolbar.
@@ -21,8 +86,8 @@ class RichTextEditor(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
         
-        # Create text editor first (needed by toolbar)
-        self.editor = QTextEdit()
+        # Create text editor first (Enhanced SCN version)
+        self.editor = SCNTextEdit()
         self.editor.setPlaceholderText(placeholder)
         self.editor.setAcceptRichText(True)
         

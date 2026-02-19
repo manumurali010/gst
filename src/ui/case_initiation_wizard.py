@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-                             QComboBox, QLineEdit, QStackedWidget, QMessageBox, QFrame, QGridLayout, QCompleter)
+                             QComboBox, QLineEdit, QStackedWidget, QMessageBox, QFrame, QGridLayout, QCompleter, QRadioButton, QButtonGroup)
 from PyQt6.QtCore import Qt, pyqtSignal
 from src.database.db_manager import DatabaseManager
 import datetime
@@ -43,6 +43,28 @@ class CaseInitiationWizard(QWidget):
         self.gstin_input = QLineEdit()
         self.gstin_input.setPlaceholderText("Enter 15-digit GSTIN")
         self.gstin_input.setStyleSheet("padding: 8px; border: 1px solid #bdc3c7; border-radius: 4px;")
+        
+        # 1.5 Case Type Selection (New for Direct Adjudication)
+        type_group = QVBoxLayout()
+        type_lbl = QLabel("Case Type")
+        type_lbl.setStyleSheet("font-weight: bold; color: #34495e;")
+        
+        self.type_btn_group = QButtonGroup(self)
+        self.radio_scrutiny = QRadioButton("Scrutiny (ASMT-10)")
+        self.radio_adjudication = QRadioButton("Direct Adjudication")
+        self.radio_scrutiny.setChecked(True) # Default
+        
+        self.type_btn_group.addButton(self.radio_scrutiny)
+        self.type_btn_group.addButton(self.radio_adjudication)
+        
+        type_layout = QHBoxLayout()
+        type_layout.addWidget(self.radio_scrutiny)
+        type_layout.addWidget(self.radio_adjudication)
+        type_layout.addStretch()
+        
+        type_group.addWidget(type_lbl)
+        type_group.addLayout(type_layout)
+        form_layout.addLayout(type_group)
         
         # Auto-complete
         all_gstins = self.db.get_all_gstins()
@@ -192,10 +214,13 @@ class CaseInitiationWizard(QWidget):
         # Form type is not needed - user will select document type later in workspace
 
         # Prepare Data
+        source_type = 'SCRUTINY' if self.radio_scrutiny.isChecked() else 'ADJUDICATION'
+        
         data = {
             "gstin": gstin,
             "financial_year": fy,
             "initiating_section": section,
+            "section": section, # Mapped for Adjudication
             "taxpayer_details": self.taxpayer_data,
             "status": "Draft",
             "legal_name": self.taxpayer_data.get('Legal Name', ''),
@@ -204,7 +229,7 @@ class CaseInitiationWizard(QWidget):
         }
         
         # Create in DB
-        pid = self.db.create_proceeding(data)
+        pid = self.db.create_proceeding(data, source_type=source_type)
         
         if pid:
             QMessageBox.information(self, "Success", "Case initiated successfully!")

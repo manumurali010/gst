@@ -280,13 +280,27 @@
 
     <script>
         /**
-         * Unified A4 Pagination Engine
-         * Handles discrete pages and smart splitting of large tables.
+         * Unified A4 Pagination Engine (DOM-Driven)
+         * Relying on rendered measurements to guarantee preview/PDF parity.
          */
         const PAGE_HEIGHT = 1123;
-        const TOP_PADDING = 57;
-        const BOTTOM_PADDING = 57;
-        const CONTENT_MAX_HEIGHT = PAGE_HEIGHT - TOP_PADDING - BOTTOM_PADDING;
+        let CONTENT_MAX_HEIGHT = 0; // Calculated dynamically from DOM
+
+        function calculateMetrics() {
+            const probe = document.createElement('div');
+            probe.className = 'a4-page';
+            probe.style.visibility = 'hidden';
+            probe.style.position = 'absolute';
+            document.body.appendChild(probe);
+
+            const style = window.getComputedStyle(probe);
+            const paddingTop = parseFloat(style.paddingTop);
+            const paddingBottom = parseFloat(style.paddingBottom);
+
+            CONTENT_MAX_HEIGHT = PAGE_HEIGHT - paddingTop - paddingBottom;
+
+            document.body.removeChild(probe);
+        }
 
         function createNewPage() {
             const wrapper = document.getElementById('scn-preview-wrapper');
@@ -302,6 +316,7 @@
         }
 
         function paginate() {
+            calculateMetrics(); // Ensure metrics are fresh
             const source = document.getElementById('scn-source-content');
             const wrapper = document.getElementById('scn-preview-wrapper');
             if (!source || !wrapper) return;

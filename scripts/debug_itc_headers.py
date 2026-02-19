@@ -1,9 +1,10 @@
 import pandas as pd
+import os
 import warnings
 
 warnings.filterwarnings("ignore")
 
-FILE_PATH = "C:\\Users\\manum\\.gemini\\antigravity\\scratch\\GST_Adjudication_System\\2022-23_32AFWPD9794D1Z0_Tax liability and ITC comparison (1).xlsx"
+FILE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "2022-23_32AFWPD9794D1Z0_Tax liability and ITC comparison (1).xlsx")
 
 try:
     xl = pd.ExcelFile(FILE_PATH)

@@ -21,3 +21,4 @@
 [2026-02-13 11:59:40,407] [ERROR] Error extracting GSTR-1 metadata from D:/WORK/Scrutiny 2022-23/pactmachinesscrutiny202223/GSTR-1_IFF_32AAFCP2036B1Z5_032023.pdf: name 're_IGNORECASE' is not defined
 [2026-02-13T12:00:11.207867] [INFO] STATE TRANSITION SUCCESS: READY -> ANALYZED | Context: {}
 [2026-02-17T19:57:17.771239] [ERROR] Analysis failed: INTEGRITY ERROR: Scrutiny Issue 'GSTR 3B vs 2B (discrepancy identified from GSTR 9)' has no 'issue_id'. Parser must emit Semantic IDs. | Context: {'error': "INTEGRITY ERROR: Scrutiny Issue 'GSTR 3B vs 2B (discrepancy identified from GSTR 9)' has no 'issue_id'. Parser must emit Semantic IDs."}
+[2026-02-18T00:27:17.022099] [ERROR] Analysis failed: FATAL INVARIANT FAILURE: Issue 'RCM_3B_VS_CASH' cannot be mapped to an SOP Point. DB and Fallback failed. | Context: {'error': "FATAL INVARIANT FAILURE: Issue 'RCM_3B_VS_CASH' cannot be mapped to an SOP Point. DB and Fallback failed."}

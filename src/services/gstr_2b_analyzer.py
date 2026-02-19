@@ -13,12 +13,22 @@ logger = logging.getLogger(__name__)
 class GSTR2BAnalyzer:
     def __init__(self, file_path):
         self.file_path = file_path
+        self.use_light_parser = False
+        self.wb = None
+        
         if not os.path.exists(file_path):
+            # This is critical, let it raise or handle gracefully?
+            # Raising is fine if file missing.
             raise FileNotFoundError(f"GSTR-2B file not found: {file_path}")
+            
         try:
+            # Attempt standard load
             self.wb = openpyxl.load_workbook(file_path, data_only=True)
         except Exception as e:
-            raise ValueError(f"Failed to load Excel file: {e}")
+            # Fallback to Light Parser
+            import logging
+            logging.warning(f"GSTR2BAnalyzer: Failed to load with openpyxl ({e}). Switching to XLSXLight.")
+            self.use_light_parser = True
 
     def validate_file(self, expected_gstin, expected_fy):
         """
@@ -286,8 +296,17 @@ class GSTR2BAnalyzer:
         numerics = []
         for val in row_values:
             # Proper numeric check
-            if pd.notna(val) and isinstance(val, (int, float)):
-                numerics.append(float(val))
+            if val is not None and isinstance(val, (int, float)):
+                 # Check for NaN if it's a float? 
+                 # Standard float('nan') exists.
+                 # If using openpyxl, it returns None for empty.
+                 # If using pandas (legacy), it might return NaN, but we are removing pandas.
+                 # If using XLSXLight, it returns "" (str).
+                 # So check for int/float is safe for openpyxl values.
+                 # But standard python float('nan') is instance of float.
+                 import math
+                 if isinstance(val, float) and math.isnan(val): continue
+                 numerics.append(float(val))
             elif isinstance(val, str):
                  # Try convert strict
                  try:
@@ -536,3 +555,129 @@ class GSTR2BAnalyzer:
         except Exception as e:
             logger.error(f"Error in SOP-10 Analysis: {e}")
             return {'status': 'info', 'reason': str(e), 'igst': 0.0}
+
+    # ==========================================
+    # New Parsers for SOP 13-16 (RCM/Cash/Interest)
+    # ==========================================
+
+    def get_rcm_inward_supplies(self):
+        """
+        Extracts 'Inward Supplies Liable for Reverse Charge' from 'ITC Available'.
+        Returns dict with int values {igst, cgst, sgst, cess}.
+        Safeguards:
+        - Matches "reverse" AND "inward" (case-insensitive)
+        - Excludes "credit", "amendment", "details"
+        - Prefers consolidated summary row
+        - Logs warning if multiple candidate rows found
+        """
+        try:
+            rows = []
+            if self.use_light_parser or self.wb is None:
+                 from src.utils.xlsx_light import XLSXLight
+                 rows = XLSXLight.read_sheet(self.file_path, "ITC Available")
+                 if not rows: return None
+            else:
+                 if "ITC Available" not in self.wb.sheetnames: return None
+                 rows = list(self.wb["ITC Available"].values)
+            
+            candidate_rows = []
+            
+            for idx, row in enumerate(rows):
+                if not row: continue
+                row_list = list(row)
+                
+                # Build text for matching
+                row_text_parts = [str(x).lower().strip() for x in row_list if x is not None and str(x).strip()]
+                row_text = " ".join(row_text_parts).replace(",", "")
+                
+                # Flexible Matching Logic
+                if "reverse" in row_text and "inward" in row_text:
+                    # Exclusion Criteria
+                    # "credit" matches "Input Tax Credit" in advisory text, so use "credit note"
+                    if any(x in row_text for x in ["credit note", "amendment", "details", "invoice"]):
+                        continue
+                        
+                    vals = self._extract_tax_block_strict(row_list)
+                    if vals:
+                        candidate_rows.append((idx, vals, row_text))
+                        logger.info(f"[RCM DETECT] Candidate Row {idx}: {vals} | Text: {row_text[:50]}...")
+
+            if not candidate_rows:
+                logger.warning(f"[RCM DETECT] No suitable RCM Inward Supply rows found in {os.path.basename(self.file_path)}")
+                return None
+                
+            # Selection Logic - Reverted to 'Pick Last' to avoid double counting Totals
+            # (User confirmed the last block is usually the total)
+            if len(candidate_rows) > 1:
+                logger.warning(f"[RCM DETECT] Multiple RCM rows found ({len(candidate_rows)}). Selecting the LAST one as per standard format.")
+                for i_r, v_r, t_r in candidate_rows:
+                     logger.debug(f"  Candidate {i_r}: {v_r}")
+            
+            # Default: Pick the last one (often Total in quarterly)
+            selected_idx, selected_vals, selected_text = candidate_rows[-1]
+            logger.info(f"[RCM DETECT] Selected Row {selected_idx} (Final): {selected_vals}")
+            
+            return {k: int(round(v)) for k, v in selected_vals.items()}
+
+        except Exception as e:
+            logger.error(f"Error extracting RCM Inward Supplies: {e}")
+            return None
+
+    def get_rcm_credit_notes(self):
+        """
+        Extracts 'Credit Notes' (Reverse Charge) from 'ITC Available'.
+        Target rows: 
+          - "B2B - Credit Notes (Reverse Charge)"
+          - "B2B - Credit Notes (Reverse Charge) (Amendment)"
+        Returns dict with int values.
+        """
+        try:
+            rows = []
+            if self.use_light_parser or self.wb is None:
+                 from src.utils.xlsx_light import XLSXLight
+                 rows = XLSXLight.read_sheet(self.file_path, "ITC Available")
+                 if not rows: return None
+            else:
+                 if "ITC Available" not in self.wb.sheetnames: return None
+                 rows = list(self.wb["ITC Available"].values)
+            
+            total_cn = {'igst': 0.0, 'cgst': 0.0, 'sgst': 0.0, 'cess': 0.0}
+            found_any_row = False
+            
+            for idx, row in enumerate(rows):
+                if not row: continue
+                row_list = list(row)
+                
+                # Normalize text
+                row_text_parts = [str(x).lower().strip() for x in row_list if x is not None and str(x).strip()]
+                row_text = " ".join(row_text_parts).replace(",", "")
+                
+                # Strict Match Logic for RCM Credit Notes
+                # Must contain: "credit", "reverse", "b2b"
+                # Must NOT contain: "others", "net-off" (advisory text check)
+                
+                if "reverse" in row_text and "credit" in row_text:
+                     # Check for specific B2B context to avoid "Others" row with advisory text
+                     if "b2b" in row_text:
+                         vals = self._extract_tax_block_strict(row_list)
+                         if vals:
+                             found_any_row = True
+                             logger.info(f"[RCM CN MATCH] Row {idx}: {vals} | Text: {row_text[:50]}...")
+                             for k, v in vals.items():
+                                 # Sum values exactly (preserve sign)
+                                 total_cn[k] += v
+                     else:
+                         # Log ignored rows helpful for debugging
+                         if "b2b" not in row_text and "note" in row_text:
+                             logger.debug(f"[RCM CN SKIP] Row {idx} ignored (missing 'b2b'): {row_text[:50]}...")
+
+            if not found_any_row:
+                logger.warning(f"[RCM DETECT] No 'B2B - Credit Notes (Reverse Charge)' rows found in {os.path.basename(self.file_path)}")
+                return None
+            
+            logger.info(f"[RCM CN TOTAL] Final Sum: {total_cn}")
+            return {k: int(round(v)) for k, v in total_cn.items()}
+
+        except Exception as e:
+            logger.error(f"Error extracting RCM Credit Notes: {e}")
+            return None
