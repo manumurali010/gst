@@ -422,19 +422,35 @@ class IssueCard(QFrame):
                 }}
             """)
         else:
-            self.set_source("New Issue (SCN)")
-            # Default Style: Danger/Red
-            self.source_badge.setStyleSheet(f"""
-                QLabel {{ 
-                    background-color: #fee2e2; 
-                    color: {Theme.DANGER}; 
-                    padding: 2px 8px; 
-                    border-radius: {Theme.RADIUS_MD}; 
-                    font-size: {Theme.FONT_META}; 
-                    font-weight: 600; 
-                    border: 1px solid #fecaca; 
-                }}
-            """)
+            # Context-Aware Default
+            if hasattr(self, 'mode') and self.mode == "DRC-01A":
+                 self.set_source("DRC-01A Issue")
+                 # Style: Warning/Orange (Distinct from SCN Red)
+                 self.source_badge.setStyleSheet(f"""
+                    QLabel {{ 
+                        background-color: #fff7ed; 
+                        color: #c2410c; 
+                        padding: 2px 8px; 
+                        border-radius: {Theme.RADIUS_MD}; 
+                        font-size: {Theme.FONT_META}; 
+                        font-weight: 600; 
+                        border: 1px solid #fed7aa; 
+                    }}
+                """)
+            else:
+                self.set_source("New Issue (SCN)")
+                # Default Style: Danger/Red
+                self.source_badge.setStyleSheet(f"""
+                    QLabel {{ 
+                        background-color: #fee2e2; 
+                        color: {Theme.DANGER}; 
+                        padding: 2px 8px; 
+                        border-radius: {Theme.RADIUS_MD}; 
+                        font-size: {Theme.FONT_META}; 
+                        font-weight: 600; 
+                        border: 1px solid #fecaca; 
+                    }}
+                """)
             
         # [FIX] Visual Consistency: Update the text label too
         if hasattr(self, 'meta_lbl'):
@@ -1212,7 +1228,46 @@ class IssueCard(QFrame):
         self.variables[name] = value
         self.calculate_values()
 
+    def validate_tax_inputs(self, show_ui=True) -> bool:
+        """
+        [PHASE A] Financial Integrity Guard.
+        Categorically block negative values in demand fields.
+        Returns: True if valid, False if negative exists.
+        """
+        from PyQt6.QtGui import QColor
+        is_valid = True
+        if not hasattr(self, 'table'): return True
+        
+        # Reset background colors for numeric cells
+        # (Assuming the grid uses standard numeric mapping)
+        for r in range(self.table.rowCount()):
+            for c in range(self.table.columnCount()):
+                item = self.table.item(r, c)
+                if not item: continue
+                
+                txt = item.text().replace(',', '').strip()
+                try:
+                    val = float(txt)
+                    if val < 0:
+                        is_valid = False
+                        if show_ui:
+                            item.setBackground(QColor("#fecaca")) # Theme.DANGER light
+                    else:
+                        # Restore default if was previously bad
+                        item.setBackground(Qt.GlobalColor.transparent)
+                except ValueError:
+                    pass
+        
+        return is_valid
+
     def calculate_values(self):
+        """Centralized value calculation and UI sync."""
+        if not hasattr(self, 'table'): return
+        
+        # Trigger validation
+        valid = self.validate_tax_inputs(show_ui=True)
+        # We don't block the calculation itself, just highlight the UI
+        
         # 1. Handle Excel Grid Calculation
         if 'grid_data' in self.template:
             self.calculate_grid()

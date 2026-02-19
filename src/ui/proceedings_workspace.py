@@ -1,9 +1,9 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
                              QListWidget, QStackedWidget, QSplitter, QScrollArea, QTextEdit, QTextBrowser,
-                             QMessageBox, QFrame, QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView, QDateEdit, QComboBox, QLineEdit, QFileDialog, QDialog, QGridLayout, QSpacerItem, QSizePolicy, QGraphicsDropShadowEffect)
-from PyQt6.QtCore import Qt, QDate, pyqtSignal
+                             QMessageBox, QFrame, QCheckBox, QTableWidget, QTableWidgetItem, QHeaderView, QDateEdit, QComboBox, QLineEdit, QFileDialog, QDialog, QGridLayout, QSpacerItem, QSizePolicy, QGraphicsDropShadowEffect, QToolTip)
+from PyQt6.QtCore import Qt, QDate, pyqtSignal, QRect
 from PyQt6 import QtCore
-from PyQt6.QtGui import QPixmap, QShortcut, QKeySequence, QIcon, QResizeEvent, QColor
+from PyQt6.QtGui import QPixmap, QShortcut, QKeySequence, QIcon, QResizeEvent, QColor, QCursor
 from src.database.db_manager import DatabaseManager
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from src.utils.preview_generator import PreviewGenerator
@@ -17,6 +17,7 @@ from src.ui.components.finalization_panel import FinalizationPanel
 from src.services.asmt10_generator import ASMT10Generator
 from src.services.ph_intimation_generator import PHIntimationGenerator
 from src.ui.styles import Theme, Styles
+from src.utils.constants import WorkflowStage
 import os
 import json
 import copy
@@ -82,6 +83,36 @@ class ASMT10ReferenceDialog(QDialog):
             container_layout.addWidget(QLabel("No ASMT-10 Data Found"))
 
 class ProceedingsWorkspace(QWidget):
+    # [PHASE 3] Strict Transition Matrix
+    # Defines the ONLY allowed allowed predecessors for a target stage.
+    TRANSITION_MATRIX = {
+        WorkflowStage.ASMT10_ISSUED: [WorkflowStage.ASMT10_DRAFT],
+        WorkflowStage.DRC01A_ISSUED: [WorkflowStage.DRC01A_DRAFT],
+        
+        # Unified SCN Entry: Scrutiny (ASMT10) OR Direct (DRC01A) OR Skipped (Direct w/ Skip)
+        WorkflowStage.SCN_DRAFT: [
+            WorkflowStage.DRC01A_ISSUED, 
+            WorkflowStage.ASMT10_ISSUED, 
+            WorkflowStage.DRC01A_DRAFT # Protected by drc01a_skipped check
+        ],
+        
+        WorkflowStage.SCN_ISSUED:    [WorkflowStage.SCN_DRAFT],
+        WorkflowStage.PH_SCHEDULED:  [WorkflowStage.SCN_ISSUED, WorkflowStage.PH_SCHEDULED], # Allow re-scheduling
+        
+        # Structured PH Lifecycle
+        WorkflowStage.PH_COMPLETED:  [WorkflowStage.PH_SCHEDULED],
+        WorkflowStage.ORDER_ISSUED:  [WorkflowStage.PH_COMPLETED]
+    }
+
+    # Deterministic Status Mapping (Enum -> String)
+    STAGE_TO_STATUS_MAP = {
+        WorkflowStage.ASMT10_ISSUED: "ASMT-10 Issued", # Actually tracked in asmt10_status, but we map for consistency if needed
+        WorkflowStage.DRC01A_ISSUED: "DRC-01A Issued",
+        WorkflowStage.SCN_ISSUED:    "SCN Issued",
+        WorkflowStage.PH_SCHEDULED:  "PH Intimated",
+        WorkflowStage.PH_COMPLETED:  "PH Concluded",
+        WorkflowStage.ORDER_ISSUED:  "Order Issued"
+    }
     def __init__(self, navigate_callback, sidebar=None, proceeding_id=None):
         super().__init__()
         print("ProceedingsWorkspace: init start")
@@ -101,11 +132,15 @@ class ProceedingsWorkspace(QWidget):
         self.active_scn_step = 0
         self.preview_initialized = False
         self.scn_workflow_phase = "METADATA" # Authority state: METADATA | DRAFTING
-        
+
+
         # [NEW] PH Generator & State
         self.ph_generator = PHIntimationGenerator()
         self.ph_entries = [] # List of dicts
         self.ph_editing_index = -1
+        
+        # UI State Flags
+        self.scn_issues_initialized = False # Track if we've loaded issues once to avoid overwrite
         
         print("ProceedingsWorkspace: calling init_ui")
         self.init_ui()
@@ -114,6 +149,100 @@ class ProceedingsWorkspace(QWidget):
         
         if self.proceeding_id:
             self.load_proceeding(self.proceeding_id)
+
+    def transition_to(self, target_stage: WorkflowStage):
+        """
+        Atomic, Strict State Transition Engine.
+        Updates both 'workflow_stage' and legacy 'status'.
+        """
+        current_stage = self.get_current_stage()
+        
+        print(f"Workflow Transition Request: {current_stage.name} -> {target_stage.name}")
+        
+        # 1. Backward Transition Guard (Strict Forward Flow)
+        # Exception: Re-scheduling PH (PH -> PH) is allowed
+        is_rescheduling_ph = (current_stage == WorkflowStage.PH_SCHEDULED and target_stage == WorkflowStage.PH_SCHEDULED)
+        
+        if target_stage < current_stage and not is_rescheduling_ph:
+             raise ValueError(f"Illegal Backward Transition: Cannot move from {current_stage.name} back to {target_stage.name}")
+
+        # 2. Matrix Validation
+        allowed_predecessors = self.TRANSITION_MATRIX.get(target_stage, [])
+        if current_stage not in allowed_predecessors:
+             raise ValueError(f"Invalid Transition: {current_stage.name} is not a valid predecessor for {target_stage.name}. Allowed: {[s.name for s in allowed_predecessors]}")
+
+        # 3. Engine-Level Skip Enforcement (DRC01A_DRAFT -> SCN_DRAFT)
+        if target_stage == WorkflowStage.SCN_DRAFT and current_stage == WorkflowStage.DRC01A_DRAFT:
+             drc_skipped = self.proceeding_data.get('drc01a_skipped', False)
+             if not drc_skipped:
+                  raise ValueError("Illegal Skip: Cannot move to SCN_DRAFT from DRC01A_DRAFT unless 'drc01a_skipped' is explicitly set.")
+
+        # 4. Atomic DB Update
+        try:
+             # Map status string
+             status_str = self.STAGE_TO_STATUS_MAP.get(target_stage)
+             
+             update_payload = {
+                 "workflow_stage": int(target_stage)
+             }
+             if status_str:
+                  update_payload["status"] = status_str
+             
+             # Get current version for optimistic locking
+             v_no = self.proceeding_data.get('version_no')
+             
+             # Execute
+             success = self.db.update_proceeding(self.proceeding_id, update_payload, version_no=v_no)
+             if not success:
+                  raise Exception("Database update failed (Unknown reason).")
+             
+             print(f"Transition Success: {current_stage.name} -> {target_stage.name}")
+             
+             # 5. Post-Commit State & UI Refresh
+             # Increment version locally since it was incremented in DB
+             if v_no is not None:
+                  self.proceeding_data['version_no'] = v_no + 1
+             
+             self.proceeding_data['workflow_stage'] = int(target_stage)
+             if status_str:
+                  self.proceeding_data['status'] = status_str
+                  
+             # Refresh UI elements
+             self.update_summary_tab()
+             self.check_existing_documents()
+             self.evaluate_scn_workflow_phase()
+             self.apply_context_layout(target_stage.get_context_key())
+             
+        except Exception as e:
+             # If ConcurrencyError or other DB error occurs, state remains unchanged
+             print(f"Transition Aborted: {e}")
+             raise e
+
+    def get_current_stage(self) -> WorkflowStage:
+        """
+        Robustly determine current workflow stage using the dedicated column.
+        Default: ASMT10_DRAFT (Base Stage) if undefined.
+        """
+        if not self.proceeding_data:
+             # Default to initial stage if no data loaded yet (e.g. during UI init)
+             return WorkflowStage.ASMT10_DRAFT
+            
+        stage_val = self.proceeding_data.get('workflow_stage')
+        if stage_val is not None:
+            try:
+                return WorkflowStage(int(stage_val))
+            except ValueError:
+                pass
+                
+        # Fallback for legacy cases (should be migrated, but be safe)
+        status = self.proceeding_data.get('status', '')
+        if "Order Issued" in status: return WorkflowStage.ORDER_ISSUED
+        if "PH Intimated" in status: return WorkflowStage.PH_SCHEDULED
+        if "SCN Issued" in status: return WorkflowStage.SCN_ISSUED
+        if "DRC-01A Issued" in status: return WorkflowStage.DRC01A_ISSUED
+        if "ASMT-10 Issued" in status: return WorkflowStage.ASMT10_ISSUED
+        
+        return WorkflowStage.ASMT10_DRAFT
 
     def init_ui(self):
         print("ProceedingsWorkspace: init_ui start")
@@ -203,8 +332,86 @@ class ProceedingsWorkspace(QWidget):
         # Initial Context
         self.apply_context_layout("summary")
 
+    def add_drc01a_issue_card(self, template, data=None):
+        """Reusable helper to add an issue card to the DRC-01A draft"""
+        from src.ui.issue_card import IssueCard
+        card = IssueCard(template, data=data, mode="DRC-01A")
+        
+        # Connect signals
+        card.removeClicked.connect(lambda: self.remove_issue_card(card))
+        card.valuesChanged.connect(self.calculate_grand_totals)
+        
+        self.issues_layout.addWidget(card)
+        self.issue_cards.append(card)
+        
+        # Trigger initial calculation
+        card.calculate_values()
+        self.calculate_grand_totals()
+        return card
+
+    def restore_drc01a_draft_state(self):
+        """
+        Hydrate DRC-01A from 'case_issues' (Source of Truth).
+        Handles Legacy Migration from 'additional_details' if case_issues is empty.
+        """
+        try:
+            # 1. Fetch Authoritative Records
+            records = self.db.get_case_issues(self.proceeding_id, stage='DRC-01A')
+            
+            # 2. Legacy Migration Fallback
+            if not records:
+                details = self.proceeding_data.get('additional_details', {})
+                if 'issues' in details and details['issues']:
+                    print("DRC-01A Hydration: Migrating Legacy Draft...")
+                    legacy_issues = details['issues']
+                    
+                    # Persist as structured records
+                    migrated_list = []
+                    for issue in legacy_issues:
+                        # Ensure 'data' wrapper if missing in legacy
+                        migrated_list.append({
+                            'issue_id': issue.get('issue_id'),
+                            'data': issue.get('data', issue) 
+                        })
+                    
+                    self.db.save_case_issues(self.proceeding_id, migrated_list, stage='DRC-01A')
+                    
+                    # Clear legacy artifact to ensure Single Source forward
+                    details.pop('issues')
+                    self.db.update_proceeding(self.proceeding_id, {'additional_details': details})
+                    self.proceeding_data['additional_details'] = details # Local Sync
+                    
+                    # Refetch now that they are in DB
+                    records = self.db.get_case_issues(self.proceeding_id, stage='DRC-01A')
+            
+            # 3. Hydrate Cards
+            if records:
+                print(f"DRC-01A Hydration: Restoring {len(records)} issues from DB.")
+                for record in records:
+                    issue_id = record['issue_id']
+                    data_payload = record.get('data', {})
+                    
+                    # Resolve Template: Master > Name > Snapshot
+                    template = self.issue_templates.get(issue_id)
+                    if not template:
+                         # Fetch deep if not in simple list
+                         template = self.db.get_issue(issue_id)
+                    
+                    if template:
+                        # Deepcopy to avoid mutating master
+                        import copy
+                        card_template = copy.deepcopy(template)
+                        self.add_drc01a_issue_card(card_template, data=data_payload)
+                    else:
+                        print(f"Warning: Template not found for issue {issue_id}")
+
+        except Exception as e:
+            print(f"Error restoring DRC-01A draft: {e}")
+            import traceback
+            traceback.print_exc()
+
     def handle_sidebar_action(self, action):
-        """Switch tabs based on sidebar action"""
+        """Switch tabs based on sidebar action with STRICT Workflow Enforcement"""
         action_map = {
             "summary": 0,
             "drc01a": 1,
@@ -216,10 +423,51 @@ class ProceedingsWorkspace(QWidget):
             "timeline": 7
         }
         
-        # Safety Check (Fail Fast)
-        is_scrutiny = bool(self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id'))
-        if is_scrutiny and action == "drc01a":
-             raise RuntimeError("DRC-01A must not exist for scrutiny-origin adjudication")
+        # [PHASE 2] Strict Workflow State Enforcement
+        current_stage = self.get_current_stage()
+        
+        # 1. DRC-01A Logic
+        # (Generally accessible for viewing, but edits might be restricted in the tab itself via ui state)
+        # However, the task says "Editable only in DRC01A_DRAFT".
+        # We handle "Editing" restrictions inside the tab (e.g. hiding buttons), 
+        # but here we allow navigation to view the "Issued" state.
+        
+        # 2. SCN Access Logic
+        # Rule: SCN drafting/viewing relies on DRC-01A being issued (or skipped).
+        if action == "scn":
+             # Exception: If DRC-01A is skipped (Direct Adjudication or configured so)
+             # We need to check drc01a_skipped.
+             is_skipped = self.proceeding_data.get('drc01a_skipped', False)
+             # Also allow if strictly Direct Adjudication without Scrutiny origin? 
+             # For now, rely on stage. 
+             # Access allowed if Stage >= DRC01A_ISSUED OR Skipped
+             allowed = (current_stage >= WorkflowStage.DRC01A_ISSUED) or is_skipped
+             
+             # Fallback for Direct Adjudication which might not set DRC01A_ISSUED if it skips it?
+             # If skipped, stage might be SCRUTINY_ACTIVE or similar? 
+             # Actually, creating direct adjudication sets stage to SCRUTINY_ACTIVE?
+             # Let's assume strictness.
+             if not allowed and current_stage < WorkflowStage.DRC01A_ISSUED:
+                  QMessageBox.warning(self, "Workflow Restricted", "SCN Drafting is locked until DRC-01A is issued.")
+                  return
+
+        # 3. PH Access Logic
+        # Rule: PH Intimation requires SCN Issued
+        if action == "ph":
+             if current_stage < WorkflowStage.SCN_ISSUED:
+                  QMessageBox.warning(self, "Workflow Restricted", "Personal Hearing Intimation is locked until SCN is issued.")
+                  return
+
+        # 4. Order Access Logic
+        # Rule: Order requires PH Scheduled (or SCN Issued if PH is waived?)
+        if action == "order":
+             if current_stage < WorkflowStage.PH_SCHEDULED:
+                  # Maybe allow if SCN issued and enough time passed? 
+                  # Strict rule: PH must be at least typically scheduled/waived.
+                  # For now, require PH_SCHEDULED.
+                  QMessageBox.warning(self, "Workflow Restricted", "Adjudication Order generation is locked until PH is scheduled.")
+                  return
+
 
         if action in action_map:
             index = action_map[action]
@@ -231,7 +479,6 @@ class ProceedingsWorkspace(QWidget):
             # Auto-load issues when switching to SCN tab
             if action == "scn":
                 self.load_scn_issue_templates()
-                # The actual load_scn_issues() is now triggered by on_scn_page_changed for Step 2
 
     def apply_context_layout(self, context_key):
         """
@@ -248,6 +495,23 @@ class ProceedingsWorkspace(QWidget):
         }
         self.context_title_lbl.setText(titles.get(context_key, ""))
         
+        # [PHASE 3] Dynamic Workflow Enforcement
+        current_stage = self.get_current_stage()
+        
+        # 1. PH Conclude Button Visibility
+        # Visible only if PH is intimated but not yet concluded
+        if hasattr(self, 'ph_conclude_btn'):
+             self.ph_conclude_btn.setVisible(current_stage == WorkflowStage.PH_SCHEDULED)
+             
+        # 2. Order Finalize Button Lock
+        # Enabled only if PH is completed
+        if hasattr(self, 'order_finalize_btn'):
+             self.order_finalize_btn.setEnabled(current_stage == WorkflowStage.PH_COMPLETED)
+             if current_stage < WorkflowStage.PH_COMPLETED:
+                  self.order_finalize_btn.setToolTip("Personal Hearing must be concluded before finalizing the order.")
+             else:
+                  self.order_finalize_btn.setToolTip("")
+
         # SCN Specific Page 1 Navigation check (Metadata)
         is_scn = (context_key == "scn")
         if is_scn and hasattr(self, 'active_scn_step'):
@@ -539,30 +803,38 @@ class ProceedingsWorkspace(QWidget):
                 if any(k.startswith('gstr9c') for k in f_paths): d_list.append("GSTR-9C")
                 return d_list
 
+            # [PHASE 4] Dynamic Draft Typing (Registry is Truth)
+            source_type = self.proceeding_data.get('source_type', 'SCRUTINY').lower()
+            
             # Initialize if missing (Legacy or New Case)
             if not grounds:
-                print("SCN Grounds: Hydrating default structure.")
+                print(f"SCN Grounds: Hydrating default structure ({source_type}).")
                 doc_list = _get_current_file_doc_list(details)
                 
                 # Fallback default if no files
                 if not doc_list:
-                    doc_list = ["GSTR-1", "GSTR-3B", "GSTR-2A"]
+                    # [PHASE 4] Smart Defaults: Field Audits (Adjudication) might not have these
+                    if source_type == 'adjudication':
+                        doc_list = [] # Start blank for direct adj
+                    else:
+                        doc_list = ["GSTR-1", "GSTR-3B", "GSTR-2A"]
 
                 # Create Structure
                 grounds = {
                     "version": 1,
-                    "type": "scrutiny",
+                    "type": source_type, # [FIX] Dynamic Type
                     "manual_override": True,
                     "manual_text": "",
                     "data": {
                         "financial_year": self.proceeding_data.get('financial_year', '-'),
                         "docs_verified": doc_list, 
+                        # ASMT-10 Ref only for Scrutiny
                         "asmt10_ref": {
                             "oc_no": "", 
                             "date": "",
                             "officer_designation": "Proper Officer",
                             "office_address": ""
-                        },
+                        } if source_type == 'scrutiny' else {},
                         "reply_ref": {
                             "received": False,
                             "date": None
@@ -572,6 +844,16 @@ class ProceedingsWorkspace(QWidget):
                 details['scn_grounds'] = grounds
                 self.proceeding_data['additional_details'] = details
             else:
+                # [PHASE 4] Registry Repair (Truth Enforcement)
+                current_type = grounds.get('type')
+                if current_type != source_type:
+                    print(f"SCN Grounds: Repairing type mismatch ('{current_type}' -> '{source_type}')")
+                    grounds['type'] = source_type
+                    # If migrating TO adjudication, maybe clear asmt10_ref? 
+                    # For now, we just fix the type tag to ensure correct rendering downstream.
+                    details['scn_grounds'] = grounds
+                    self.proceeding_data['additional_details'] = details
+
                 # [RECOVERY] Check if it's a blanched draft
                 current_docs = grounds.get('data', {}).get('docs_verified', [])
                 STALE_DEFAULT = ["GSTR-1", "GSTR-3B", "GSTR-2A"]
@@ -620,8 +902,11 @@ class ProceedingsWorkspace(QWidget):
             import copy
             if grounds_data:
                 ui_view = copy.deepcopy(grounds_data)
-                # Overlay Authoritative Identifiers
-                if 'data' in ui_view:
+                
+                # Overlay Authoritative Identifiers (ONLY for Scrutiny)
+                source_type = self.proceeding_data.get('source_type', 'SCRUTINY')
+                
+                if source_type == 'SCRUTINY' and 'data' in ui_view:
                     if 'asmt10_ref' not in ui_view['data']:
                         ui_view['data']['asmt10_ref'] = {}
                     
@@ -636,6 +921,9 @@ class ProceedingsWorkspace(QWidget):
             else:
                  self.scn_grounds_form.set_data(None)
             
+            # [NEW] Introductory Paragraph auto-regeneration logic
+            self.scn_grounds_form.auto_regenerate()
+            
         self.proceeding_data['taxpayer_details'] = self._ensure_dict(self.proceeding_data.get('taxpayer_details'))
         
 
@@ -646,19 +934,54 @@ class ProceedingsWorkspace(QWidget):
         # Update UI
         self.update_summary_tab()
         
-        source_scrutiny_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
+        # [PHASE 3] Workspace Branching
+        source_type = self.proceeding_data.get('source_type', 'SCRUTINY')
+        self._configure_workspace_mode(source_type)
+
+    def _configure_workspace_mode(self, source_type):
+        """
+        Configure UI states based on Case Source Type (Registry-Driven).
+        """
+        pre_scn_mode = 'ASMT10' # Default
         
-        if source_scrutiny_id:
-            # Populate ASMT-10 Read-Only Preview
-            self.render_asmt10_preview(source_scrutiny_id)
-            # Scrutiny-origin: Detach DRC-01A Finalization
-            self._detach_drc01a_finalization_panel()
-        else:
-            # Direct adjudication: Attach DRC-01A Finalization
-            self._attach_drc01a_finalization_panel()
+        if source_type == 'SCRUTINY':
+            # Scrutiny Mode -> ASMT10 Origin
+            pre_scn_mode = 'ASMT10'
+            
+            source_scrutiny_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
+            if source_scrutiny_id:
+                self.render_asmt10_preview(source_scrutiny_id)
+            
+
+            
+        elif source_type == 'ADJUDICATION':
+            # Adjudication Mode -> Check Source
+            source_scrutiny_id = self.proceeding_data.get('source_scrutiny_id')
+            
+            if source_scrutiny_id:
+                # Scrutiny-Origin Adjudication
+                pre_scn_mode = 'ASMT10'
+                self.render_asmt10_preview(source_scrutiny_id)
+            else:
+                # Direct Adjudication
+                pre_scn_mode = 'DRC01A'
+
+                
+                # Attach DRC-01A Logic (Ensure panel exists/is visible)
+                if hasattr(self, 'drc01a_tab'):
+                    # Logic to enable DRC-01A editing would go here
+                    pass
         
-        # Restore Draft State (Issues, Amounts, etc.)
-        self.restore_draft_state()
+        # [REVERTED] Sidebar is managed by MainWindow -> Sidebar.set_mode().
+        # We do not rebuild it here to avoid destroying inner sidebars (SCN/PH).
+        
+        
+        # Restore Draft State (Context Aware)
+        # [PHASE 5] Strict Hydration per Document Type
+        if pre_scn_mode == 'DRC01A':
+             self.restore_drc01a_draft_state()
+        elif pre_scn_mode == 'ASMT10':
+             pass # ASMT-10 is read-only rendering, handled by render_asmt10_preview
         
         # [PHASE 15] Hydrate SCN Initialization Flag from normalized details
         self.scn_issues_initialized = False
@@ -945,34 +1268,41 @@ class ProceedingsWorkspace(QWidget):
         self.lbl_gstin.setText(data.get('gstin', '-'))
         self.fy_badge.setText(f"FY {data.get('financial_year', '-')}")
         
-        # 2. Status Banner (Strict logic derived from issuance facts)
-        status = data.get('status', 'Draft')
-        asmt10_status = data.get('asmt10_status')
-        source_id = data.get('source_scrutiny_id') or data.get('scrutiny_id')
+        # 2. Status Banner (Strict logic derived from workflow_stage)
+        current_stage = self.get_current_stage()
         
-        # Issuance facts
+        # Issuance facts (for authority block below)
+        source_id = data.get('source_scrutiny_id') or data.get('scrutiny_id')
         asmt_issued = source_id and data.get('oc_number')
         scn_issued = data.get('scn_number')
         ord_issued = data.get('order_number')
-        scn_draft_exists = "Draft" in status and "SCN" in status
         
-        banner_text = "Status: - " # Should be overwritten
+        banner_text = "Status: - "
         banner_style = ""
         
-        if ord_issued:
+        if current_stage == WorkflowStage.ORDER_ISSUED:
             banner_text = "⚖️ Order Issued"
             banner_style = "background-color: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;"
-        elif scn_draft_exists and not scn_issued:
-            banner_text = "✏️ SCN Draft in Progress"
+        elif current_stage == WorkflowStage.PH_SCHEDULED:
+            banner_text = "📅 PH Scheduled"
             banner_style = "background-color: #fffbeb; color: #92400e; border: 1px solid #fde68a;"
-        elif scn_issued:
+        elif current_stage == WorkflowStage.SCN_ISSUED:
             banner_text = "⚖️ Show Cause Notice Issued"
             banner_style = "background-color: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;"
-        elif asmt_issued and not scn_issued:
+        elif current_stage == WorkflowStage.SCN_DRAFT:
+            banner_text = "✏️ SCN Draft in Progress"
+            banner_style = "background-color: #fffbeb; color: #92400e; border: 1px solid #fde68a;"
+        elif current_stage == WorkflowStage.ASMT10_ISSUED:
             banner_text = "🔒 ASMT-10 Finalised — SCN Pending"
             banner_style = "background-color: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe;"
+        elif current_stage == WorkflowStage.DRC01A_ISSUED:
+            banner_text = "📄 DRC-01A Issued — Awaiting Response"
+            banner_style = "background-color: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe;"
+        elif current_stage == WorkflowStage.DRC01A_DRAFT:
+            banner_text = "✏️ DRC-01A Draft"
+            banner_style = "background-color: #fffbeb; color: #92400e; border: 1px solid #fde68a;"
         else:
-            banner_text = f"Status: {status}"
+            banner_text = f"Status: {data.get('status', 'Active')}"
             banner_style = "background-color: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;"
             
         self.status_banner.setText(banner_text)
@@ -988,20 +1318,26 @@ class ProceedingsWorkspace(QWidget):
         # 4. Authority Block (Hierarchy & Emphasis)
         # Row 0: ASMT-10 (The Legal Foundation)
         row_asmt = self.auth_rows[0]
-        asmt_oc = data.get('oc_number') if source_id else "—"
-        asmt_date = data.get('asmt10_finalised_on') or data.get('notice_date') if source_id else "—"
         
-        if asmt_issued:
-            row_asmt['ref'].setText(asmt_oc)
-            row_asmt['date'].setText(asmt_date or "—")
-            row_asmt['status'].setText("✔ Issued")
-            row_asmt['status'].setStyleSheet("color: #166534; font-weight: 800; font-size: 8pt;")
-            row_asmt['frame'].setStyleSheet("background-color: #f0fdf4; border-radius: 6px; border-bottom: 1px solid #dcfce7;")
-            row_asmt['name'].setStyleSheet("font-weight: 800; color: #1e293b;")
+        is_direct = data.get('source_type') == 'ADJUDICATION' and not source_id
+        if is_direct:
+             row_asmt['frame'].setVisible(False)
         else:
-            for k in ['ref', 'date', 'status']: row_asmt[k].setText("—")
-            row_asmt['frame'].setStyleSheet("opacity: 0.5;")
-            row_asmt['status'].setStyleSheet("color: #94a3b8;")
+             row_asmt['frame'].setVisible(True)
+             asmt_oc = data.get('oc_number') if source_id else "—"
+             asmt_date = data.get('asmt10_finalised_on') or data.get('notice_date') if source_id else "—"
+             
+             if asmt_issued:
+                 row_asmt['ref'].setText(asmt_oc)
+                 row_asmt['date'].setText(asmt_date or "—")
+                 row_asmt['status'].setText("✔ Issued")
+                 row_asmt['status'].setStyleSheet("color: #166534; font-weight: 800; font-size: 8pt;")
+                 row_asmt['frame'].setStyleSheet("background-color: #f0fdf4; border-radius: 6px; border-bottom: 1px solid #dcfce7;")
+                 row_asmt['name'].setStyleSheet("font-weight: 800; color: #1e293b;")
+             else:
+                 for k in ['ref', 'date', 'status']: row_asmt[k].setText("—")
+                 row_asmt['frame'].setStyleSheet("opacity: 0.5;")
+                 row_asmt['status'].setStyleSheet("color: #94a3b8;")
 
         # Row 1: SCN
         row_scn = self.auth_rows[1]
@@ -1047,260 +1383,217 @@ class ProceedingsWorkspace(QWidget):
         self.next_action_hint.setText(hint)
 
     def create_drc01a_tab(self):
-        print("ProceedingsWorkspace: create_drc01a_tab start")
+        print("ProceedingsWorkspace: create_drc01a_tab start (3-Step Refactor)")
         # Initialize list of issue cards
         self.issue_cards = []
         
         # --- DRAFT CONTAINER ---
         self.drc01a_draft_container = QWidget()
+        self.drc01a_draft_container.setObjectName("drc01a_draft_container")
         draft_layout = QVBoxLayout(self.drc01a_draft_container)
         draft_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Prepare Pages for Side Nav
+        # 3-Step Structure
+        # 1. Reference Details (Metadata, Audit, Taxpayer)
+        # 2. Issues & Tax (Drafting, Quantification)
+        # 3. Finalize & Issue (Preview, Signature, Action)
         
-        # 1. Reference Details
+        # --- STEP 1: Reference Details ---
         ref_widget = QWidget()
         ref_layout = QVBoxLayout(ref_widget)
         ref_layout.setContentsMargins(0,0,0,0)
         
-        ref_card = QWidget() # Was ModernCard
-        ref_inner_layout = QHBoxLayout(ref_card)
+        # Card 1: Official Correspondence Metadata
+        ref_card = QWidget()
+        ref_card.setStyleSheet(f"background-color: #ffffff; border-radius: 8px; border: 1px solid #e0e0e0;")
+        ref_inner = QVBoxLayout(ref_card)
+        ref_inner.setContentsMargins(20, 20, 20, 20)
         
-        oc_label = QLabel("OC No:")
+        ref_title = QLabel("Reference Information")
+        ref_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #333333; margin-bottom: 10px;")
+        ref_inner.addWidget(ref_title)
+        
+        # Grid for inputs
+        ref_grid = QGridLayout()
+        ref_grid.setSpacing(15)
+        
+        # Row 0: OC Number & Date
+        ref_grid.addWidget(QLabel("OC No (Intimation):"), 0, 0)
         self.oc_number_input = QLineEdit()
-        self.oc_number_input.setPlaceholderText("Format: No./Year (e.g. 123/2025)")
+        self.oc_number_input.setPlaceholderText("Format: No./Year")
+        ref_grid.addWidget(self.oc_number_input, 0, 1)
         
-
-        
-        # Suggest Button
         suggest_btn = QPushButton("Get Next")
-        suggest_btn.setToolTip("Get next available OC Number")
-        suggest_btn.setStyleSheet("padding: 2px 8px; background-color: #3498db; color: white; border-radius: 4px; font-size: 8pt;")
+        suggest_btn.setFixedWidth(80)
         suggest_btn.clicked.connect(lambda: self.suggest_next_oc(self.oc_number_input))
+        ref_grid.addWidget(suggest_btn, 0, 2)
         
-        ref_inner_layout.addWidget(oc_label)
-        ref_inner_layout.addWidget(self.oc_number_input)
-        ref_inner_layout.addWidget(suggest_btn)
-        
-        oc_date_label = QLabel("OC Date:")
+        ref_grid.addWidget(QLabel("OC Date:"), 0, 3)
         self.oc_date_input = QDateEdit()
         self.oc_date_input.setCalendarPopup(True)
         self.oc_date_input.setDate(QDate.currentDate())
-        self.oc_date_input.setMinimumDate(QDate.currentDate())
+        ref_grid.addWidget(self.oc_date_input, 0, 4)
         
+        # Row 1: Deadlines (New)
+        ref_grid.addWidget(QLabel("Reply By:"), 1, 0)
+        self.reply_deadline_input = QDateEdit()
+        self.reply_deadline_input.setCalendarPopup(True)
+        self.reply_deadline_input.setDate(QDate.currentDate().addDays(15)) # Default 15 days
+        ref_grid.addWidget(self.reply_deadline_input, 1, 1)
 
-        ref_inner_layout.addWidget(oc_date_label)
-        ref_inner_layout.addWidget(self.oc_date_input)
-        ref_inner_layout.addStretch()
+        ref_grid.addWidget(QLabel("Payment By:"), 1, 3)
+        self.payment_deadline_input = QDateEdit()
+        self.payment_deadline_input.setCalendarPopup(True)
+        self.payment_deadline_input.setDate(QDate.currentDate().addDays(15))
+        ref_grid.addWidget(self.payment_deadline_input, 1, 4)
+
+        # Row 2: Context (Read-Only)
+        ref_grid.addWidget(QLabel("Financial Year:"), 2, 0)
+        fy_val = self.proceeding_data.get('financial_year', 'N/A')
+        lbl_fy = QLabel(f"<b>{fy_val}</b>")
+        lbl_fy.setStyleSheet("color: #555;")
+        ref_grid.addWidget(lbl_fy, 2, 1)
+
+        ref_grid.addWidget(QLabel("Adjudication Section:"), 2, 3)
+        sec_val = self.proceeding_data.get('adjudication_section', 'N/A')
+        self.section_display = QLabel(f"<b>{sec_val}</b>") # Read-Only
+        self.section_display.setStyleSheet("color: #e67e22; padding: 4px; background: #fff3e0; border-radius: 4px;")
+        ref_grid.addWidget(self.section_display, 2, 4)
         
+        # Row 3: Officer Details (New)
+        ref_grid.addWidget(QLabel("Proper Officer:"), 3, 0)
+        self.officer_name_input = QLineEdit()
+        self.officer_name_input.setPlaceholderText("Name of Issuing Officer")
+        # Auto-fill if available in settings/session? For now blank or placeholder
+        ref_grid.addWidget(self.officer_name_input, 3, 1, 1, 4)
+        
+        ref_inner.addLayout(ref_grid)
         ref_layout.addWidget(ref_card)
         ref_layout.addStretch()
-        
-        # 2. Issues Involved
+
+        # --- STEP 2: Issues & Tax ---
         issues_widget = QWidget()
         issues_layout = QVBoxLayout(issues_widget)
         issues_layout.setContentsMargins(0,0,0,0)
         
-        # Issue Selection Toolbar
-        issue_selection_layout = QHBoxLayout()
-        issue_label = QLabel("Select Issue:")
+        # Toolbar
+        toolbar = QWidget()
+        toolbar.setStyleSheet("background-color: #f8f9fa; border-bottom: 1px solid #e0e0e0;")
+        tb_layout = QHBoxLayout(toolbar)
+        tb_layout.setContentsMargins(10, 5, 10, 5)
+        
+        tb_layout.addWidget(QLabel("<b>Add Issue:</b>"))
         self.issue_combo = QComboBox()
-        self.issue_combo.addItem("Select an issue...", None)
-        self.load_issue_templates()
+        self.issue_combo.addItem("Select Issue Template...", None)
+        self.load_issue_templates() # Load from Issue Master
+        tb_layout.addWidget(self.issue_combo, 1)
         
-        refresh_issues_btn = QPushButton("🔄")
-        refresh_issues_btn.setToolTip("Refresh issue list")
-        refresh_issues_btn.clicked.connect(self.load_issue_templates)
+        add_btn = QPushButton("Insert")
+        add_btn.setStyleSheet("background-color: #3498db; color: white; font-weight: bold;")
+        add_btn.clicked.connect(self.insert_selected_issue)
+        tb_layout.addWidget(add_btn)
         
-        insert_issue_btn = QPushButton("Insert Issue Template")
-        insert_issue_btn.setProperty("class", "primary")
-        insert_issue_btn.clicked.connect(self.insert_selected_issue)
+        issues_layout.addWidget(toolbar)
         
-        issue_selection_layout.addWidget(issue_label)
-        issue_selection_layout.addWidget(self.issue_combo)
-        issue_selection_layout.addWidget(refresh_issues_btn)
-        issue_selection_layout.addWidget(insert_issue_btn)
-        issue_selection_layout.addStretch()
-        issues_layout.addLayout(issue_selection_layout)
+        # Scrollable Area for Issues
+        from PyQt6.QtWidgets import QScrollArea
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         
         self.issues_container = QWidget()
         self.issues_layout = QVBoxLayout(self.issues_container)
         self.issues_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.issues_layout.setSpacing(15)
+        self.issues_layout.setSpacing(20)
+        self.issues_layout.setContentsMargins(20, 20, 20, 20)
         
-        # Use existing issue cards logic (they are ModernCards, so they fit well)
-        issues_layout.addWidget(self.issues_container)
-        issues_layout.addStretch()
+        scroll.setWidget(self.issues_container)
+        issues_layout.addWidget(scroll, 1) # [FIX] Ensure Scroll Area takes available space
+        
+        # Tax Summary (Live Derived)
+        summary_card = QFrame()
+        summary_card.setFrameShape(QFrame.Shape.StyledPanel)
+        summary_card.setStyleSheet("""
+            QFrame {
+                background-color: #2c3e50; 
+                color: white; 
+                border-top-left-radius: 8px; 
+                border-top-right-radius: 8px;
+                border-bottom: 1px solid #34495e;
+            }
+        """)
+        sum_layout = QHBoxLayout(summary_card)
+        sum_layout.setContentsMargins(20, 15, 20, 15)
+        
+        sum_layout.addWidget(QLabel("<b>Total Liability:</b>"))
+        self.lbl_total_tax = QLabel("₹ 0")
+        self.lbl_total_tax.setStyleSheet("font-size: 16px; font-weight: bold; color: #f1c40f;")
+        sum_layout.addWidget(self.lbl_total_tax)
+        sum_layout.addStretch()
+        
+        issues_layout.addWidget(summary_card)
 
-        # 3. Sections Violated
-        sections_widget = QWidget()
-        sec_layout = QVBoxLayout(sections_widget)
-        sec_layout.setContentsMargins(0,0,0,0)
-        
-        section_selection_layout = QHBoxLayout()
-        section_label = QLabel("Select Section:")
-        self.section_combo = QComboBox()
-        self.section_combo.addItem("Select a section...", None)
-        self.load_sections()
-        
-        add_section_btn = QPushButton("Add Section")
-        add_section_btn.setProperty("class", "primary")
-        add_section_btn.clicked.connect(self.add_section_to_editor)
-        
-        section_selection_layout.addWidget(section_label)
-        section_selection_layout.addWidget(self.section_combo)
-        section_selection_layout.addWidget(add_section_btn)
-        section_selection_layout.addStretch()
-        sec_layout.addLayout(section_selection_layout)
-        
-        self.sections_editor = RichTextEditor("Enter the sections of law that were violated...")
-        self.sections_editor.setMinimumHeight(400)
-        
+# ... (Skip ahead to show_drc01a_finalization_panel)
 
-        sec_layout.addWidget(self.sections_editor)
-        
-        # 4. Tax Demand Details
-        tax_widget = QWidget()
-        tax_layout = QVBoxLayout(tax_widget)
-        tax_layout.setContentsMargins(0,0,0,0)
-        
-        act_selection_layout = QHBoxLayout()
-        act_label = QLabel("Select Acts:")
-        act_label.setStyleSheet("font-weight: bold;")
-        act_selection_layout.addWidget(act_label)
-        
-        self.act_checkboxes = {}
-        for act in ["CGST", "SGST", "IGST", "Cess"]:
-            cb = QCheckBox(act)
-            cb.stateChanged.connect(lambda state, a=act: self.toggle_act_row(a, state))
-            self.act_checkboxes[act] = cb
-            act_selection_layout.addWidget(cb)
-        act_selection_layout.addStretch()
-        tax_layout.addLayout(act_selection_layout)
-        
-        self.tax_table = QTableWidget()
-        self.tax_table.setColumnCount(7)
-        self.tax_table.setHorizontalHeaderLabels([
-            "Act", "Tax Period From", "Tax Period To", "Tax (₹)", "Interest (₹)", "Penalty (₹)", "Total (₹)"
-        ])
-        self.tax_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.tax_table.setMinimumHeight(300)
-        tax_layout.addWidget(self.tax_table)
-        self.add_total_row()
-        
-        # 5. Dates & Compliance
-        dates_widget = QWidget()
-        dates_layout = QVBoxLayout(dates_widget)
-        dates_layout.setContentsMargins(0,0,0,0)
-        
-        # Last Date for Reply
-        reply_label = QLabel("Last Date for Reply")
-        self.reply_date = QDateEdit()
-        self.reply_date.setCalendarPopup(True)
-        self.reply_date.setDate(QDate.currentDate().addDays(30))
-        self.reply_date.setMinimumDate(QDate.currentDate())
-        
 
-        dates_layout.addWidget(reply_label)
-        dates_layout.addWidget(self.reply_date)
-        
-        # Last Date for Payment
-        payment_label = QLabel("Last Date for Payment")
-        self.payment_date = QDateEdit()
-        self.payment_date.setCalendarPopup(True)
-        self.payment_date.setDate(QDate.currentDate().addDays(30))
-        self.payment_date.setMinimumDate(QDate.currentDate())
-        
-
-        dates_layout.addWidget(payment_label)
-        dates_layout.addWidget(self.payment_date)
-        dates_layout.addStretch()
-        
-        # 6. Actions
+        # --- STEP 3: Actions & Finalize ---
         actions_widget = QWidget()
         actions_layout = QVBoxLayout(actions_widget)
         
-        actions_desc = QLabel("Review the generated document in the right panel and proceed.")
-        actions_layout.addWidget(actions_desc)
+        finalize_desc = QLabel("Review the draft below. Once finalized, the document will be issued and locked.")
+        finalize_desc.setStyleSheet("color: #666; font-size: 11pt; margin: 20px;")
+        actions_desc_align = Qt.AlignmentFlag.AlignCenter
+        finalize_desc.setAlignment(actions_desc_align)
+        actions_layout.addWidget(finalize_desc)
         
-        # Letterhead Checkbox
-        self.show_letterhead_cb = QCheckBox("Include Letterhead in Generation")
-        self.show_letterhead_cb.setChecked(True)
+        # Action Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
         
-
-        actions_layout.addWidget(self.show_letterhead_cb)
-        
-        action_btns_layout = QHBoxLayout()
         save_btn = QPushButton("Save Draft")
+        save_btn.setFixedSize(120, 40)
         save_btn.clicked.connect(self.save_drc01a)
-        action_btns_layout.addWidget(save_btn)
-        
-        pdf_btn = QPushButton("Generate PDF")
-        pdf_btn.setProperty("class", "danger")
-        pdf_btn.clicked.connect(self.generate_pdf)
-        action_btns_layout.addWidget(pdf_btn)
-        
-        docx_btn = QPushButton("Generate DOCX")
-        docx_btn.setProperty("class", "primary")
-        docx_btn.clicked.connect(self.generate_docx)
-        action_btns_layout.addWidget(docx_btn)
+        btn_row.addWidget(save_btn)
         
         finalize_btn = QPushButton("Finalize & Issue")
-        finalize_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 10px; font-weight: bold;")
+        finalize_btn.setFixedSize(150, 40)
+        finalize_btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         finalize_btn.clicked.connect(self.show_drc01a_finalization_panel)
-        action_btns_layout.addWidget(finalize_btn)
+        btn_row.addWidget(finalize_btn)
         
-        action_btns_layout.addStretch()
-        actions_layout.addLayout(action_btns_layout)
+        btn_row.addStretch()
+        actions_layout.addLayout(btn_row)
         actions_layout.addStretch()
-        
-        # Build Side Nav Items
+
+        # Build Side Nav
         nav_items = [
             ("Reference Details", "1", ref_widget),
-            ("Issues Involved", "2", issues_widget),
-            ("Sections Violated", "3", sections_widget),
-            ("Tax Demand Details", "4", tax_widget),
-            ("Dates & Compliance", "5", dates_widget),
-            ("Actions & Finalize", "✓", actions_widget)
+            ("Issues & Tax", "2", issues_widget),
+            ("Actions & Finalize", "3", actions_widget)
         ]
         
         side_nav = self.create_side_nav_layout(nav_items)
         draft_layout.addWidget(side_nav)
         
-        # --- FINALIZATION CONTAINER (Initially Hidden) ---
+        # --- PREVIEW / FINALIZATION CONTAINERS (Lazy) ---
         self.drc01a_finalization_container = self.create_drc01a_finalization_panel()
         self.drc01a_finalization_container.hide()
         
-        # --- VIEW CONTAINER (Initially Hidden) ---
         self.drc01a_view_container = QWidget()
         self.drc01a_view_container.hide()
         view_layout = QVBoxLayout(self.drc01a_view_container)
         
-        view_title = QLabel("<b>DRC-01A Generated</b>")
-        view_title.setStyleSheet("font-size: 14pt; color: #27ae60; margin-bottom: 20px;")
+        view_title = QLabel("<b>DRC-01A Issued</b>")
+        view_title.setStyleSheet("font-size: 16pt; color: #27ae60; margin-bottom: 10px;")
         view_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         view_layout.addWidget(view_title)
         
-        view_msg = QLabel("A DRC-01A document has already been generated for this case.")
+        view_msg = QLabel("This document has been finalized and issued. Changes are no longer permitted.")
         view_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
         view_layout.addWidget(view_msg)
-        
-        summary_lbl = QLabel("Document Generated Successfully.\nClick 'Edit / Revise Draft' to make changes.")
-        summary_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        summary_lbl.setStyleSheet("color: #7f8c8d; font-size: 10pt; margin: 20px;")
-        view_layout.addWidget(summary_lbl)
-        
-        # Edit Button
-        edit_btn = QPushButton("Edit / Revise Draft")
-        edit_btn.setStyleSheet("background-color: #f39c12; color: white; padding: 10px; font-weight: bold;")
-        edit_btn.clicked.connect(lambda: self.toggle_view_mode("drc01a", False))
-        view_layout.addWidget(edit_btn)
-        
         view_layout.addStretch()
-
-        # Add containers to a main widget switching wrapper
-        # Since we refactored, we can just return a container that holds all three
         
+        # Wrapper
         wrapper = QWidget()
         wrapper_layout = QVBoxLayout(wrapper)
         wrapper_layout.setContentsMargins(0,0,0,0)
@@ -1308,97 +1601,360 @@ class ProceedingsWorkspace(QWidget):
         wrapper_layout.addWidget(self.drc01a_finalization_container)
         wrapper_layout.addWidget(self.drc01a_view_container)
         
+        # [PERSISTENCE] Hydrate State
+        self.restore_drc01a_draft_state()
+        
+        print("ProceedingsWorkspace: create_drc01a_tab done")
         return wrapper
 
     def create_drc01a_finalization_panel(self):
-        """Create the DRC-01A Finalization Summary Container (Lazy)"""
+        print("ProceedingsWorkspace: create_drc01a_finalization_panel start")
         container = QWidget()
-        self.drc01a_finalization_layout = QVBoxLayout(container)
-        self.drc01a_finalization_layout.setContentsMargins(0, 0, 0, 0)
-        return container
-
-    def _attach_drc01a_finalization_panel(self):
-        """Instantiate and attach FinalizationPanel only for direct adjudication cases."""
-        if hasattr(self, "drc_fin_panel"):
-            return
-            
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        from src.ui.components.finalization_panel import FinalizationPanel
         self.drc_fin_panel = FinalizationPanel()
         
-        # Connect Signals
-        self.drc_fin_panel.cancel_btn.clicked.connect(self.hide_drc01a_finalization_panel)
-        self.drc_fin_panel.finalize_btn.clicked.connect(self.confirm_drc01a_finalization)
-        self.drc_fin_panel.pdf_btn.clicked.connect(self.generate_pdf)
+        # Connect Actions
+        self.drc_fin_panel.cancel_btn.clicked.connect(lambda: self.toggle_view_mode("drc01a", False))
+        self.drc_fin_panel.finalize_btn.clicked.connect(self.finalize_drc01a_issuance)
+        self.drc_fin_panel.pdf_btn.clicked.connect(lambda: self.generate_pdf(doc_type="DRC-01A"))
+        self.drc_fin_panel.save_btn.clicked.connect(self.save_drc01a)
+        self.drc_fin_panel.refresh_btn.clicked.connect(self.show_drc01a_finalization_panel)
         
-        self.drc01a_finalization_layout.addWidget(self.drc_fin_panel)
-        print("FinalizationPanel Attached (Direct Adjudication)")
-
-    def _detach_drc01a_finalization_panel(self):
-        """Detach and destroy FinalizationPanel for scrutiny-origin cases."""
-        if hasattr(self, "drc_fin_panel"):
-            self.drc_fin_panel.setParent(None)
-            self.drc_fin_panel.deleteLater()
-            del self.drc_fin_panel
-            print("FinalizationPanel Detached")
+        layout.addWidget(self.drc_fin_panel)
+        self.drc01a_finalization_layout = layout # Keep reference if needed
+        return container
 
     def show_drc01a_finalization_panel(self):
         """Review and Show Finalization Panel"""
-        # 1. Validate Inputs
+        # 1. Validate Issues Exist
+        if not self.issue_cards:
+             QMessageBox.warning(self, "Draft Empty", "Please add at least one issue before finalizing.")
+             return
+             
+        # 2. Validate Metadata Inputs
+        errors = []
         if not self.oc_number_input.text().strip():
-            QMessageBox.warning(self, "Validation Error", "OC Number is mandatory for finalization.")
-            self.oc_number_input.setFocus()
+            errors.append("OC Number is mandatory.")
+        if not self.officer_name_input.text().strip():
+            errors.append("Proper Officer Name is mandatory.")
+            
+        # Date Logic Check (Reply Date > OC Date)
+        oc_date = self.oc_date_input.date()
+        reply_date = self.reply_deadline_input.date()
+        if reply_date <= oc_date:
+            errors.append("Reply Date must be after OC Date.")
+            
+        if errors:
+            QMessageBox.warning(self, "Validation Error", "\n".join(errors))
             return
-
-        oc_no = self.oc_number_input.text()
-        oc_date = self.oc_date_input.date().toString('dd-MM-yyyy')
+            
+        # 3. Build Model & Render Preview
+        drc_model = self._get_drc01a_model()
+        html_preview = self._render_drc01a_preview(drc_model)
         
+        # 4. Load into Panel
         self.drc_fin_panel.load_data(
             proceeding_data=self.proceeding_data,
-            issues_list=self.issue_cards, # Passing rich objects
+            issues_list=self.issue_cards, 
             doc_type="DRC-01A",
-            doc_no=oc_no, # For DRC-01A, OC No is the main ref
-            doc_date=oc_date,
-            ref_no="-" # No sep ref for DRC
+            doc_no=drc_model['oc_no'],
+            doc_date=drc_model['oc_date'],
+            ref_no="-" 
         )
+        
+        # 5. Set HTML Preview (Browser)
+        self.drc_fin_panel.set_preview_html(html_preview)
 
-        # 3. Switch View
+        # 6. Switch View
         self.drc01a_draft_container.hide()
+        self.drc01a_view_container.hide()
         self.drc01a_finalization_container.show()
         
-    def hide_drc01a_finalization_panel(self):
-        self.drc01a_finalization_container.hide()
-        self.drc01a_draft_container.show()
+    def finalize_drc01a_issuance(self):
+        """
+        Execute Strict Issuance Logic:
+        1. Save to DB (Persistent)
+        2. Generate PDF Snapshot
+        3. Update Workflow Stage -> DRC01A_ISSUED
+        4. Lock UI
+        """
+        reply = QMessageBox.question(self, "Confirm Issuance", 
+                                   "Are you sure you want to issue DRC-01A?\n\nThis action is IRREVERSIBLE. The document will be locked.",
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.No:
+            return
 
-    def confirm_drc01a_finalization(self):
-        """Commit Finalization"""
         try:
-            # 1. Save Document as Final
-            self.save_drc01a() # Ensure latest draft is saved
-            
-            # 2. Update Proceeding Status
-            self.db.update_proceeding(self.proceeding_id, {
-                "status": "DRC-01A Issued"
-            })
-            
-            # 3. Update Register
-            oc_data = {
-                'OC_Number': self.oc_number_input.text(),
-                'OC_Date': self.oc_date_input.date().toString("yyyy-MM-dd"),
-                'OC_Content': f"DRC-01A Issued for GSTIN {self.proceeding_data.get('gstin','')}. {self.drc_fin_panel.fin_scn_remarks.toPlainText()}",
-                'OC_To': self.proceeding_data.get('legal_name', '')
-            }
-            # Use proceeding_id (case_id used in SQLite)
-            self.db.add_oc_entry(self.proceeding_id, oc_data, is_issuance=True)
-            
-            QMessageBox.information(self, "Success", "DRC-01A Finalized Successfully.")
-            
-            # 4. Switch to View Mode
-            self.drc01a_finalization_container.hide()
-            self.drc01a_view_container.show()
-            
+             # 1. Save Final State
+             self.save_drc01a() 
+             
+             # 2. Update Workflow State (Atomic Transaction ideally)
+             if self.transition_to(WorkflowStage.DRC01A_ISSUED):
+                 QMessageBox.information(self, "Success", "DRC-01A Issued Successfully.\n\nWorkflow advanced to SCN Draft.")
+                 
+                 # 3. Refresh UI to show View Mode (Locked)
+                 self.drc01a_finalization_container.hide()
+                 self.toggle_view_mode("drc01a", True) # Switch to View Container
+                 
+                 # 4. Trigger auto-generation of SCN draft? (Optional)
+                 # self.create_scn_tab() # Refresh SCN tab availability
+             else:
+                 QMessageBox.critical(self, "Error", "Failed to update workflow stage.")
+                 
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Finalization failed: {e}")
+            QMessageBox.critical(self, "Issuance Error", f"An error occurred: {e}")
+            print(f"Finalization Error: {e}")
             import traceback
             traceback.print_exc()
+
+
+    def _get_drc01a_model(self):
+        """Build Structured Data Model for DRC-01A (No UI Scraping)"""
+        if not self.proceeding_data: return {}
+        
+        # 1. Taxpayer
+        tp = self.proceeding_data.get('taxpayer_details', self.proceeding_data.get('taxpayer', {}))
+        
+        # 2. Metadata
+        model = {
+            'gstin': tp.get('gstin', self.proceeding_data.get('gstin', '-')),
+            'legal_name': tp.get('legal_name', self.proceeding_data.get('legal_name', '-')),
+            'trade_name': tp.get('trade_name', '-'),
+            'address': tp.get('address', 'Address not available'),
+            
+            'oc_no': self.oc_number_input.text(),
+            'oc_date': self.oc_date_input.date().toString("dd/MM/yyyy"),
+            'reply_date': self.reply_deadline_input.date().toString("dd/MM/yyyy"),
+            'payment_date': self.payment_deadline_input.date().toString("dd/MM/yyyy"),
+            'officer_name': self.officer_name_input.text(),
+            
+            'financial_year': self.proceeding_data.get('financial_year', '-'),
+            'section': self.proceeding_data.get('adjudication_section', '-'),
+            
+            # Context Flags
+            'is_direct': self.proceeding_data.get('source_type') == 'ADJUDICATION' and not self.proceeding_data.get('source_scrutiny_id'),
+            'asmt10_ref': self.proceeding_data.get('source_scrutiny_id', '-'),
+            
+            'issues': [],
+            'total_tax': 0.0,
+            'total_interest': 0.0,
+            'total_penalty': 0.0,
+            'grand_total': 0.0
+        }
+        
+        # 3. Issues & Financials
+        from src.utils.formatting import format_indian_number
+        
+        for idx, card in enumerate(self.issue_cards):
+            # Prefer calculated breakdown
+            breakdown = card.get_tax_breakdown() if hasattr(card, 'get_tax_breakdown') else {}
+            
+            # Helper to sum issue totals
+            i_tax = sum(v.get('tax', 0) for v in breakdown.values())
+            i_int = sum(v.get('interest', 0) for v in breakdown.values())
+            i_pen = sum(v.get('penalty', 0) for v in breakdown.values())
+            
+            issue_data = {
+                'index': idx + 1,
+                'title': card.template.get('issue_name', 'Issue'),
+                'description': "Details regarding this issue...", # Placeholder or extracted content
+                'tax': i_tax,
+                'interest': i_int,
+                'penalty': i_pen,
+                'total': i_tax + i_int + i_pen,
+                'breakdown': breakdown
+            }
+            model['issues'].append(issue_data)
+            
+            model['total_tax'] += i_tax
+            model['total_interest'] += i_int
+            model['total_penalty'] += i_pen
+            model['grand_total'] += issue_data['total']
+            
+        model['grand_total_fmt'] = format_indian_number(model['grand_total'], prefix_rs=True)
+        return model
+
+    def _render_drc01a_preview(self, model):
+        """Generate HTML for DRC-01A Preview"""
+        html = f"""
+        <html>
+        <head>
+            <style>
+                body {{ font-family: 'Segoe UI', sans-serif; padding: 40px; color: #333; }}
+                h1 {{ text-align: center; color: #2c3e50; font-size: 18pt; margin-bottom: 5px; }}
+                .subtitle {{ text-align: center; font-size: 12pt; font-weight: bold; margin-bottom: 30px; }}
+                .meta-table {{ width: 100%; margin-bottom: 20px; border-collapse: collapse; }}
+                .meta-table td {{ padding: 5px; vertical-align: top; }}
+                .section-header {{ background-color: #f8f9fa; padding: 8px; font-weight: bold; border-left: 4px solid #3498db; margin-top: 20px; }}
+                table.demand {{ width: 100%; border-collapse: collapse; margin-top: 10px; }}
+                table.demand th, table.demand td {{ border: 1px solid #ddd; padding: 8px; text-align: right; }}
+                table.demand th {{ background-color: #f1f2f6; text-align: center; }}
+                .footer {{ margin-top: 40px; text-align: right; font-weight: bold; }}
+            </style>
+        </head>
+        <body>
+            <h1>FORM GST DRC-01A</h1>
+            <div class="subtitle">Intimation of tax ascertained as being payable under section 73(5)/74(5)</div>
+            
+            <table class='meta-table'>
+                <tr>
+                    <td width="50%">
+                        <b>Taxpayer Details:</b><br>
+                        GSTIN: {model['gstin']}<br>
+                        Legal Name: {model['legal_name']}<br>
+                        Trade Name: {model['trade_name']}
+                    </td>
+                    <td width="50%" style="text-align: right">
+                        <b>Case Details:</b><br>
+                        Case ID: {self.proceeding_id}<br>
+                        Financial Year: {model['financial_year']}<br>
+                        Intimation No.: {model['oc_no']}<br>
+                        Date: {model['oc_date']}
+                    </td>
+                </tr>
+            </table>
+
+            <div class="section-header">Brief Facts of the Case</div>
+            <p>
+                Based on the verification of returns and other details, discrepancies have been noticed for the tax period 
+                {model['financial_year']}. The details are as follows:
+            </p>
+            <ul>
+        """
+        
+        for issue in model['issues']:
+            html += f"<li><b>{issue['title']}</b>: Liability determined: ₹{issue['total']:,.2f}</li>"
+            
+        html += """
+            </ul>
+            
+            <div class="section-header">Summary of Tax Liability</div>
+            <table class='demand'>
+                <tr>
+                    <th>Act</th>
+                    <th>Tax</th>
+                    <th>Interest</th>
+                    <th>Penalty</th>
+                    <th>Total</th>
+                </tr>
+        """
+        
+        # Aggregate Breakdown for Table
+        acts = ['IGST', 'CGST', 'SGST', 'Cess']
+        agg = {act: {'t':0,'i':0,'p':0} for act in acts}
+        
+        for issue in model['issues']:
+            bd = issue['breakdown']
+            for act in acts:
+                if act in bd:
+                    agg[act]['t'] += bd[act].get('tax', 0)
+                    agg[act]['i'] += bd[act].get('interest', 0)
+                    agg[act]['p'] += bd[act].get('penalty', 0)
+        
+        for act in acts:
+            t, i, p = agg[act]['t'], agg[act]['i'], agg[act]['p']
+            if t+i+p > 0:
+                html += f"""
+                <tr>
+                    <td style='text-align:left'><b>{act}</b></td>
+                    <td>{t:,.2f}</td>
+                    <td>{i:,.2f}</td>
+                    <td>{p:,.2f}</td>
+                    <td><b>{(t+i+p):,.2f}</b></td>
+                </tr>
+                """
+                
+        html += f"""
+                <tr style='background-color: #ecf0f1;'>
+                    <td style='text-align:left'><b>Total</b></td>
+                    <td><b>{model['total_tax']:,.2f}</b></td>
+                    <td><b>{model['total_interest']:,.2f}</b></td>
+                    <td><b>{model['total_penalty']:,.2f}</b></td>
+                    <td><b>{model['grand_total']:,.2f}</b></td>
+                </tr>
+            </table>
+            
+            <div class="footer">
+                Proper Officer<br>
+                (Signature & Name)
+            </div>
+        </body>
+        </html>
+        """
+        return html
+
+    def generate_pdf(self, doc_type="DRC-01A"):
+        """Generate PDF for the specified document type"""
+        if doc_type == "DRC-01A":
+            model = self._get_drc01a_model()
+            html_content = self._render_drc01a_preview(model)
+            filename = f"DRC-01A_{model['oc_no'].replace('/', '_') or 'DRAFT'}.pdf"
+        elif doc_type == "SCN":
+             # Placeholder for SCN
+             QMessageBox.information(self, "Info", "SCN PDF Generation is handled separately.")
+             return
+        else:
+             return
+
+        from PyQt6.QtPrintSupport import QPrinter
+        from PyQt6.QtGui import QTextDocument
+        from PyQt6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save PDF", filename, "PDF Files (*.pdf)")
+        if not file_path: return
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+        printer.setOutputFileName(file_path)
+        
+        doc = QTextDocument()
+        doc.setHtml(html_content)
+        doc.print(printer)
+        
+        QMessageBox.information(self, "Success", f"PDF saved successfully to:\n{file_path}")
+        import os
+        try:
+            os.startfile(file_path)
+        except: pass
+
+    def load_sections(self):
+        """Populate Adjudication Sections"""
+        if not hasattr(self, 'section_combo'): return
+        
+        current_val = self.section_combo.currentText()
+        self.section_combo.blockSignals(True)
+        self.section_combo.clear()
+        
+        sections = [
+            "Section 73: Non-fraud cases",
+            "Section 74: Fraud/Suppression cases", 
+            "Section 76: Tax collected but not paid",
+            "Section 122: General Penalties",
+            "Section 125: General Penalty",
+            "Section 129: E-Way Bill / Detention",
+            "Section 130: Confiscation"
+        ]
+        
+        # Add current value if not in list (Legacy Support)
+        if current_val and current_val not in sections and current_val != "Select Section...":
+             self.section_combo.addItem(current_val)
+             
+        self.section_combo.addItems(sections)
+        
+        # Try to match proceeding data
+        proc_sec = self.proceeding_data.get('adjudication_section', '')
+        if proc_sec:
+            # Normalize lookup (e.g. "73" -> match "Section 73...")
+            for idx in range(self.section_combo.count()):
+                text = self.section_combo.itemText(idx)
+                if proc_sec in text:
+                    self.section_combo.setCurrentIndex(idx)
+                    break
+        self.section_combo.blockSignals(False)
 
     def load_issue_templates(self):
         """Load issue templates from DB (Active Issues)"""
@@ -1418,20 +1974,7 @@ class ProceedingsWorkspace(QWidget):
         except Exception as e:
             print(f"Error loading issue templates: {e}")
 
-    def load_sections(self):
-        """Load CGST sections from DB"""
-        try:
-            sections = self.db.get_cgst_sections()
-            self.section_combo.clear()
-            self.section_combo.addItem("Select Section...", None)
-            
-            for section in sections:
-                title = section.get('title', '')
-                # Store full content in user data if needed, or just title
-                self.section_combo.addItem(title, section)
-                
-        except Exception as e:
-            print(f"Error loading sections: {e}")
+
 
     def add_section_to_editor(self):
         """Insert selected section into the editor"""
@@ -1480,74 +2023,28 @@ class ProceedingsWorkspace(QWidget):
         self.calculate_grand_totals()
 
     def calculate_grand_totals(self, _=None):
-        """Sum up totals from all issue cards and update main table"""
-        # Initialize totals for each Act
-        act_totals = {
-            'CGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0},
-            'SGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0},
-            'IGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0},
-            'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
-        }
+        """Dynamic Aggregation for DRC-01A Draft (Derived from Issues)"""
+        total_liability = 0.0
         
         # Aggregate from all issue cards
         for card in self.issue_cards:
+            # Polymorphic Safety: Handle different card types
             if hasattr(card, 'get_tax_breakdown'):
                 breakdown = card.get_tax_breakdown()
                 for act, values in breakdown.items():
-                    if act in act_totals:
-                        act_totals[act]['tax'] += values.get('tax', 0.0)
-                        act_totals[act]['interest'] += values.get('interest', 0.0)
-                        act_totals[act]['penalty'] += values.get('penalty', 0.0)
+                   total_liability += values.get('tax', 0.0)
+                   total_liability += values.get('interest', 0.0)
+                   total_liability += values.get('penalty', 0.0)
+            elif hasattr(card, 'get_total_liability'):
+                 total_liability += card.get_total_liability()
         
-        # Auto-select Acts based on non-zero totals
-        # This ensures the rows exist in the table
-        for act, totals in act_totals.items():
-            has_liability = (totals['tax'] > 0 or totals['interest'] > 0 or totals['penalty'] > 0)
-            if has_liability:
-                # Find the checkbox for this act
-                # keys in act_checkboxes match keys in act_totals (CGST, SGST, IGST, Cess)
-                if act in self.act_checkboxes:
-                    cb = self.act_checkboxes[act]
-                    if not cb.isChecked():
-                        # This will trigger toggle_act_row and create the row
-                        cb.setChecked(True)
-        
-        # Update the Tax Table rows
-        # We iterate through the table rows (excluding the last Total row)
-        # and match the Act name in column 0
-        
-        # Temporarily block signals to prevent infinite loops
-        self.tax_table.blockSignals(True)
-        
-        row_count = self.tax_table.rowCount()
-        # The last row is "Total", so we iterate up to row_count - 1
-        for row in range(row_count - 1):
-            item = self.tax_table.item(row, 0)
-            if not item: continue
+        # Update Summary Card
+        from src.utils.formatting import format_indian_number
+        if hasattr(self, 'lbl_total_tax'):
+            self.lbl_total_tax.setText(f"₹ {format_indian_number(total_liability)}")
             
-            act_name = item.text().strip()
-            
-            # Map "Cess" variations if needed
-            if act_name.lower() == 'cess': act_name = 'Cess'
-            
-            if act_name in act_totals:
-                totals = act_totals[act_name]
-                
-                # Update Tax (Col 3)
-                self.tax_table.setItem(row, 3, QTableWidgetItem(str(totals['tax'])))
-                
-                # Update Interest/Penalty if extracted (otherwise leave manual/default)
-                if totals['interest'] > 0:
-                    self.tax_table.setItem(row, 4, QTableWidgetItem(str(totals['interest'])))
-                if totals['penalty'] > 0:
-                    self.tax_table.setItem(row, 5, QTableWidgetItem(str(totals['penalty'])))
-                    
-        self.tax_table.blockSignals(False)
-        
-        # Recalculate row totals and grand total
-        self.calculate_totals()
-        # No automatic preview trigger here. Preview is stage-gated.
-        pass
+        # No more table updates. Table is removed.
+
 
     def create_scn_tab(self):
         print("ProceedingsWorkspace: create_scn_tab start")
@@ -1571,24 +2068,20 @@ class ProceedingsWorkspace(QWidget):
         ref_layout.setSpacing(20)
         
         self.ref_card = ModernCard(title="Reference Details", collapsible=False)
-        self.ref_card.setFixedWidth(450) # Keep it compact and professional
+        self.ref_card.setFixedWidth(500) # Slightly wider for drafting comfort
         
-        # Sub-header & Helper text
-        ref_subheader = QLabel("SCN Identity Setup")
-        ref_subheader.setStyleSheet("font-size: 10pt; color: #7f8c8d; margin-top: -10px; margin-bottom: 5px;")
+        # Section 1 – Notice Identification
+        header_style = "font-size: 11pt; font-weight: bold; color: #2c3e50;"
+        sec1_header = QLabel("Notice Identification")
+        sec1_header.setStyleSheet(header_style)
         self.ref_card.addLayout(QVBoxLayout()) # Internal layout access
-        self.ref_card.content_layout.insertWidget(0, ref_subheader)
-        
-        ref_helper = QLabel("These details identify the Show Cause Notice and are saved even if you exit early.")
-        ref_helper.setWordWrap(True)
-        ref_helper.setStyleSheet("font-size: 8pt; color: #95a5a6; font-style: italic; margin-bottom: 15px;")
-        self.ref_card.content_layout.insertWidget(1, ref_helper)
+        self.ref_card.content_layout.addWidget(sec1_header)
         
         # Grid for inputs
         grid_widget = QWidget()
         grid = QGridLayout(grid_widget)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setSpacing(15)
+        grid.setContentsMargins(0, 5, 0, 0)
+        grid.setSpacing(12)
         
         label_style = "color: #5f6368; font-weight: 500; font-size: 9pt;"
         input_style = "padding: 8px; border: 1px solid #dadce0; border-radius: 4px; font-size: 10pt;"
@@ -1599,8 +2092,6 @@ class ProceedingsWorkspace(QWidget):
         self.scn_no_input = QLineEdit()
         self.scn_no_input.setPlaceholderText("e.g. SCN/2026/001")
         self.scn_no_input.setStyleSheet(input_style)
-        
-
         self.scn_no_input.textChanged.connect(self.evaluate_scn_workflow_phase)
         
         grid.addWidget(scn_no_label, 0, 0)
@@ -1635,15 +2126,9 @@ class ProceedingsWorkspace(QWidget):
         """)
         self.btn_auto_oc.clicked.connect(self._on_auto_generate_oc)
         
-        # Provenance Indicator
-        self.oc_provenance_lbl = QLabel("")
-        self.oc_provenance_lbl.setStyleSheet("font-size: 8pt; color: #3498db; font-style: italic;")
-        self.oc_provenance_lbl.hide()
-        
         grid.addWidget(oc_label, 1, 0)
         grid.addWidget(self.scn_oc_input, 1, 1)
         grid.addWidget(self.btn_auto_oc, 1, 2)
-        grid.addWidget(self.oc_provenance_lbl, 2, 1, 1, 2)
         
         # SCN Date
         date_label = QLabel("SCN Date")
@@ -1653,26 +2138,26 @@ class ProceedingsWorkspace(QWidget):
         self.scn_date_input.setDate(QDate.currentDate())
         self.scn_date_input.setMinimumDate(QDate.currentDate())
         self.scn_date_input.setStyleSheet(input_style + " padding: 6px;")
-        
-
         self.scn_date_input.dateChanged.connect(self.evaluate_scn_workflow_phase)
         
-        grid.addWidget(date_label, 3, 0)
-        grid.addWidget(self.scn_date_input, 3, 1, 1, 2)
+        grid.addWidget(date_label, 2, 0)
+        grid.addWidget(self.scn_date_input, 2, 1, 1, 2)
+
+        # Spacing to Grounds Module
+        self.ref_card.content_layout.addWidget(grid_widget)
         
         # [NEW] Grounds Configuration Module
-        # Separator
-        sep_grounds = QFrame()
-        sep_grounds.setFrameShape(QFrame.Shape.HLine)
-        sep_grounds.setStyleSheet("color: #e0e0e0; margin-top: 10px; margin-bottom: 10px;")
-        grid.addWidget(sep_grounds, 4, 0, 1, 3)
-        
+        # Identity Logic (Provenance Label moved here)
+        self.oc_provenance_lbl = QLabel("")
+        self.oc_provenance_lbl.setStyleSheet("font-size: 8pt; color: #3498db; font-style: italic; margin-bottom: 10px;")
+        self.oc_provenance_lbl.hide()
+        self.ref_card.content_layout.addWidget(self.oc_provenance_lbl)
+
         # Instantiate Form
         from src.ui.components.grounds_forms import get_grounds_form
         self.scn_grounds_form = get_grounds_form("scrutiny")
-        grid.addWidget(self.scn_grounds_form, 5, 0, 1, 3)
+        self.ref_card.content_layout.addWidget(self.scn_grounds_form)
         
-        self.ref_card.addWidget(grid_widget)
         self.ref_card.content_layout.addStretch()
         
         # Action Buttons Hierarchy
@@ -1700,7 +2185,15 @@ class ProceedingsWorkspace(QWidget):
             }
         """)
         self.btn_save_scn_ref.clicked.connect(self.save_scn_metadata)
-        btn_layout.addWidget(self.btn_save_scn_ref)
+        
+        # [PHASE B] Standardized Draft Save (Step 1)
+        self.btn_draft_step1 = self._create_save_draft_btn()
+        
+        # Footer layout for buttons
+        footer_btn_layout = QHBoxLayout()
+        footer_btn_layout.addWidget(self.btn_draft_step1)
+        footer_btn_layout.addWidget(self.btn_save_scn_ref)
+        btn_layout.addLayout(footer_btn_layout)
         
         # Action Buttons Hierarchy (End)
         
@@ -1756,6 +2249,11 @@ class ProceedingsWorkspace(QWidget):
         scn_issue_selection_layout.addWidget(scn_refresh_issues_btn)
         scn_issue_selection_layout.addWidget(scn_insert_issue_btn)
         scn_issue_selection_layout.addWidget(scn_reset_btn)
+        
+        # [PHASE B] Standardized Draft Save (Step 2)
+        btn_draft_step2 = self._create_save_draft_btn()
+        scn_issue_selection_layout.addWidget(btn_draft_step2)
+        
         scn_issue_selection_layout.addStretch()
         issues_layout.addLayout(scn_issue_selection_layout)
         
@@ -1779,6 +2277,11 @@ class ProceedingsWorkspace(QWidget):
         regenerate_btn.setToolTip("Auto-generate demand text tiles based on added issues")
         regenerate_btn.setStyleSheet("padding: 5px; font-size: 8pt; background-color: #3498db; color: white; border-radius: 4px;")
         regenerate_btn.clicked.connect(lambda: self.sync_demand_tiles() if not self.is_scn_phase1() else None)
+        
+        # [PHASE B] Standardized Draft Save (Step 3)
+        btn_draft_step3 = self._create_save_draft_btn()
+        demand_header_layout.addWidget(btn_draft_step3)
+        
         demand_header_layout.addWidget(regenerate_btn)
         demand_layout.addLayout(demand_header_layout)
         
@@ -1801,6 +2304,13 @@ class ProceedingsWorkspace(QWidget):
         self.reliance_editor.setMinimumHeight(300)
         
 
+        rel_header = QHBoxLayout()
+        rel_header.addStretch()
+        # [PHASE B] Standardized Draft Save (Step 4)
+        btn_draft_step4 = self._create_save_draft_btn()
+        rel_header.addWidget(btn_draft_step4)
+        rel_layout.addLayout(rel_header)
+
         rel_layout.addWidget(self.reliance_editor)
         
         # 5. Copy Submitted To
@@ -1811,6 +2321,13 @@ class ProceedingsWorkspace(QWidget):
         self.copy_to_editor = RichTextEditor("List authorities here...")
         self.copy_to_editor.setMinimumHeight(300)
         
+
+        copy_header = QHBoxLayout()
+        copy_header.addStretch()
+        # [PHASE B] Standardized Draft Save (Step 5)
+        btn_draft_step5 = self._create_save_draft_btn()
+        copy_header.addWidget(btn_draft_step5)
+        copy_layout.addLayout(copy_header)
 
         copy_layout.addWidget(self.copy_to_editor)
         
@@ -1983,21 +2500,55 @@ class ProceedingsWorkspace(QWidget):
                  self.scn_nav_cards[i].set_enabled(False)
 
     def on_scn_page_changed(self, index):
-        self.active_scn_step = index
+        # [PHASE A] Hard Validation Gate: Progression from Step 1
+        if self.active_scn_step == 0 and index > 0:
+            if hasattr(self, 'scn_grounds_form'):
+                errors = self.scn_grounds_form.validate(show_ui=True)
+                if errors:
+                    msg = "Please resolve the following legal inconsistencies in Step 1 before proceeding:\n\n" + "\n".join([f"• {e}" for e in errors])
+                    QMessageBox.warning(self, "Validation Error", msg)
+                    
+                    # Force navigation back to Step 1
+                    self.scn_side_nav.nav_cards[0].setChecked(True)
+                    # Note: We don't update self.active_scn_step here to prevent infinite recursion
+                    # switch_page will call this again with index 0
+                    return
+
+    def on_scn_page_changed(self, index):
+        """
+        Handle navigation within SCN Wizard (Stacked Widget).
+        Now strictly Stage-Driven.
+        """
+        current_stage = self.get_current_stage()
         
-        # Hard Entry Gate: Step 2 (Issue Adoption) for Scrutiny Cases
+        # Hard Entry Gate: Step 2 (Issue Adoption)
         if index == 1:
-            source_scrutiny_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
-            if source_scrutiny_id:
-                asmt10_status = self.proceeding_data.get('asmt10_status')
-                if asmt10_status != 'finalised':
-                     self._show_blocking_msg("ASMT-10 is not finalised. SCN drafting is locked.")
-                     # Go back to Step 1
-                     self.scn_side_nav.nav_cards[0].setChecked(True)
-                     self.active_scn_step = 0
-                     return
+            # [LOGIC] SCN Drafting requires SCN_DRAFT stage.
+            # This is already enforced by the main tab lock, but good as a secondary check.
+            if current_stage < WorkflowStage.SCN_DRAFT:
+                 self._show_blocking_msg("SCN Drafting is not active in this stage.")
+                 # Go back to Step 1
+                 self.scn_side_nav.nav_cards[0].setChecked(True)
+                 return
             
             # Trigger Hydration
+            self.hydrate_from_snapshot()
+            
+        # Hard Financial Gate: Step 6 (Preview & Finalization)
+        if index == 5:
+            invalid_cards = []
+            for card in self.scn_issue_cards:
+                if not card.validate_tax_inputs(show_ui=True):
+                    invalid_cards.append(card.display_title)
+            
+            if invalid_cards:
+                msg = f"Negative demand values detected in the following issues:\n\n" + "\n".join([f"• {c}" for c in invalid_cards]) + "\n\nSCN generation is blocked until these are corrected."
+                QMessageBox.warning(self, "Financial Validation Error", msg)
+                # Revert to Step 5 or wherever they were
+                self.scn_side_nav.nav_cards[4].setChecked(True)
+                return
+            
+            # If valid, proceed to hydration
             self.hydrate_from_snapshot()
             
         print(f"ProceedingsWorkspace: SCN Page {index} active")
@@ -2280,6 +2831,21 @@ class ProceedingsWorkspace(QWidget):
         self.ph_docx_btn.clicked.connect(self.generate_ph_docx)
         toolbar_layout.addWidget(self.ph_docx_btn)
         
+        # [PHASE 3] Conclude Hearing Action
+        self.ph_conclude_btn = QPushButton("🏁 Conclude Hearing")
+        self.ph_conclude_btn.setFixedHeight(32)
+        self.ph_conclude_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ph_conclude_btn.setStyleSheet(f"""
+            QPushButton {{ 
+                background-color: #f39c12; color: white; padding: 0 16px; 
+                font-weight: bold; border-radius: 6px; font-size: 13px;
+            }}
+            QPushButton:hover {{ background-color: #e67e22; }}
+        """)
+        self.ph_conclude_btn.clicked.connect(self.conclude_ph_hearing)
+        self.ph_conclude_btn.setVisible(False) # Hidden by default, shown via apply_context_layout
+        toolbar_layout.addWidget(self.ph_conclude_btn)
+        
         preview_v_layout.addWidget(self.ph_preview_toolbar)
         
         # Restore Phase 8 direct browser placement (fixes hidden preview regression)
@@ -2365,10 +2931,10 @@ class ProceedingsWorkspace(QWidget):
         docx_btn.clicked.connect(self.generate_docx)
         buttons_layout.addWidget(docx_btn)
         
-        finalize_btn = QPushButton("Finalize & Register")
-        finalize_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
-        finalize_btn.clicked.connect(self.confirm_order_finalization)
-        buttons_layout.addWidget(finalize_btn)
+        self.order_finalize_btn = QPushButton("Finalize & Register")
+        self.order_finalize_btn.setStyleSheet("background-color: #27ae60; color: white; padding: 8px 20px; font-weight: bold; border-radius: 4px;")
+        self.order_finalize_btn.clicked.connect(self.confirm_order_finalization)
+        buttons_layout.addWidget(self.order_finalize_btn)
         
         buttons_layout.addStretch()
         layout.addLayout(buttons_layout)
@@ -2416,7 +2982,7 @@ class ProceedingsWorkspace(QWidget):
         layout.setStretch(1, 1) # Preview
         
         # Consolidated Button Connections
-        self.scn_fin_panel.save_btn.clicked.connect(lambda: self.save_document("SCN"))
+        self.scn_fin_panel.save_btn.clicked.connect(lambda: self.save_document("SCN", is_manual=True))
         self.scn_fin_panel.pdf_btn.clicked.connect(self.generate_pdf)
         self.scn_fin_panel.docx_btn.clicked.connect(self.generate_docx)
         self.scn_fin_panel.refresh_btn.clicked.connect(self.render_final_preview)
@@ -2458,12 +3024,10 @@ class ProceedingsWorkspace(QWidget):
         """Commit SCN Finalization"""
         try:
             # 1. Save Document as Final
-            self.save_document("SCN") # Ensure latest draft is saved
+            self.save_document("SCN", is_manual=True) # Ensure latest draft is saved
             
-            # 2. Update Proceeding Status
-            self.db.update_proceeding(self.proceeding_id, {
-                "status": "SCN Issued"
-            })
+            # 2. Transition State (Atomic Update)
+            self.transition_to(WorkflowStage.SCN_ISSUED)
             
             # 3. Update Register (SCN Register entry - implicitly done via status or explicit call?)
             # Also Add OC Entry for SCN
@@ -2496,12 +3060,12 @@ class ProceedingsWorkspace(QWidget):
             if hasattr(self, 'scn_issue_cards'):
                 present_issue_ids = {c.template['issue_id'] for c in self.scn_issue_cards}
             
-            # 1. Scrutiny-Based Adoptions
-            adopted_from_asmt10_ids = set()
-            source_scrutiny_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
+            # 1. Upstream Adoptions (Scrutiny or Direct)
+            adopted_from_upstream_ids = set()
+            source_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
             
-            if source_scrutiny_id:
-                finalized_issues = self.db.get_case_issues(source_scrutiny_id, stage='DRC-01A')
+            if source_id:
+                finalized_issues = self.db.get_case_issues(source_id, stage='DRC-01A')
                 if finalized_issues:
                     self.scn_issue_combo.addItem("--- ADOPT FROM ASMT-10 ---", None)
                     for record in finalized_issues:
@@ -2579,7 +3143,7 @@ class ProceedingsWorkspace(QWidget):
             import traceback
             traceback.print_exc()
 
-    def add_scn_issue_card(self, template, data=None, source_type=None, source_id=None, origin="SCN", status="ACTIVE"):
+    def add_scn_issue_card(self, template, data=None, source_type=None, source_id=None, origin="SCN", status="ACTIVE", trigger_eval=True):
         """Add flexible issue card to SCN layout"""
         from src.ui.issue_card import IssueCard
         card = IssueCard(template, data=data, mode="SCN", content_key="scn_content")
@@ -2617,7 +3181,8 @@ class ProceedingsWorkspace(QWidget):
         self.scn_issue_cards.append(card)
         
         # Trigger Phase Evaluation
-        self.evaluate_scn_workflow_phase()
+        if trigger_eval:
+            self.evaluate_scn_workflow_phase()
         
         return card
 
@@ -2775,11 +3340,12 @@ class ProceedingsWorkspace(QWidget):
 
     def hydrate_from_snapshot(self):
         """
-        Snapshot-Only Hydration Strategy.
+        Snapshot-Only Hydration Strategy for SCN.
         Rules:
-        1. If 'SCN' stage issues exist: Load strictly from case_issues.data_json. 
-           NEVER consult Issue Master.
-        2. If NO 'SCN' issues exist: Clone from ASMT-10 (Initial Setup).
+        1. Load existing 'SCN' draft if present.
+        2. Adopt/Merge 'DRC-01A' issues (from Current or Source proceeding).
+           - Supports Direct Adjudication (Current ID)
+           - Supports Scrutiny Flow (Source ID)
         """
         # 1. Idempotency Gate
         if self.scn_issues_initialized and self.scn_issue_cards:
@@ -2796,83 +3362,75 @@ class ProceedingsWorkspace(QWidget):
             # 3. Fetch Existing SCN Draft from DB
             existing_scn_draft = self.db.get_case_issues(self.proceeding_id, stage='SCN')
             
+            loaded_ids = set()
             if existing_scn_draft:
                 print(f"SCN Load: Restoring {len(existing_scn_draft)} cards from snapshot.")
                 self._hydrate_cards_from_records(existing_scn_draft, is_initial_hydration=False)
+                loaded_ids = {r.get('issue_id') for r in existing_scn_draft}
                 
+            # [FIX] SCN Adoption: Fetch source issues from DRC-01A
+            # Priority: 1. Current Proceeding (Direct Adjudication) 2. Source Proceeding (Scrutiny)
+            source_issues = []
+            
+            # Check Local (Direct Adjudication or Same-Proceeding Flow)
+            # Fetch 'DRC-01A' to adopt. (ASMT-10 is irrelevant for SCN if DRC-01A exists)
+            local_drc = self.db.get_case_issues(self.proceeding_id, stage='DRC-01A')
+            if local_drc:
+                 source_issues = local_drc
+                 print(f"SCN Adoption: Found {len(local_drc)} DRC-01A issues in Current Proceeding.")
             else:
-                # 4. First-Time Initialization: Clone from ASMT-10
-                source_scrutiny_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
-                
-                if source_scrutiny_id:
-                    finalized_asmt10_records = self.db.get_case_issues(source_scrutiny_id, stage='DRC-01A')
-                    
-                    if finalized_asmt10_records:
-                        print(f"SCN Load: Initializing from ASMT-10 ({len(finalized_asmt10_records)} issues).")
-                        
-                        # Prepare Clone Batch
-                        clone_batch = []
-                        for record in finalized_asmt10_records:
-                            # Clone Structure
-                            new_record = {
-                                'issue_id': record['issue_id'],
-                                'data': record['data'], # This is ASMT-10 data. 
-                                # Note: For strict independent lifecycle, we probably should bake the template here too?
-                                # But ASMT-10 data usually implies using the adapter to build the SCN template.
-                                # The adapter `build_scn_issue_from_asmt10` does the translation.
-                                # So for *initial* clone, we rely on the adapter logic which fetches template. 
-                                # This is allowed ("Issue Master used at insertion time"). 
-                                # Initial clone counts as insertion.
-                                'origin': 'SCRUTINY',
-                                'source_proceeding_id': source_scrutiny_id,
-                                'added_by': 'System'
-                            }
-                            clone_batch.append(new_record)
-                        
-                        # Persist Initial State (So next time we hit Priority 1)
-                        # We use _hydrate_cards_from_records with is_initial_hydration=True which calls build_scn_issue_from_asmt10
-                        # Wait, we need to save the RESULT of the adaptation (the SCN template) to the DB.
-                        # The clone_batch above saves the raw ASMT-10 data? 
-                        # No, `save_scn_issue_snapshot` saves whatever we pass.
-                        # Ideally, we should perform the adaptation *before* saving the snapshot if we want strict independence immediately.
-                        # However, `_hydrate_cards_from_records(is_initial=True)` adapts it.
-                        # Let's persist *after* hydration to capture the adapted templates.
-                        
-                        # So:
-                        # 1. Hydrate UI from ASMT-10 records (Adapter runs here)
-                        self._hydrate_cards_from_records(finalized_asmt10_records, is_initial_hydration=True)
-                        
-                        # 2. Immediately Persist the RESULTING UI state (which includes the SCN templates)
-                        self.persist_scn_issues()
-                        
-                        # 3. Reload from snapshot to verify? No, we are already hydrated.
-                        # But strictly speaking, the prompt says "Once ... exist ... never be queried".
-                        # If I persist now, next reload will use snapshot.
-                        
-                    else:
-                        print("SCN Load: No ASMT-10 issues found to adopt.")
-                else:
-                    print("SCN Load: Direct SCN mode (No source scrutiny).")
+                 # Check Source (Classic Flow)
+                 src_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
+                 if src_id:
+                     remote_drc = self.db.get_case_issues(src_id, stage='DRC-01A')
+                     # Fallback to ASMT-10 ONLY if legacy/no DRC-01A found (optional, but robust)
+                     if not remote_drc:
+                          remote_drc = self.db.get_case_issues(src_id, stage='ASMT-10')
+                          
+                     if remote_drc:
+                          source_issues = remote_drc
+                          print(f"SCN Adoption: Found {len(remote_drc)} Source issues (SourceID={src_id}).")
 
+            # Identify missing
+            missing_records = [r for r in source_issues if r.get('issue_id') not in loaded_ids]
+            
+            if missing_records:
+                print(f"SCN Merge: Adopting {len(missing_records)} missing issues from Source/DRC-01A...")
+                # Treat these as "initial hydration" (Use Adapter)
+                self._hydrate_cards_from_records(missing_records, is_initial_hydration=True)
+                # [PERSISTENCE] Save immediately to lock in the merged state
+                self.save_scn_issue_snapshot()
+            
             self.scn_issues_initialized = True
             self._persist_scn_init_flag()
+
 
         except Exception as e:
             print(f"SCN Hydration Error: {e}")
             import traceback
             traceback.print_exc()
 
-    def persist_scn_issues(self):
+    def persist_scn_issues(self, is_manual_save=False):
         """
         Orchestrate saving the current SCN issue state to DB (case_issues).
         Captures the exact snapshot of the drafting area INCLUDING TEMPLATES.
         Requirement: Snapshot-Only Hydration (Independent of Master)
         """
-        # Guard: Phase-1 Finalization
-        if self.is_scn_finalized():
-             # Technically Save Button should be disabled, but strict backend guard is needed
-             print("SCN is Finalized. Writes blocked.")
-             return
+        # [PHASE C] Structural Integrity Enforcement
+        # Ensure totals are recalculated before persistence
+        self.calculate_grand_totals()
+
+        # [PHASE A] Financial Integrity Block (Selective for Finalization)
+        if not is_manual_save:
+            invalid_cards = []
+            for card in self.scn_issue_cards:
+                if not card.validate_tax_inputs(show_ui=True):
+                    invalid_cards.append(card.display_title)
+            
+            if invalid_cards:
+                msg = f"Cannot save SCN. Negative demand values detected in:\n\n" + "\n".join([f"• {c}" for c in invalid_cards])
+                QMessageBox.critical(self, "Financial Validation Error", msg)
+                return
 
         try:
             current_snapshot = []
@@ -2886,6 +3444,12 @@ class ProceedingsWorkspace(QWidget):
                 
                 card_data = card.get_data()
                 
+                # [PHASE B] Template Traceability
+                # Deterministic hash generation from canonical representation
+                template_dict = getattr(card, 'template', {})
+                template_version = template_dict.get('version', '1.0')
+                template_hash = self.db.generate_canonical_hash(template_dict)
+
                 # CRITICAL HARDENING: Save the Template Structure
                 # This ensures we don't need to consult Master when re-hydrating.
                 # card.template contains the structure used to render the card.
@@ -2896,6 +3460,8 @@ class ProceedingsWorkspace(QWidget):
                      'values': card_data.get('variables', {}),
                      'table_data': card_data.get('table_data'),
                      'template_snapshot': card.template, # FULL TEMPLATE
+                     'template_version': template_version,
+                     'template_schema_hash': template_hash,
                      # Persist other state flags if needed
                      'status': getattr(card, 'status', 'ACTIVE')
                 }
@@ -2912,6 +3478,11 @@ class ProceedingsWorkspace(QWidget):
                     'added_by': 'User' 
                 }
                 current_snapshot.append(snapshot_item)
+            
+            # [PHASE B] Draft Versioning (Manual Save ONLY)
+            if is_manual_save:
+                print(f"SCN Governance: Triggering Draft Snapshot for Proceeding {self.proceeding_id}")
+                self.db.save_proceeding_draft(self.proceeding_id, current_snapshot)
             
             # Save to DB
             try:
@@ -3408,8 +3979,8 @@ class ProceedingsWorkspace(QWidget):
 
     def is_scn_finalized(self):
         """Check if SCN is in finalized state (Read-Only Mode)"""
-        status = self.proceeding_data.get('status', '')
-        return "Final" in status or "Issued" in status
+        current_stage = self.get_current_stage()
+        return current_stage >= WorkflowStage.SCN_ISSUED
 
     def _hydrate_cards_from_records(self, records, is_initial_hydration=False):
         """Authoritative card factory. No fallbacks, heuristics, or shared help paths."""
@@ -3417,17 +3988,23 @@ class ProceedingsWorkspace(QWidget):
         # Fetch case-level provenance for validation
         case_source_id = self.proceeding_data.get('source_scrutiny_id') or self.proceeding_data.get('scrutiny_id')
         
-        for record in records:
+        for i, record in enumerate(records):
             if is_initial_hydration:
-                # Use Adapter for fresh ASMT-10 adoption
-                adapted = self.build_scn_issue_from_asmt10(record)
-                card = self.add_scn_issue_card(
-                    template=adapted['template'],
-                    data=adapted['data'],
-                    origin="ASMT10",
-                    source_id=record['issue_id']
-                )
-                if card: card.on_grid_data_adopted()
+                try:
+                    # Use Adapter for fresh ASMT-10 adoption
+                    adapted = self.build_scn_issue_from_asmt10(record)
+                    card = self.add_scn_issue_card(
+                        template=adapted['template'],
+                        data=adapted['data'],
+                        origin="ASMT10",
+                        source_id=record['issue_id'],
+                        trigger_eval=False
+                    )
+                    if card: card.on_grid_data_adopted()
+                except Exception as e:
+                    print(f"[HYDRATION ERROR] Failed to load card {i} (ID: {record.get('issue_id')}): {e}")
+                    import traceback
+                    traceback.print_exc()
             else:
                 # Restoration of existing SCN draft (SCN stage) - STRICT SNAPSHOT HYDRATION
                 data_payload = record.get('data', {})
@@ -3645,9 +4222,13 @@ class ProceedingsWorkspace(QWidget):
                     data=restore_data, 
                     origin=current_origin,
                     status=data_payload.get('status', 'ACTIVE'),
-                    source_id=source_id
+                    source_id=source_id,
+                    trigger_eval=False
                 )
                 if card: card.on_grid_data_adopted()
+
+        # Batch Evaluation: Trigger phase check ONLY after all cards are hydrated
+        self.evaluate_scn_workflow_phase()
 
     def reset_scn_adoption(self):
         """
@@ -3819,7 +4400,7 @@ class ProceedingsWorkspace(QWidget):
 
             QMessageBox.warning(self, "Error", f"Failed to generate demand text: {e}")
 
-    def save_document(self, doc_type="SCN"):
+    def save_document(self, doc_type="SCN", is_manual=False):
         """Save SCN document with authoritative structural integrity"""
         # Phase-1 Isolation: Structurally block save during Step-2 (Adoption)
         if doc_type == "SCN" and self.is_scn_phase1():
@@ -3829,12 +4410,12 @@ class ProceedingsWorkspace(QWidget):
         if not self.proceeding_id:
             return
             
-        print(f"ProceedingsWorkspace: Saving {doc_type} draft...")
+        print(f"ProceedingsWorkspace: Saving {doc_type} draft (is_manual={is_manual})...")
         
         try:
             if doc_type == "SCN":
                 # Aggregate issue data using the authoritative schema (New Persistence)
-                self.persist_scn_issues()
+                self.persist_scn_issues(is_manual_save=is_manual)
                 
                 # Aggregate Demand Text from Tiles
                 full_demand_text = ""
@@ -3882,6 +4463,48 @@ class ProceedingsWorkspace(QWidget):
             QMessageBox.critical(self, "Error", f"Error saving SCN: {e}")
             print(f"Error saving SCN: {e}")
             return False
+
+    def on_manual_draft_save(self):
+        """Centralized manual save handler with non-intrusive feedback"""
+        # 1. Structural Validation + Persistence
+        self.save_document("SCN", is_manual=True)
+        
+        # 2. Feedback Mechanism (Status Bar or Toast Overlay)
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        msg = f"Draft saved at {timestamp}"
+        
+        # If we have a status bar, use it. Otherwise, use a transient label.
+        if hasattr(self, 'statusBar') and self.statusBar():
+            self.statusBar().showMessage(msg, 5000)
+        else:
+            print(f"SCN Governance: {msg}")
+            # Fallback toast if needed (simplified for high-integrity)
+            QToolTip.showText(QCursor.pos(), msg, self, QRect(), 3000)
+
+    def _create_save_draft_btn(self):
+        """Standardized factory for Phase B Save Draft buttons"""
+        btn = QPushButton("Save Draft")
+        btn.setObjectName("BtnSaveDraft")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet("""
+            QPushButton#BtnSaveDraft {
+                background-color: #f8fafc;
+                border: 1px solid #cbd5e1;
+                color: #475569;
+                padding: 8px 15px;
+                border-radius: 4px;
+                font-weight: 500;
+                font-size: 9pt;
+            }
+            QPushButton#BtnSaveDraft:hover {
+                background-color: #f1f5f9;
+                border-color: #3498db;
+                color: #3498db;
+            }
+        """)
+        btn.clicked.connect(self.on_manual_draft_save)
+        return btn
 
     def _find_template_for_scrutiny_item(self, item, template_map):
         """Heuristic to find a matching template for a scrutiny result item"""
@@ -4697,7 +5320,11 @@ class ProceedingsWorkspace(QWidget):
                 'data': card.get_data()
             })
             
-        # 2. Save Document HTML (for View Mode)
+        # [PHASE 5] Single-Source Persistence (DB Only)
+        # Issues are now strictly stored in 'case_issues' table.
+        # 'additional_details' is reserved for Metadata and legacy migration flags.
+        
+        # 2. Save Document HTML (for View Mode - Canonical Snapshot)
         doc_data = {
             "proceeding_id": self.proceeding_id,
             "doc_type": "DRC-01A",
@@ -4706,10 +5333,12 @@ class ProceedingsWorkspace(QWidget):
         }
         self.db.save_document(doc_data)
         
-        # 3. Save Structured Draft Data to case_issues table
-        self.db.save_case_issues(self.proceeding_id, issues_list, stage='DRC-01A')
+        # 3. Save Structured Draft Data to case_issues table (Authoritative Data)
+        # Verify Not Issued using exact check (though DB Trigger also protects this)
+        if self.get_current_stage() < WorkflowStage.DRC01A_ISSUED:
+             self.db.save_case_issues(self.proceeding_id, issues_list, stage='DRC-01A')
         
-        # 4. Save Metadata
+        # 4. Save Metadata (Dates, Section)
         self.save_drc01a_metadata()
         
         self.db.update_proceeding(self.proceeding_id, {
@@ -5179,22 +5808,15 @@ class ProceedingsWorkspace(QWidget):
             QMessageBox.critical(self, "Error", f"Error generating DOCX: {str(e)}")
 
     def check_existing_documents(self):
-        """Check if documents exist and toggle view mode"""
-        drc01a_exists = False
-        scn_exists = False
+        """Check workflow stage and toggle view mode"""
+        # [PHASE 2] Source of Truth is Workflow Stage, not document existence
+        current_stage = self.get_current_stage()
         
-        for doc in self.documents:
-            if doc['doc_type'] == 'DRC 01A':
-                drc01a_exists = True
-                # Update preview image if available (Removed as per user request)
-                # if doc.get('snapshot_path') and os.path.exists(doc['snapshot_path']):
-                #     pixmap = QPixmap(doc['snapshot_path'])
-                #     self.drc01a_view_preview.setPixmap(pixmap.scaledToWidth(600, Qt.TransformationMode.SmoothTransformation))
-                # else:
-                #     self.drc01a_view_preview.setText("Preview not available")
-                    
-        self.toggle_view_mode("drc01a", drc01a_exists)
-        self.toggle_view_mode("scn", scn_exists)
+        drc01a_done = current_stage >= WorkflowStage.DRC01A_ISSUED
+        scn_done = current_stage >= WorkflowStage.SCN_ISSUED
+        
+        self.toggle_view_mode("drc01a", drc01a_done)
+        self.toggle_view_mode("scn", scn_done)
 
     def toggle_view_mode(self, doc_type, show_view):
         """Toggle between Draft and View containers"""
@@ -5239,159 +5861,35 @@ class ProceedingsWorkspace(QWidget):
         
         self.evaluate_scn_workflow_phase()
 
-    def restore_draft_state(self):
-        """Restore UI state from proceeding data with robust error isolation."""
-        self.issue_restore_failed = False
-        
-        # --- BLOCK 1: Issue Restoration (Complex, High Risk) ---
-        try:
-            # Check for structured data in proceedings table
-            add_details = self.proceeding_data.get('additional_details', {})
-            # 1. Restore Issues from case_issues table
-            saved_issues = self.db.get_case_issues(self.proceeding_id, stage='DRC-01A')
-        
-            # Clear existing cards first
-            for card in self.issue_cards:
-                card.setParent(None)
-                self.issues_layout.removeWidget(card)
-                card.deleteLater()
-            self.issue_cards = []
-            
-            if saved_issues:
-                # Load templates to reconstruct cards
-                all_templates = self.db.get_issue_templates()
-                    
-                template_map = {t['issue_id']: t for t in all_templates}
+    def toggle_view_mode(self, doc_type, show_view):
+        """Toggle between Draft and View containers with [PHASE 5] Hard Lock Enforcement"""
+        if doc_type == "drc01a":
+            if not show_view:
+                # REQUESTING EDIT MODE
+                # [HARD LOCK] Block if already issued
+                if self.get_current_stage() >= WorkflowStage.DRC01A_ISSUED:
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.warning(self, "Locked", "DRC-01A has been issued and cannot be edited.")
+                    return # Silent Reject
                 
-                for issue_record in saved_issues:
-                    issue_id = issue_record['issue_id']
-                    data = issue_record['data']
-                    issue_row_id = issue_record.get('id') # Ensure get_case_issues returns row ID too
-
-                    # --- AUTO-REPAIR: Legacy Data Migration ---
-                    # Constraint: Only if origin is 'SCN' AND source_issue_id exists
-                    current_origin = issue_record.get('origin', 'SCN')
-                    source_id_in_data = data.get('source_issue_id')
-                    
-                    if current_origin == 'SCN' and source_id_in_data and issue_row_id:
-                         print(f"Auto-corrected legacy issue origin from SCN -> SCRUTINY (issue_id={issue_id})")
-                         # 1. Update In-Memory
-                         issue_record['origin'] = 'SCRUTINY'
-                         data['origin'] = 'SCRUTINY'
-                         
-                         # 2. Persist Correction Immediately
-                         self.db.update_case_issue_origin(issue_row_id, 'SCRUTINY')
-                         try:
-                             # Also update internal JSON blob to prevent regressive sync
-                             updated_json = json.dumps(data)
-                             self.db.update_case_issue(issue_row_id, {'data_json': updated_json})
-                         except: pass
-
-                    # Pass corrected origin to card
-                    if 'origin' not in data: data['origin'] = issue_record.get('origin', 'SCN')
-                    
-                    template = template_map.get(issue_id)
-                    if not template:
-                        print(f"WARNING: Template not found for issue_id: {issue_id}. Using fallback.")
-                        # Fallback for unknown template
-                        template = {'issue_id': issue_id, 'issue_name': 'Unknown Issue', 'variables': {}}
-                    else:
-                        print(f"SUCCESS: Restoring issue {issue_id} with template.")
-                        
-                    from src.ui.issue_card import IssueCard
-                    card = IssueCard(template, parent=self)
-                    
-                    # Restore state using robust load_data method
-                    card.load_data(data)
-                    
-                    # Add to layout
-                    self.issues_layout.addWidget(card)
-                    self.issue_cards.append(card)
-                    
-                    # Connect signals
-                    card.removeClicked.connect(lambda c=card: self.remove_issue_card(c))
-                    card.valuesChanged.connect(self.calculate_grand_totals)
-
-                    
-                    # Trigger calculation to update totals based on restored variables
-                    card.calculate_values()
-                    
-        except Exception as e:
-            print(f"SCN Issue restore failed: {e}")
-            import traceback
-            traceback.print_exc()
-            self.issue_restore_failed = True
-
-        # --- BLOCK 2: Metadata Restoration (Foundational, Low Risk) ---
-        try:
-            # [PHASE 15] additional_details is already normalized by hydrate_proceeding_data
-            details = self.proceeding_data.get('additional_details', {})
-            
-            if details:
-                # 1. DRC-01A Metadata (with legacy fallback)
-                drc_meta = details.get('drc01a_metadata', {})
-                oc_num = drc_meta.get('oc_number') or details.get('oc_number')
-                oc_dte = drc_meta.get('oc_date') or details.get('oc_date')
-                rply_dte = drc_meta.get('reply_date') or details.get('reply_date')
+                self.drc01a_view_container.hide()
+                self.drc01a_draft_container.show()
+            else:
+                # REQUESTING VIEW MODE
+                self.drc01a_draft_container.hide()
+                self.drc01a_view_container.show()
                 
-                if oc_num: self.oc_number_input.setText(oc_num)
-                if oc_dte: self.oc_date_input.setDate(QDate.fromString(oc_dte, "yyyy-MM-dd"))
-                if rply_dte: self.reply_date.setDate(QDate.fromString(rply_dte, "yyyy-MM-dd"))
-                
-                # SCN Metadata (with legacy fallback)
-                scn_meta = details.get('scn_metadata', {})
-                scn_num = scn_meta.get('scn_number') or details.get('scn_number')
-                scn_oc = scn_meta.get('scn_oc_number') or details.get('scn_oc_number')
-                scn_dte = scn_meta.get('scn_date') or details.get('scn_date')
-                
-                # Safeguard: Block signals during restoration
-                self.scn_no_input.blockSignals(True)
-                self.scn_oc_input.blockSignals(True)
-                self.scn_date_input.blockSignals(True)
-                
-                if scn_num: self.scn_no_input.setText(scn_num)
-                if scn_oc: self.scn_oc_input.setText(scn_oc)
-                if scn_dte: self.scn_date_input.setDate(QDate.fromString(scn_dte, "yyyy-MM-dd"))
-                
-                self.scn_no_input.blockSignals(False)
-                self.scn_oc_input.blockSignals(False)
-                self.scn_date_input.blockSignals(False)
-                
-                # PH Intimation Restoration
-                self.ph_entries = details.get('ph_entries', [])
-                self.refresh_ph_list()
-                if self.ph_entries:
-                    self.render_ph_preview()
-                
-                # Phase-2/3 Restoration (Reliance/Copy-To)
-                if not self.is_scn_phase1():
-                    rel_docs = scn_meta.get('reliance_documents') or details.get('reliance_documents')
-                    copy_to = scn_meta.get('copy_submitted_to') or details.get('copy_submitted_to')
-                    if rel_docs: self.reliance_editor.setHtml(rel_docs)
-                    if copy_to: self.copy_to_editor.setHtml(copy_to)
-                else:
-                    print("ProceedingsWorkspace: Phase-1 Active. Skipping Phase-2/3 Restoration.")
-
-        except Exception as e:
-             print(f"SCN Metadata restore failed: {e}")
-             import traceback
-             traceback.print_exc()
-            
-        # --- BLOCK 3: Finalization & UI Unlocking ---
-        try:
-            # 4. Final Validation
-            self.evaluate_scn_workflow_phase()
-            
-            # Non-blocking warning for partial failures
-            if self.issue_restore_failed:
-                 print("Warning: Some issues failed to restore.")
-                 # Optional: Show a subtle message or toast. 
-                 # For now, we avoid popup spam on load, but logging is key.
-
-        except Exception as e:
-            print(f"Error in restoration finalization: {e}")
+        elif doc_type == "scn":
+             # SCN Logic (Placeholder for future hardening)
+             if show_view:
+                 self.scn_draft_container.hide()
+                 self.scn_view_container.show()
+             else:
+                 self.scn_view_container.hide()
+                 self.scn_draft_container.show()
 
     def confirm_ph_finalization(self):
+
         """Finalize PH and Register OC"""
         if not self.ph_oc_input.text().strip():
             QMessageBox.warning(self, "Validation Error", "OC Number is mandatory for registration.")
@@ -5407,7 +5905,10 @@ class ProceedingsWorkspace(QWidget):
             self.db.add_oc_entry(self.proceeding_id, oc_data)
             
             # Update status
-            self.db.update_proceeding(self.proceeding_id, {"status": "PH Intimated"})
+            self.db.update_proceeding(self.proceeding_id, {
+                "status": "PH Intimated",
+                "workflow_stage": WorkflowStage.PH_SCHEDULED
+            })
             
             QMessageBox.information(self, "Success", "PH Intimation Finalized and OC Registered.")
         except Exception as e:
@@ -5891,8 +6392,8 @@ class ProceedingsWorkspace(QWidget):
             }
             self.db.add_oc_entry(self.proceeding_id, oc_data)
             
-            # Update status
-            self.db.update_proceeding(self.proceeding_id, {"status": "Order Issued"})
+            # 2. Transition State (Atomic Update)
+            self.transition_to(WorkflowStage.ORDER_ISSUED)
             
             QMessageBox.information(self, "Success", "Order Finalized and OC Registered.")
         except Exception as e:
@@ -5913,3 +6414,135 @@ class ProceedingsWorkspace(QWidget):
             
         except Exception as e:
             print(f"Error suggesting OC: {e}")
+
+    # [PHASE 3] Restored Finalization Methods & New PH Logic
+
+    def confirm_drc01a_finalization(self):
+        """Commit DRC-01A Finalization"""
+        try:
+            # 1. Save Document as Final
+            self.save_drc01a_data() # Ensure latest draft is saved
+            
+            # 2. Transition State (Atomic Update)
+            self.transition_to(WorkflowStage.DRC01A_ISSUED)
+            
+            # 3. Add OC Entry for DRC-01A
+            oc_data = {
+                'OC_Number': self.oc_number_input.text(),
+                'OC_Date': self.oc_date_input.date().toString("yyyy-MM-dd"),
+                'OC_Content': f"DRC-01A Issued. Case ID: {self.proceeding_data.get('case_id')}",
+                'OC_To': self.proceeding_data.get('legal_name', '')
+            }
+            self.db.add_oc_entry(self.proceeding_id, oc_data)
+            
+            QMessageBox.information(self, "Success", "DRC-01A Finalized Successfully.")
+            
+            # 4. Switch to View Mode
+            self.drc01a_finalization_container.hide()
+            self.drc01a_view_container.show()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Finalization failed: {e}")
+
+    def confirm_scn_finalization(self):
+        """Commit SCN Finalization"""
+        try:
+            # 1. Save Document as Final
+            self.save_document("SCN", is_manual=True) # Ensure latest draft is saved
+            
+            # 2. Transition State (Atomic Update)
+            self.transition_to(WorkflowStage.SCN_ISSUED)
+            
+            # 3. Add OC Entry for SCN
+            oc_data = {
+                'OC_Number': self.scn_oc_input.text(),
+                'OC_Date': self.scn_date_input.date().toString("yyyy-MM-dd"),
+                'OC_Content': f"Show Cause Notice Issued. SCN No: {self.scn_no_input.text()}. {self.scn_fin_panel.fin_scn_remarks.toPlainText()}",
+                'OC_To': self.proceeding_data.get('legal_name', '')
+            }
+            self.db.add_oc_entry(self.proceeding_id, oc_data)
+            
+            QMessageBox.information(self, "Success", "Show Cause Notice Finalized Successfully.")
+            
+            # 4. Switch to View Mode
+            self.scn_finalization_container.hide()
+            self.scn_view_container.show()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Finalization failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def confirm_ph_finalization(self):
+        """Commit PH Intimation Finalization"""
+        try:
+            # 1. Transition State (Atomic Update) (PH Scheduled)
+            self.transition_to(WorkflowStage.PH_SCHEDULED)
+            
+            # 2. Add OC Entry for PH
+            oc_data = {
+                'OC_Number': self.ph_edit_oc.text(),
+                'OC_Date': self.ph_date.date().toString("yyyy-MM-dd"),
+                'OC_Content': f"PH Intimation Issued. Hearing on {self.ph_date.date().toString('dd/MM/yyyy')} at {self.ph_time.time().toString('hh:mm A')}",
+                'OC_To': self.proceeding_data.get('legal_name', '')
+            }
+            self.db.add_oc_entry(self.proceeding_id, oc_data)
+            
+            QMessageBox.information(self, "Success", "Personal Hearing Intimated Successfully.")
+            
+            self.contact_card.hide()
+            self.refresh_ph_list()
+            
+            # Show 'Conclude Hearing' button logic would be refreshed by UI update
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Finalization failed: {e}")
+
+    def conclude_ph_hearing(self):
+        """[Phase 3] Conclude PH Hearing Lifecycle Step -> Allows Order Generation"""
+        # 1. Dialog for Outcome
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Conclude Personal Hearing")
+        layout = QVBoxLayout(dialog)
+        
+        attended_cb = QCheckBox("Taxpayer Attended Hearing?")
+        layout.addWidget(attended_cb)
+        
+        remarks_edit = QTextEdit()
+        remarks_edit.setPlaceholderText("Enter outcome remarks...")
+        layout.addWidget(remarks_edit)
+        
+        btn_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btn_box.accepted.connect(dialog.accept)
+        btn_box.rejected.connect(dialog.reject)
+        layout.addWidget(btn_box)
+        
+        if dialog.exec() == QDialog.Accepted:
+            try:
+                # 2. Persist Outcome
+                outcome_data = {
+                    'attended': attended_cb.isChecked(),
+                    'remarks': remarks_edit.toPlainText(),
+                    'concluded_at': datetime.datetime.now().isoformat()
+                }
+                
+                # Update additional details
+                details = self.proceeding_data.get('additional_details', {})
+                if isinstance(details, str): import json; details = json.loads(details)
+                
+                details['ph_outcome'] = outcome_data
+                self.proceeding_data['additional_details'] = details
+                
+                # DB Update for details (Separate from transition to be safe, or just rely on transition if it handled data?)
+                # Transition uses update_proceeding which accepts partials.
+                # But here we want to update 'additional_details' column specifically.
+                import json
+                self.db.update_proceeding(self.proceeding_id, {'additional_details': json.dumps(details)})
+                
+                # 3. Transition to PH_COMPLETED
+                self.transition_to(WorkflowStage.PH_COMPLETED)
+                
+                QMessageBox.information(self, "Success", "Hearing Concluded. Order Generation Unlocked.")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to conclude hearing: {e}")

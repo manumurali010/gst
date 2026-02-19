@@ -156,7 +156,19 @@ class FinalizationPanel(QWidget):
         total_layout.addWidget(self.grand_total_lbl)
         self.summary_card.addWidget(total_frame)
         
+        self.summary_card.addWidget(total_frame)
+        
         self.layout.addWidget(self.summary_card)
+        
+        # --- PREVIEW BROWSER (New) ---
+        from PyQt6.QtWebEngineWidgets import QWebEngineView
+        self.browser = QWebEngineView()
+        self.browser.setMinimumHeight(600)
+        self.browser.setStyleSheet("border: 1px solid #bdc3c7;")
+        # Hidden by default, toggled via UI or logic? 
+        # User requested "Preview Panel Must Be Visible". 
+        # Let's show it by default or allow collapsing the summary.
+        self.layout.addWidget(self.browser)
         
         # --- 5. ACTION FOOTER (Always Visible) ---
         footer_frame = QFrame()
@@ -168,15 +180,18 @@ class FinalizationPanel(QWidget):
         self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_btn.setStyleSheet("""
             QPushButton {
-                background-color: white;
-                border: 1px solid #7f8c8d;
-                color: #2c3e50;
+                background-color: #f8fafc;
+                border: 1px solid #cbd5e1;
+                color: #475569;
                 padding: 8px 15px;
                 border-radius: 4px;
-                font-weight: bold;
+                font-weight: 500;
+                font-size: 9pt;
             }
             QPushButton:hover {
-                background-color: #f1f3f4;
+                background-color: #f1f5f9;
+                border-color: #3498db;
+                color: #3498db;
             }
         """)
         footer_layout.addWidget(self.save_btn)
@@ -328,7 +343,12 @@ class FinalizationPanel(QWidget):
             
         self.doc_no_lbl.setText(f"No: {doc_no}")
         self.doc_date_lbl.setText(f"Date: {doc_date}")
-        self.doc_ref_lbl.setText(f"Ref OC: {ref_no}")
+        
+        if ref_no and ref_no != "-":
+            self.doc_ref_lbl.setVisible(True)
+            self.doc_ref_lbl.setText(f"Ref OC: {ref_no}")
+        else:
+            self.doc_ref_lbl.setVisible(False)
         
         # 3. Issues List
         issue_names = []
@@ -429,3 +449,8 @@ class FinalizationPanel(QWidget):
             self.confirm_chk.setVisible(True)
             self.cancel_btn.setVisible(True)
             self.finalize_btn.setVisible(True)
+
+    def set_preview_html(self, html_content):
+        """Render the HTML preview in the embedded browser"""
+        if hasattr(self, 'browser'):
+            self.browser.setHtml(html_content)
