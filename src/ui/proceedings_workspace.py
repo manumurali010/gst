@@ -598,6 +598,12 @@ class ProceedingsWorkspace(QWidget):
         if is_scn and hasattr(self, 'active_scn_step'):
             # This logic is mostly handled in on_scn_page_changed
             pass
+            
+        # Refresh Officer Dropdowns on load to capture changes from Settings module
+        if context_key == "drc01a":
+            self.load_active_officers() # Hydrates DRC-01A
+        elif context_key == "scn":
+            self._hydrate_scn_officer_dropdown() # New helper for SCN
 
     def create_asmt10_tab(self):
         """Create Read-Only ASMT-10 Tab with Professional Document Framing"""
@@ -1704,21 +1710,38 @@ class ProceedingsWorkspace(QWidget):
         return tab_root
 
     def load_active_officers(self):
-        """Load active officers into the combo box"""
-        if getattr(self, 'officer_combo', None):
+        """Load active officers into the combo box, but check if the selected is inactive"""
+        # Ensure widget exists and is not None (bool(widget) can be False during init)
+        if getattr(self, 'officer_combo', None) is not None:
             self.officer_combo.clear()
             self.officer_combo.addItem("Select Issuing Officer...", None)
-            officers = self.db.get_active_officers()
-            for off in officers:
+            
+            active_officers = self.db.get_active_officers()
+            
+            saved_id = self.proceeding_data.get('issuing_officer_id') if self.proceeding_data else None
+            
+            # 1. Load active officers
+            for off in active_officers:
                 display_text = f"{off['name']} ({off['designation']}, {off['jurisdiction']})"
                 self.officer_combo.addItem(display_text, off['id'])
                 
-            if self.proceeding_data:
-                saved_id = self.proceeding_data.get('issuing_officer_id')
-                if saved_id:
-                    index = self.officer_combo.findData(saved_id)
-                    if index >= 0:
-                        self.officer_combo.setCurrentIndex(index)
+            # 2. Check for inactive override
+            if saved_id:
+                index = self.officer_combo.findData(saved_id)
+                if index < 0:
+                    # The saved officer ID is not in the active list
+                    saved_officer = self.db.get_officer_by_id(saved_id)
+                    if saved_officer:
+                        display_text = f"{saved_officer['name']} ({saved_officer['designation']}) - (Inactive)"
+                        self.officer_combo.addItem(display_text, saved_officer['id'])
+                        
+                # 3. Set matching index
+                final_index = self.officer_combo.findData(saved_id)
+                if final_index >= 0:
+                    self.officer_combo.setCurrentIndex(final_index)
+            print(f"[DEBUG] officer_combo populated with {self.officer_combo.count()} items.")
+        else:
+            print("[DEBUG] officer_combo does not exist on self yet!")
 
     def create_drc01a_finalization_panel(self):
         print("ProceedingsWorkspace: create_drc01a_finalization_panel start")
@@ -2147,49 +2170,24 @@ class ProceedingsWorkspace(QWidget):
 
     def render_drc01a_html(self, model):
         """
-        PURE FUNCTION: Render HTML using the data model.
-        No UI reads allowed.
+        Pure function: Map SSoT model to Jinja context and render.
+        Accepts dict: { 'gstin', 'legal_name', 'address', 'case_id', 'oc_no', 'oc_date', 'tax_rows', 'issues_html' }
         """
         if not model:
             return "<h3>Data Validation Failed</h3>"
 
         try:
-            from jinja2 import Environment, FileSystemLoader
-            import os
-            import datetime # Import datetime for potential use in template or context
-
-            # Locate Template
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            # Work up to src/templates
-            import os
-
-            # Locate Template
-            current_dir = os.path.dirname(os.path.abspath(__file__)) # src/ui
-            src_dir = os.path.dirname(current_dir) # src
-            root_dir = os.path.dirname(src_dir) # gst (Project Root)
-            template_dir = os.path.join(root_dir, "templates")
-
-            print(f"DEBUG: Loading Templates from Root: {template_dir}")
-            
-            target_template = os.path.join(template_dir, 'drc01a.html')
-            if not os.path.exists(target_template):
-                 print(f"CRITICAL: drc01a.html NOT FOUND in {template_dir}")
-                 # Fallback for dev environment oddities
-                 if os.path.exists("D:/gst/templates/drc01a.html"):
-                     template_dir = "D:/gst/templates"
-                     target_template = "D:/gst/templates/drc01a.html"
-
-            print(f"DEBUG: Loading DRC-01A via TemplateEngine")
-
             from src.utils.template_engine import TemplateEngine
             from src.utils.formatting import format_indian_number
+            from jinja2 import Environment, FileSystemLoader
+            import os
+            import datetime
+            import re
             
             # Defense against None type aggregation
             total = model.get('grand_total_liability', 0)
             formatted_total = format_indian_number(total) if total is not None else "0"
-            
-            import re
-            
+
             # --- 2. Backend String Sanitization ---
             advice_paragraph = model.get('advice_paragraph', '')
             advice_paragraph = re.sub(r'\s+', ' ', advice_paragraph).strip()
@@ -2243,14 +2241,9 @@ class ProceedingsWorkspace(QWidget):
                 if key not in context or context[key] is None:
                     raise KeyError(f"CRITICAL: Missing required contract key for DRC-01A rendering: {key}")
 
-            # Letterhead injection (if needed, based on a model flag or config)
-            # For now, assume template handles placeholder or it's done post-render if needed.
-            # If `self.show_letterhead_cb` is still used, it needs to be passed via model.
-            # For this pure function, we'll assume the model has a 'show_letterhead' flag.
-            # If not, the template itself should handle the placeholder.
-            # For now, we'll remove the letterhead logic from here and assume the template is self-contained.
-
-            rendered = template.render(**context)
+            # Use Centralized TemplateEngine
+            rendered = TemplateEngine.render_document("drc01a.html", context)
+            
             print("--- HTML OUTPUT START (First 200 chars) ---")
             print(rendered[:200])
             print("--- HTML OUTPUT END ---")
@@ -2473,6 +2466,38 @@ class ProceedingsWorkspace(QWidget):
             print(f"[DRC-01A] calculate_grand_totals: suppressed model error: {e}")
 
 
+    def _hydrate_scn_officer_dropdown(self):
+        """Internal helper to refresh SCN officer dropdown with inactive override support"""
+        if getattr(self, 'scn_officer_combo', None) is not None:
+            self.scn_officer_combo.clear()
+            self.scn_officer_combo.addItem("Select Issuing Officer...", None)
+            active_officers = self.db.get_active_officers()
+        
+        current_officer_id = self.proceeding_data.get('issuing_officer_id')
+        default_index = 0
+        current_index_tracker = 1 # Start after the placeholder
+        
+        # 1. Load active officers
+        for off in active_officers:
+            display_text = f"{off['name']} ({off['designation']}, {off['jurisdiction']})"
+            self.scn_officer_combo.addItem(display_text, off['id'])
+            if off['id'] == current_officer_id:
+                default_index = current_index_tracker
+            current_index_tracker += 1
+                
+        # 2. Check for inactive override
+        if current_officer_id and default_index == 0:
+            saved_officer = self.db.get_officer_by_id(current_officer_id)
+            if saved_officer:
+                display_text = f"{saved_officer['name']} ({saved_officer['designation']}) - (Inactive)"
+                self.scn_officer_combo.addItem(display_text, saved_officer['id'])
+                default_index = current_index_tracker
+                
+        if default_index > 0:
+            self.scn_officer_combo.setCurrentIndex(default_index)
+            
+        print(f"[DEBUG] scn_officer_combo populated with {self.scn_officer_combo.count()} items.")
+
     def create_scn_tab(self):
         print("ProceedingsWorkspace: create_scn_tab start")
         """Create Show Cause Notice tab"""
@@ -2576,22 +2601,7 @@ class ProceedingsWorkspace(QWidget):
         self.scn_officer_combo = QComboBox()
         self.scn_officer_combo.setStyleSheet(input_style + " padding: 6px;")
         
-        # Load active officers into SCN combo box specifically
-        self.scn_officer_combo.addItem("Select Issuing Officer...", None)
-        officers = self.db.get_active_officers()
-        
-        # Hydrate default value natively
-        current_officer_id = self.proceeding_data.get('issuing_officer_id')
-        default_index = 0
-        
-        for idx, off in enumerate(officers, start=1):
-            display_text = f"{off['name']} ({off['designation']}, {off['jurisdiction']})"
-            self.scn_officer_combo.addItem(display_text, off['id'])
-            if off['id'] == current_officer_id:
-                default_index = idx
-                
-        if default_index > 0:
-            self.scn_officer_combo.setCurrentIndex(default_index)
+        self._hydrate_scn_officer_dropdown()
             
         grid.addWidget(officer_label, 3, 0)
         grid.addWidget(self.scn_officer_combo, 3, 1, 1, 2)

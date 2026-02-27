@@ -134,6 +134,10 @@ class SettingsTab(QWidget):
         general_tab = self.create_general_tab()
         self.tabs.addTab(general_tab, "General")
         
+        # Officer Registry tab
+        officer_tab = self.create_officer_registry_tab()
+        self.tabs.addTab(officer_tab, "Officer Registry")
+        
         # Data Management tab
         data_tab = self.create_data_management_tab()
         self.tabs.addTab(data_tab, "Data Management")
@@ -825,3 +829,168 @@ class SettingsTab(QWidget):
         self.config.set_setting('jurisdiction', self.jurisdiction_input.text())
         
         QMessageBox.information(self, "Success", "Settings saved successfully!")
+
+    # ---------------- Officer Registry Methods ----------------
+
+    def create_officer_registry_tab(self):
+        """Builds the Officer Registry Management Interface"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Action Bar
+        action_bar = QHBoxLayout()
+        title = QLabel("👮 Officer Registry")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #2c3e50;")
+        action_bar.addWidget(title)
+        
+        action_bar.addStretch()
+        
+        self.btn_add_officer = QPushButton("⊕ Add Officer")
+        self.btn_add_officer.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_add_officer.setStyleSheet("""
+            QPushButton { background-color: #27ae60; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; }
+            QPushButton:hover { background-color: #2ecc71; }
+        """)
+        self.btn_add_officer.clicked.connect(self.on_add_officer)
+        action_bar.addWidget(self.btn_add_officer)
+        
+        layout.addLayout(action_bar)
+        
+        # Help Text
+        help_text = QLabel("Manage the Adjudicating Authorities available for drafting SCNs and Orders. Deactivating an officer hides them from new drafts without affecting historical records.")
+        help_text.setWordWrap(True)
+        help_text.setStyleSheet("color: #64748b; font-size: 12px; font-style: italic; margin-bottom: 10px;")
+        layout.addWidget(help_text)
+        
+        # Officer Table
+        self.officer_table = QTableWidget()
+        self.officer_table.setAlternatingRowColors(True)
+        self.officer_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.officer_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.officer_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.officer_table.verticalHeader().setVisible(False)
+        self.officer_table.setStyleSheet("""
+            QTableWidget { border: 1px solid #e0e0e0; border-radius: 4px; background-color: white; }
+            QHeaderView::section { background-color: #f1f5f9; padding: 8px; border: none; font-weight: bold; color: #333; }
+            QTableWidget::item { padding: 6px; }
+            QTableWidget::item:selected { background-color: #e3f2fd; color: black; }
+        """)
+        
+        columns = ["ID", "Name", "Designation", "Jurisdiction", "Status", "Actions"]
+        self.officer_table.setColumnCount(len(columns))
+        self.officer_table.setHorizontalHeaderLabels(columns)
+        self.officer_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.officer_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # ID
+        self.officer_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents) # Status
+        self.officer_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents) # Actions
+        
+        layout.addWidget(self.officer_table)
+        
+        self.refresh_officer_table()
+        
+        return widget
+
+    def refresh_officer_table(self):
+        """Load data from database and populate the table"""
+        officers = self.db.get_all_officers()
+        self.officer_table.setRowCount(0)
+        
+        for row_idx, off in enumerate(officers):
+            self.officer_table.insertRow(row_idx)
+            
+            # 0. ID
+            id_item = QTableWidgetItem(str(off['id']))
+            id_item.setData(Qt.ItemDataRole.UserRole, off)  # Store dict for editing
+            self.officer_table.setItem(row_idx, 0, id_item)
+            
+            # 1. Name
+            self.officer_table.setItem(row_idx, 1, QTableWidgetItem(off['name'] or ''))
+            
+            # 2. Designation
+            self.officer_table.setItem(row_idx, 2, QTableWidgetItem(off['designation'] or ''))
+            
+            # 3. Jurisdiction
+            self.officer_table.setItem(row_idx, 3, QTableWidgetItem(off['jurisdiction'] or ''))
+            
+            # 4. Status Badge
+            is_active = bool(off['is_active'])
+            status_text = "Active" if is_active else "Inactive"
+            status_item = QTableWidgetItem(status_text)
+            status_item.setForeground(QColor('#166534') if is_active else QColor('#991b1b'))
+            status_item.setBackground(QColor('#dcfce7') if is_active else QColor('#fee2e2'))
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.officer_table.setItem(row_idx, 4, status_item)
+            
+            # 5. Actions Panel
+            action_widget = QWidget()
+            action_layout = QHBoxLayout(action_widget)
+            action_layout.setContentsMargins(4, 2, 4, 2)
+            action_layout.setSpacing(6)
+            
+            # Edit
+            btn_edit = QPushButton("Edit")
+            btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_edit.setStyleSheet("background-color: transparent; border: 1px solid #3498db; color: #3498db; border-radius: 3px; padding: 2px 8px;")
+            btn_edit.clicked.connect(lambda checked, o=off: self.on_edit_officer(o))
+            action_layout.addWidget(btn_edit)
+            
+            # Toggle Status
+            btn_toggle = QPushButton("Deactivate" if is_active else "Activate")
+            btn_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_toggle.setStyleSheet(f"background-color: transparent; border: 1px solid {'#e67e22' if is_active else '#2ecc71'}; color: {'#e67e22' if is_active else '#2ecc71'}; border-radius: 3px; padding: 2px 8px;")
+            btn_toggle.clicked.connect(lambda checked, oid=off['id'], state=is_active: self.on_toggle_officer(oid, state))
+            action_layout.addWidget(btn_toggle)
+            
+            # Delete
+            btn_del = QPushButton("Delete")
+            btn_del.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_del.setStyleSheet("background-color: transparent; border: 1px solid #e74c3c; color: #e74c3c; border-radius: 3px; padding: 2px 8px;")
+            btn_del.clicked.connect(lambda checked, oid=off['id'], name=off['name']: self.on_delete_officer(oid, name))
+            action_layout.addWidget(btn_del)
+            
+            self.officer_table.setCellWidget(row_idx, 5, action_widget)
+
+    def on_add_officer(self):
+        from src.ui.components.officer_dialog import OfficerDialog
+        dlg = OfficerDialog(self)
+        if dlg.exec():
+            data = dlg.get_data()
+            new_id = self.db.add_officer(data['name'], data['designation'], data['jurisdiction'], data['office_address'])
+            if new_id:
+                self.refresh_officer_table()
+            else:
+                QMessageBox.critical(self, "Error", "Failed to add officer.")
+
+    def on_edit_officer(self, officer_data):
+        from src.ui.components.officer_dialog import OfficerDialog
+        dlg = OfficerDialog(self, officer_data)
+        if dlg.exec():
+            data = dlg.get_data()
+            success = self.db.update_officer(officer_data['id'], data['name'], data['designation'], data['jurisdiction'], data['office_address'])
+            if success:
+                self.refresh_officer_table()
+            else:
+                QMessageBox.critical(self, "Error", "Failed to update officer.")
+
+    def on_toggle_officer(self, officer_id, current_state):
+        new_state = 0 if current_state else 1
+        action = "deactivate" if current_state else "activate"
+        
+        reply = QMessageBox.question(self, "Confirm", f"Are you sure you want to {action} this officer?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            success = self.db.toggle_officer_status(officer_id, new_state)
+            if success:
+                self.refresh_officer_table()
+            else:
+                QMessageBox.critical(self, "Error", "Failed to update officer status.")
+
+    def on_delete_officer(self, officer_id, name):
+        reply = QMessageBox.question(self, "Confirm Delete", f"Are you sure you want to permanently delete '{name}'?\nThis action cannot be undone.", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            success, msg = self.db.delete_officer(officer_id)
+            if success:
+                self.refresh_officer_table()
+                QMessageBox.information(self, "Deleted", msg)
+            else:
+                QMessageBox.critical(self, "Deletion Blocked", msg)

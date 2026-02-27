@@ -1125,6 +1125,17 @@ class DatabaseManager:
 
             DatabaseManager._initialized = True
 
+    def _get_conn(self):
+        """Returns a configured SQLite connection instance using the active db_file."""
+        if not hasattr(self, 'db_file') or not self.db_file:
+            self.init_sqlite()
+        conn = sqlite3.connect(self.db_file)
+        conn.row_factory = sqlite3.Row
+        
+        # Enforce foreign key constraints at connection level
+        conn.execute("PRAGMA foreign_keys = ON;")
+        return conn
+
     def get_dashboard_catalog(self):
         """
         [REPOSITORY PATTERN] Content Catalog for Scrutiny Dashboard.
@@ -2850,3 +2861,95 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error fetching officer {officer_id}: {e}")
             return None
+
+    def get_all_officers(self):
+        """Fetch all officers (active and inactive) for Settings table"""
+        try:
+            conn = self._get_conn()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, designation, jurisdiction, office_address, is_active FROM officers ORDER BY name")
+            rows = cursor.fetchall()
+            conn.close()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Error fetching all officers: {e}")
+            return []
+
+    def add_officer(self, name, designation, jurisdiction, office_address):
+        """Add a new officer to the registry"""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO officers (name, designation, jurisdiction, office_address, is_active)
+                VALUES (?, ?, ?, ?, 1)
+            ''', (name, designation, jurisdiction, office_address))
+            conn.commit()
+            officer_id = cursor.lastrowid
+            conn.close()
+            return officer_id
+        except Exception as e:
+            print(f"Error adding officer: {e}")
+            return None
+
+    def update_officer(self, officer_id, name, designation, jurisdiction, office_address):
+        """Update an existing officer's details"""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute('''
+                UPDATE officers 
+                SET name = ?, designation = ?, jurisdiction = ?, office_address = ?
+                WHERE id = ?
+            ''', (name, designation, jurisdiction, office_address, officer_id))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error updating officer {officer_id}: {e}")
+            return False
+
+    def toggle_officer_status(self, officer_id, is_active):
+        """Enable or disable an officer (0 or 1)"""
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            cursor.execute('UPDATE officers SET is_active = ? WHERE id = ?', (is_active, officer_id))
+            conn.commit()
+            conn.close()
+            return True
+        except Exception as e:
+            print(f"Error toggling officer status: {e}")
+            return False
+
+    def delete_officer(self, officer_id):
+        """
+        Delete an officer ONLY IF they are not referenced by any proceeding.
+        Explicitly checks usage count before attempting DELETE.
+        Returns: (Success: bool, ErrorMessage: str)
+        """
+        try:
+            conn = self._get_conn()
+            cursor = conn.cursor()
+            
+            # --- Deletion Safety Enhancement (Required) ---
+            cursor.execute('SELECT COUNT(*) FROM proceedings WHERE issuing_officer_id = ?', (officer_id,))
+            count = cursor.fetchone()[0]
+            
+            if count > 0:
+                conn.close()
+                return False, f"Cannot delete officer. They are currently acting as the Issuing Authority for {count} proceeding(s)."
+                
+            # If safe, proceed with deletion
+            cursor.execute('DELETE FROM officers WHERE id = ?', (officer_id,))
+            conn.commit()
+            conn.close()
+            return True, "Officer successfully deleted."
+            
+        except sqlite3.IntegrityError as e:
+            # Fallback catch for strict DB-level enforcement
+            return False, "Database constraint error: This officer is actively linked to protected records."
+        except Exception as e:
+            print(f"Error deleting officer: {e}")
+            return False, f"An unexpected error occurred: {str(e)}"
