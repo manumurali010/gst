@@ -19,6 +19,7 @@ import datetime
 from src.ui.components.side_nav_card import SideNavCard
 from src.ui.ui_helpers import render_grid_to_table_widget
 from src.utils.formatting import format_indian_number
+from src.utils.number_utils import safe_int
 from src.services.gstr_2a_analyzer import GSTR2AAnalyzer
 from src.ui.components.header_selection_dialog import HeaderSelectionDialog
 
@@ -76,7 +77,7 @@ class FinalizationConfirmationDialog(QDialog):
         
         for i, issue in enumerate(issues):
             name = issue.get('category') or issue.get('issue_name') or "Unknown Issue"
-            amt = float(issue.get('total_shortfall', 0))
+            amt = safe_int(issue.get('total_shortfall', 0))
             issue_table.setItem(i, 0, QTableWidgetItem(name))
             issue_table.setItem(i, 1, QTableWidgetItem(format_indian_number(amt, prefix_rs=True)))
             
@@ -680,7 +681,7 @@ class IssueCard(QFrame):
         try:
             # Clean up number formatting before parsing back to float
             clean_val = self.amount_edit.text().replace(',', '').replace('₹', '').strip()
-            data['total_shortfall'] = float(clean_val)
+            data['total_shortfall'] = safe_int(clean_val)
         except:
             pass # Keep original if parse error
         return data
@@ -1208,8 +1209,12 @@ class ComplianceDashboard(QScrollArea):
         self.setWidget(self.container)
 
     def update_point(self, num, status, value_text=None, details=None):
+        print(f"[DEBUG UI] update_point called with num={num} (type: {type(num)}), keys in cards: {[type(k) for k in self.cards.keys()]}")
         if num in self.cards:
+            print(f"[DEBUG UI] Key matched. Updating card {num} to {status}")
             self.cards[num].set_status(status, value_text, details)
+        else:
+            print(f"[DEBUG UI] KEY MISMATCH for {num}. Card not found. Available keys: {list(self.cards.keys())}")
             
     def reset_all(self):
         # [ROBUSTNESS] Guard against crashes if DB load failed
@@ -3849,7 +3854,7 @@ class ScrutinyTab(QWidget):
         # Filter to only show actual issues in the dialog
         
         # Filter Logic: Shortfall > 0 AND Included by User
-        detected_issues = [i for i in self.scrutiny_results if float(i.get('total_shortfall', 0)) > 0 and i.get('is_included', True)]
+        detected_issues = [i for i in self.scrutiny_results if safe_int(i.get('total_shortfall', 0)) > 0 and i.get('is_included', True)]
         
         dlg = FinalizationConfirmationDialog(data, detected_issues, self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -3863,7 +3868,7 @@ class ScrutinyTab(QWidget):
         # Authoritative Persistence: Persist ONLY finalized issues (shortfall > 0) to case_issues
         # This is the SOLE legal source for downstream SCN drafting.
         # DEEPCOPY CRITICAL: Lock the snapshot in memory before writing to DB
-        active_issues = copy.deepcopy([i for i in self.scrutiny_results if float(i.get('total_shortfall', 0)) > 0 and i.get('is_included', True)])
+        active_issues = copy.deepcopy([i for i in self.scrutiny_results if safe_int(i.get('total_shortfall', 0)) > 0 and i.get('is_included', True)])
         structured_issues = []
         for item in active_issues:
             # issue_id is the primary legal identifier
@@ -3873,7 +3878,7 @@ class ScrutinyTab(QWidget):
             snapshot_data = {
                 'issue_id': issue_id,
                 'issue_name': item.get('issue_name') or item.get('category'),
-                'total_shortfall': float(item.get('total_shortfall', 0)),
+                'total_shortfall': safe_int(item.get('total_shortfall', 0)),
                 'brief_facts': item.get('brief_facts'), # The edited ASMT-10 narration
                 'snapshot': item.get('snapshot', {}), # Raw detected values
                 'grid_data': item.get('grid_data'), # Frozen table structure

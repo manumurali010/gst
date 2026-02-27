@@ -1,6 +1,7 @@
-from PyQt6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QPushButton, QCheckBox, QWidget
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QFont, QCursor
+from PyQt6.QtWidgets import (QTableWidget, QTableWidgetItem, QHeaderView, QPushButton, 
+                             QCheckBox, QWidget, QStyledItemDelegate, QLineEdit)
+from PyQt6.QtCore import Qt, QSize, QRegularExpression
+from PyQt6.QtGui import QFont, QCursor, QRegularExpressionValidator
 from src.utils.formatting import format_indian_number
 from src.ui.styles import Theme
 
@@ -181,6 +182,22 @@ def render_grid_to_table_widget(table_widget: QTableWidget, grid_data: dict, int
     
     
     return cell_widgets
+
+class MonetaryDelegate(QStyledItemDelegate):
+    """
+    Enforces integer-only input in QTableWidget editors.
+    Prevents silent truncation by blocking non-integer characters (like '.') 
+    during active editing at the UI level.
+    """
+    def createEditor(self, parent, option, index):
+        editor = super().createEditor(parent, option, index)
+        if isinstance(editor, QLineEdit):
+            # Use QRegularExpressionValidator to support integers beyond 32-bit limits (2.1B)
+            # Regex r"\d+" allows only digits (0-9)
+            regex = QRegularExpression(r"\d+")
+            validator = QRegularExpressionValidator(regex, editor)
+            editor.setValidator(validator)
+        return editor
 
 # --- Component Factories ---
 

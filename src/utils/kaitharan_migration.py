@@ -20,8 +20,10 @@ pid, name, selected_json = row
 issues = json.loads(selected_json) if selected_json else []
 print(f"Found {len(issues)} issues in selected_issues.")
 
+from src.utils.number_utils import safe_int
+
 # 2. Filter for active issues (shortfall > 0)
-active_issues = [i for i in issues if float(i.get('total_shortfall', 0)) > 0]
+active_issues = [i for i in issues if safe_int(i.get('total_shortfall', 0)) > 0]
 print(f"Active issues identified: {len(active_issues)}")
 
 # 3. Migrate to case_issues (DRC-01A)
@@ -33,7 +35,7 @@ for item in active_issues:
     data_json = json.dumps(item)
     category = item.get('category')
     description = item.get('description')
-    amount = float(item.get('total_shortfall', 0))
+    amount = safe_int(item.get('total_shortfall', 0))
     
     c.execute("""
         INSERT INTO case_issues (proceeding_id, issue_id, stage, data_json, category, description, amount)

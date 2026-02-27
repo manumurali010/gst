@@ -1059,6 +1059,64 @@ class DatabaseManager:
                     cursor.execute("ALTER TABLE issues_master ADD COLUMN description TEXT NOT NULL DEFAULT ''")
                     conn.commit()
                     print("[MIGRATION] Success. 'description' column added.")
+                    
+                # --- OFFICER REGISTRY MIGRATION (V2) ---
+                # 1. Provide strict single-row schema_meta definition
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS schema_meta (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        version INTEGER NOT NULL
+                    )
+                ''')
+
+                # 2. Check current version, initialize if empty
+                cursor.execute("SELECT version FROM schema_meta WHERE id = 1")
+                row = cursor.fetchone()
+
+                if not row:
+                    # Initialize fresh DB or pre-V2 legacy DB to V1
+                    cursor.execute("INSERT INTO schema_meta (id, version) VALUES (1, 1)")
+                    current_version = 1
+                else:
+                    current_version = row[0]
+
+                # 3. Apply V2 Migration (Officer Registry) safely
+                if current_version < 2:
+                    print("[MIGRATION] Running Database Schema V2 Update (Officer Registry)...")
+                    
+                    # Create officers table
+                    cursor.execute('''
+                        CREATE TABLE IF NOT EXISTS officers (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT NOT NULL,
+                            designation TEXT NOT NULL,
+                            jurisdiction TEXT NOT NULL,
+                            office_address TEXT,
+                            is_active BOOLEAN DEFAULT 1,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    ''')
+                    
+                    # Create indexing
+                    cursor.execute("CREATE INDEX IF NOT EXISTS idx_officer_active ON officers(is_active)")
+                    
+                    # Safely add columns to proceedings
+                    cursor.execute("PRAGMA table_info(proceedings)")
+                    proc_cols = [info[1] for info in cursor.fetchall()]
+                    
+                    if "issuing_officer_id" not in proc_cols:
+                        print("[MIGRATION] Adding 'issuing_officer_id' to proceedings...")
+                        cursor.execute("ALTER TABLE proceedings ADD COLUMN issuing_officer_id INTEGER REFERENCES officers(id)")
+                        
+                    if "issuing_officer_snapshot" not in proc_cols:
+                        print("[MIGRATION] Adding 'issuing_officer_snapshot' to proceedings...")
+                        cursor.execute("ALTER TABLE proceedings ADD COLUMN issuing_officer_snapshot TEXT")
+                    
+                    cursor.execute("UPDATE schema_meta SET version = 2 WHERE id = 1")
+                    print("[MIGRATION] V2 Update Complete.")
+                
+                # Commit all schema changes
+                conn.commit()
                 conn.close()
             except Exception as e:
                 print(f"[CRITICAL] Schema Migration Failed: {e}")
@@ -1088,6 +1146,26 @@ class DatabaseManager:
             rows = cursor.fetchall()
             conn.close()
             
+            # [STATIC FALLBACK] Map for missing DB points
+            SOP_FALLBACK_MAP = {
+                "LIABILITY_3B_R1": 1,
+                "RCM_LIABILITY_ITC": 2,
+                "ISD_CREDIT_MISMATCH": 3,
+                "ITC_3B_2B_OTHER": 4,
+                "TDS_TCS_MISMATCH": 5,
+                "EWAY_BILL_MISMATCH": 6,
+                "CANCELLED_SUPPLIERS": 7,
+                "NON_FILER_SUPPLIERS": 8,
+                "INELIGIBLE_ITC_16_4": 9,
+                "IMPORT_ITC_MISMATCH": 10,
+                "RULE_42_43_VIOLATION": 11,
+                "ITC_3B_2B_9X4": 12,
+                "RCM_CASH_VS_2B": 13,
+                "RCM_3B_VS_CASH": 13,
+                "RCM_ITC_VS_CASH": 13,
+                "RCM_ITC_VS_2B": 13
+            }
+
             result = []
             for row in rows:
                 item = dict(row)
@@ -1096,6 +1174,18 @@ class DatabaseManager:
                 desc = item.get("description")
                 if not desc or not str(desc).strip():
                     raise RuntimeError(f"Data Integrity Violation: Issue '{item['issue_id']}' has missing/empty description.")
+                
+                # [TYPE NORMALIZATION] DB Regression Guard (SOP_POINT IS NULL)
+                raw_sop = item.get("sop_point")
+                if raw_sop is None or str(raw_sop).lower() == "null" or str(raw_sop).strip() == "":
+                    fallback_val = SOP_FALLBACK_MAP.get(item["issue_id"])
+                    if fallback_val is None:
+                        raise RuntimeError(f"Data Error: Cannot determine sop_point for {item['issue_id']}")
+                    print(f"WARNING: issues_master DB missing sop_point for {item['issue_id']}. Using static fallback {fallback_val}.")
+                    raw_sop = fallback_val
+                
+                # Enforce literal integer extraction
+                item["sop_point"] = int(float(raw_sop))
                 
                 result.append(item)
                 
@@ -1409,6 +1499,19 @@ class DatabaseManager:
             
             source_type = registry_row[0]
             
+            # BACKEND LOCK ENFORCEMENT - Single Source of Truth
+            from src.utils.constants import WorkflowStage
+            if source_type == 'SCRUTINY':
+                cursor.execute("SELECT workflow_stage FROM proceedings WHERE id=?", (pid,))
+                lock_row = cursor.fetchone()
+                if lock_row and lock_row[0] is not None and lock_row[0] >= WorkflowStage.DRC01A_ISSUED.value:
+                    raise RuntimeError(f"Database Modification Rejected: Proceeding {pid} is Finalized and Locked.")
+            elif source_type == 'ADJUDICATION':
+                cursor.execute("SELECT workflow_stage FROM adjudication_cases WHERE id=?", (pid,))
+                lock_row = cursor.fetchone()
+                if lock_row and lock_row[0] is not None and lock_row[0] >= WorkflowStage.DRC01A_ISSUED.value:
+                    raise RuntimeError(f"Database Modification Rejected: Adjudication Case {pid} is Finalized and Locked.")
+            
             if source_type == 'ADJUDICATION':
                 conn.close()
                 return self.update_adjudication_case(pid, data, version_no=version_no)
@@ -1445,7 +1548,10 @@ class DatabaseManager:
 
         except Exception as e:
             if 'conn' in locals():
-                 conn.rollback()
+                try:
+                    conn.rollback()
+                except sqlite3.ProgrammingError:
+                    pass # Ignore if closed
             print(f"Error updating proceeding: {e}")
             raise e
         finally:
@@ -1862,7 +1968,7 @@ class DatabaseManager:
 
     def update_master_template_description(self, issue_id, new_brief_facts):
         """
-        Updates the 'brief_facts' template for a specific master issue.
+        Updates the 'brief_facts' template for a specific master issue in issues_master.
         This allows users to customize legal text globally.
         """
         import json
@@ -1870,30 +1976,27 @@ class DatabaseManager:
             conn = self._get_conn()
             cursor = conn.cursor()
             
-            # 1. Fetch current JSON
-            cursor.execute("SELECT issue_json FROM issues_data WHERE issue_id = ?", (issue_id,))
+            # 1. Fetch current templates from issues_master
+            cursor.execute("SELECT templates FROM issues_master WHERE issue_id = ?", (issue_id,))
             row = cursor.fetchone()
             if not row:
                 conn.close()
                 return False, "Issue template not found in master database."
             
-            issue_json = json.loads(row[0])
+            templates = json.loads(row[0]) if row[0] else {}
             
             # 2. Update the template
-            if 'templates' not in issue_json:
-                issue_json['templates'] = {}
+            # PRESERVE ALL EXISTING KEYS (brief_facts_scn, brief_facts_drc01a, grounds, etc.)
+            templates['brief_facts'] = new_brief_facts
             
-            issue_json['templates']['brief_facts'] = new_brief_facts
-            
-            # Also update the main description if it matches the legacy structure
-            if 'description' in issue_json:
-                issue_json['description'] = new_brief_facts
-                
-            # 3. Save back
-            cursor.execute("UPDATE issues_data SET issue_json = ? WHERE issue_id = ?", (json.dumps(issue_json), issue_id))
-            
-            # Optional: Update master table updated_at
-            cursor.execute("UPDATE issues_master SET updated_at = CURRENT_TIMESTAMP WHERE issue_id = ?", (issue_id,))
+            # 3. Save back to issues_master
+            cursor.execute("""
+                UPDATE issues_master 
+                SET templates = ?, 
+                    description = ?,
+                    updated_at = CURRENT_TIMESTAMP 
+                WHERE issue_id = ?
+            """, (json.dumps(templates), new_brief_facts, issue_id))
             
             conn.commit()
             conn.close()
@@ -1904,33 +2007,65 @@ class DatabaseManager:
             return False, str(e)
 
     def get_active_issues(self):
-        """Get all active issues as a list of JSON objects"""
-        import json
+        """Get all active issues reconstructed from issues_master normalized columns"""
+        import sqlite3
         try:
             conn = self._get_conn()
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            # Join master and data to get the JSON
-            query = """
-                SELECT d.issue_json 
-                FROM issues_master m
-                JOIN issues_data d ON m.issue_id = d.issue_id
-                WHERE m.active = 1
-            """
-            cursor.execute(query)
+            # Select directly from issues_master
+            cursor.execute("SELECT * FROM issues_master WHERE active = 1")
             rows = cursor.fetchall()
             conn.close()
             
             issues = []
             for row in rows:
-                try:
-                    issues.append(json.loads(row[0]))
-                except:
-                    pass
+                issues.append(self._reconstruct_issue_json(row))
             return issues
         except Exception as e:
             print(f"Error getting active issues: {e}")
             return []
+
+    def _reconstruct_issue_json(self, row):
+        """
+        Helper to reconstruct the legacy issue_json structure from issues_master columns.
+        Ensures exact backward compatibility for IssueCard and ScrutinyTab.
+        """
+        import json
+        if not row:
+            return None
+            
+        # Convert sqlite3.Row if needed
+        d = dict(row) if not isinstance(row, dict) else row
+        
+        # Parse JSON columns
+        def safe_json_load(val):
+            if not val: return {}
+            if isinstance(val, (dict, list)): return val # Already parsed
+            try: return json.loads(val)
+            except: return {}
+
+        templates = safe_json_load(d.get('templates'))
+        grid_data = safe_json_load(d.get('grid_data'))
+        liability_config = safe_json_load(d.get('liability_config'))
+        tax_demand_mapping = safe_json_load(d.get('tax_demand_mapping'))
+        
+        # Construct the legacy blob structure
+        return {
+            "issue_id": d.get('issue_id'),
+            "issue_name": d.get('issue_name'),
+            "description": d.get('description') or templates.get('brief_facts', ''),
+            "category": d.get('category', 'General'),
+            "sop_point": d.get('sop_point'),
+            "grid_data": grid_data,
+            "templates": templates,
+            "liability_config": liability_config,
+            "tax_demand_mapping": tax_demand_mapping,
+            "analysis_type": d.get('analysis_type', 'auto'),
+            "sop_version": d.get('sop_version'),
+            "applicable_from_fy": d.get('applicable_from_fy')
+        }
 
     def get_all_issues_metadata(self):
         """Get metadata for all issues (for Developer List View)"""
@@ -1999,24 +2134,19 @@ class DatabaseManager:
             return None
 
     def get_issue_by_name(self, name):
-        """Fetch an issue by its name from issues_master/data tables"""
-        import json
+        """Fetch an issue by its name reconstructed from issues_master"""
+        import sqlite3
         try:
             conn = self._get_conn()
+            conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            query = """
-                SELECT d.issue_json 
-                FROM issues_master m
-                JOIN issues_data d ON m.issue_id = d.issue_id
-                WHERE m.issue_name = ?
-            """
-            cursor.execute(query, (name,))
+            cursor.execute("SELECT * FROM issues_master WHERE issue_name = ?", (name,))
             row = cursor.fetchone()
             conn.close()
             
             if row:
-                return json.loads(row[0])
+                return self._reconstruct_issue_json(row)
             return None
         except Exception as e:
             print(f"Error getting issue by name {name}: {e}")
@@ -2689,3 +2819,34 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error getting scrutiny cases: {e}")
             return []
+
+    # ---------------- Officer Registry Methods ----------------
+
+    def get_active_officers(self):
+        """Fetch all active officers for UI dropdowns"""
+        try:
+            conn = self._get_conn()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, designation, jurisdiction, office_address FROM officers WHERE is_active = 1 ORDER BY name")
+            rows = cursor.fetchall()
+            conn.close()
+            return [dict(row) for row in rows]
+        except Exception as e:
+            print(f"Error fetching active officers: {e}")
+            return []
+
+    def get_officer_by_id(self, officer_id):
+        """Fetch a specific officer's complete metadata by ID"""
+        if not officer_id: return None
+        try:
+            conn = self._get_conn()
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM officers WHERE id = ?", (officer_id,))
+            row = cursor.fetchone()
+            conn.close()
+            return dict(row) if row else None
+        except Exception as e:
+            print(f"Error fetching officer {officer_id}: {e}")
+            return None

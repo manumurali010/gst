@@ -1,0 +1,136 @@
+    def _get_drc01a_model(self):
+        """
+        SSoT: Aggregate all data for DRC-01A rendering and export.
+        Uses Decimal for precise monetary aggregation.
+        Aggregates normalized legal references from individual issues.
+        """
+        if not self.proceeding_data:
+            return {}
+
+        tp = self.proceeding_data.get('taxpayer_details', {})
+        if isinstance(tp, str):
+            try: tp = json.loads(tp)
+            except: tp = {}
+        elif tp is None:
+            tp = {}
+
+        # 1. Taxpayer & Case Info
+        model = {
+            'gstin': self.proceeding_data.get('gstin', '') or tp.get('GSTIN', ''),
+            'legal_name': self.proceeding_data.get('legal_name', '') or tp.get('Legal Name', ''),
+            'trade_name': self.proceeding_data.get('trade_name', '') or tp.get('Trade Name', ''),
+            'address': self.proceeding_data.get('address', '') or tp.get('Address', ''),
+            'case_id': self.proceeding_data.get('case_id', '') or '',
+            'oc_no': self.oc_number_input.text(),
+            'oc_date': self.oc_date_input.date().toString("dd/MM/yyyy"),
+            'financial_year': self.proceeding_data.get('financial_year', '') or '',
+            'initiating_section': self.proceeding_data.get('initiating_section', '') or '',
+            'form_type': self.proceeding_data.get('form_type', '') or 'DRC-01A',
+            'reply_date': self.reply_deadline_input.date().toString("dd/MM/yyyy"),
+            'payment_date': self.payment_deadline_input.date().toString("dd/MM/yyyy"),
+            'issue_date': self.oc_date_input.date().toString("dd/MM/yyyy")
+        }
+
+        # 2. Logic for Adjudication Section Titles
+        sec = model['initiating_section']
+        if "73" in sec:
+            model['section_title'] = "section 73(5)"
+            model['section_body'] = "73(5)"
+        elif "74" in sec:
+            model['section_title'] = "section 74(5)"
+            model['section_body'] = "74(5)"
+        else:
+            model['section_title'] = "section 73(5)/section 74(5)"
+            model['section_body'] = "73(5) / 74(5)"
+
+        # 3. Aggregate Legal Provisions (Normalized Layer)
+        normalized_provisions = self._aggregate_legal_references()
+        if normalized_provisions:
+            model['sections_violated_html'] = "<ul>" + "".join([f"<li>{p}</li>" for p in normalized_provisions]) + "</ul>"
+        else:
+            model['sections_violated_html'] = "<i>Not specified</i>"
+
+        # 4. Narrative Content from Issues
+        issues_html = ""
+        for card in self.issue_cards:
+            if card.is_included:
+                issues_html += card.generate_html()
+                issues_html += "<br><hr style='border: 1px dashed #eee;'><br>"
+        model['issues_html'] = issues_html
+
+        # 5. Financial Aggregation (Decimal Layer)
+        # Using Decimal for precise summation across all included issue cards
+        total_breakdown = {} # Act -> {Tax: D, Interest: D, Penalty: D, Total: D}
+        
+        for card in self.issue_cards:
+            if not card.is_included: continue
+            
+            card_breakdown = card.get_tax_breakdown() # Returns card level Decimal mapping
+            for act, vals in card_breakdown.items():
+                if act not in total_breakdown:
+                    total_breakdown[act] = {
+                        'Tax': Decimal('0'), 'Interest': Decimal('0'), 
+                        'Penalty': Decimal('0'), 'Total': Decimal('0')
+                    }
+                for key in ['Tax', 'Interest', 'Penalty', 'Total']:
+                    total_breakdown[act][key] += Decimal(str(vals.get(key, 0)))
+
+        # Prepare Tax Table Rows
+        tax_rows = []
+        grand_total = Decimal('0')
+        
+        # Sort by ACT_PRIORITY
+        for act in self.ACT_PRIORITY:
+            if act in total_breakdown:
+                vals = total_breakdown[act]
+                row_tot = vals['Total']
+                grand_total += row_tot
+                
+                tax_rows.append({
+                    'Act': act,
+                    'Period': model['financial_year'], # Summary level uses FY
+                    'Tax': f"{vals['Tax']:,.0f}",
+                    'Interest': f"{vals['Interest']:,.0f}",
+                    'Penalty': f"{vals['Penalty']:,.0f}",
+                    'Total': f"{row_tot:,.0f}"
+                })
+        
+        model['tax_rows'] = tax_rows
+        model['grand_total_liability'] = f"{grand_total:,.0f}"
+        
+        # Period derivation for metadata
+        model['tax_period_from'] = f"01/04/{model['financial_year'][:4]}" if model['financial_year'] else ""
+        model['tax_period_to'] = f"31/03/{model['financial_year'][5:]}" if len(model['financial_year']) > 5 else ""
+
+        return model
+
+    def _aggregate_legal_references(self):
+        """Aggregate and normalize legal provisions from all issue cards"""
+        all_refs = []
+        for card in self.issue_cards:
+            if not card.is_included: continue
+            
+            # Extract text from legal editor
+            raw_text = card.legal_editor.toPlainText().strip()
+            if not raw_text: continue
+            
+            # Split by common delimiters (newline, semicolon, comma)
+            import re
+            provisions = re.split(r'[\r\n;,]+', raw_text)
+            for p in provisions:
+                p = p.strip()
+                if p:
+                    all_refs.append(LegalReference(p))
+                    
+        # Deduplicate using canonical identity
+        unique_refs = []
+        seen = set()
+        for ref in all_refs:
+            if ref.canonical_id not in seen:
+                unique_refs.append(ref)
+                seen.add(ref.canonical_id)
+        
+        # Sort and return original strings for best representation
+        # but sorted by canonical identity for logical consistency
+        unique_refs.sort(key=lambda x: x.canonical_id)
+        return [ref.original for ref in unique_refs]

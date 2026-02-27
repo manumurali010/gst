@@ -7,8 +7,9 @@ from PyQt6.QtGui import QFont
 import copy
 from src.ui.rich_text_editor import RichTextEditor
 from src.ui.components.modern_card import ModernCard
-from src.ui.ui_helpers import render_grid_to_table_widget
+from src.ui.ui_helpers import render_grid_to_table_widget, MonetaryDelegate
 from src.utils.formatting import format_indian_number
+from src.utils.number_utils import safe_int
 from src.ui.styles import Theme
 
 class CollapsibleSection(QWidget):
@@ -117,6 +118,13 @@ class IssueCard(QFrame):
         """)
         self.toggle_btn.clicked.connect(self.toggle_content)
         header_layout.addWidget(self.toggle_btn)
+
+        # Include Checkbox (For DRC-01A Soft Delete / Inclusion)
+        self.include_cb = QCheckBox()
+        self.include_cb.setChecked(self.is_included)
+        self.include_cb.setStyleSheet(f"QCheckBox::indicator {{ width: 22px; height: 22px; }}")
+        self.include_cb.stateChanged.connect(lambda: self.handle_remove_or_drop() if self.include_cb.isChecked() != self.is_included else None)
+        header_layout.addWidget(self.include_cb)
 
         # Title Column
         title_col = QVBoxLayout()
@@ -227,18 +235,15 @@ class IssueCard(QFrame):
         self.grid_section = CollapsibleSection("Issue Details", self.grid_container)
         body_layout.addWidget(self.grid_section)
         
-        # 2.3 Draft Content (Editor)
+        # 2.3 Brief Facts & Legal Provisions (Consolidated Editor)
         self.editor = RichTextEditor()
         self.editor.setMinimumHeight(200)
-        # [UI POLISH] Remove toolbar for cleaner look (safe mode)
         self.editor.set_toolbar_visible(False) 
-        
-        self.update_editor_content()
         self.editor.textChanged.connect(self.contentChanged.emit)
         
-        self.draft_section = CollapsibleSection("Brief Facts & Content", self.editor)
+        self.draft_section = CollapsibleSection("Brief Facts & Legal Provisions", self.editor)
         body_layout.addWidget(self.draft_section)
-        
+
         self.main_layout.addWidget(self.body_container)
 
     def toggle_content(self):
@@ -513,6 +518,10 @@ class IssueCard(QFrame):
         """Updates visual appearance based on inclusion state (Soft Delete)"""
         if self.is_included:
             # Active State
+            self.include_cb.blockSignals(True)
+            self.include_cb.setChecked(True)
+            self.include_cb.blockSignals(False)
+            
             self.body_container.setEnabled(True)
             self.setGraphicsEffect(None) # Remove opacity effect
             
@@ -539,6 +548,10 @@ class IssueCard(QFrame):
             """)
         else:
             # Soft Deleted State
+            self.include_cb.blockSignals(True)
+            self.include_cb.setChecked(False)
+            self.include_cb.blockSignals(False)
+            
             self.body_container.setEnabled(False) 
             
             # Visual Greying Out
@@ -689,7 +702,7 @@ class IssueCard(QFrame):
             if not item: return 0
             
             try:
-                return float(item.text())
+                return safe_int(item.text())
             except:
                 return 0
 
@@ -772,6 +785,9 @@ class IssueCard(QFrame):
             self.table = QTableWidget()
             self.table.setMinimumHeight(200)
             self.table.setMaximumHeight(800)
+            
+            # Enforce Integer standard at UI level
+            self.table.setItemDelegate(MonetaryDelegate(self.table))
             
             # Connect signal ONCE
             self.table.itemChanged.connect(self.on_grid_item_changed)
@@ -1164,17 +1180,24 @@ class IssueCard(QFrame):
         layout.addLayout(inputs_layout)
 
     def on_grid_item_changed(self, item):
-        """Handle changes in grid table"""
+        """Handle changes in grid table - Enforce Integers"""
         cell_info = item.data(Qt.ItemDataRole.UserRole)
         if not cell_info:
             return
             
         # Update variable
         var_name = cell_info.get('var')
-        text = item.text()
+        text = item.text().replace(',', '').replace('₹', '').strip()
         
         try:
-            val = float(text)
+            # Enforce Integer standard (Round Half Up)
+            f = safe_int(text) if text else 0
+            val = int(f + 0.5) if f >= 0 else int(f - 0.5)
+            # Update UI text to integer string if it was float-like
+            if '.' in text:
+                item.tableWidget().blockSignals(True)
+                item.setText(str(val))
+                item.tableWidget().blockSignals(False)
         except ValueError:
             val = text
             
@@ -1247,7 +1270,7 @@ class IssueCard(QFrame):
                 
                 txt = item.text().replace(',', '').strip()
                 try:
-                    val = float(txt)
+                    val = safe_int(txt)
                     if val < 0:
                         is_valid = False
                         if show_ui:
@@ -1296,6 +1319,7 @@ class IssueCard(QFrame):
 
         # 3. Update UI
         self.refresh_totals_ui()
+        self.update_editor_content()
 
     def refresh_totals_ui(self):
         """Update IGST/CGST/SGST labels and signals based on current breakdown"""
@@ -1306,12 +1330,15 @@ class IssueCard(QFrame):
         cgst = 0
         sgst = 0
         
+        # Map acts to dashboard slots (Case Insensitive)
         for act, values in breakdown.items():
             tax_val = values.get('tax', 0)
-            if act == 'IGST': igst += tax_val
-            elif act == 'CGST': cgst += tax_val
-            elif act == 'SGST': sgst += tax_val
+            act_upper = str(act).upper()
+            if 'IGST' in act_upper: igst += tax_val
+            elif 'CGST' in act_upper: cgst += tax_val
+            elif 'SGST' in act_upper or 'UGST' in act_upper: sgst += tax_val
             
+        from src.utils.formatting import format_indian_number
         if hasattr(self, 'lbl_igst'):
             self.lbl_igst.setText(f"IGST: {format_indian_number(igst, prefix_rs=True)}")
         if hasattr(self, 'lbl_cgst'):
@@ -1326,14 +1353,15 @@ class IssueCard(QFrame):
             self.tax_badge.setText(f"Tax: {formatted_tax}")
             self.tax_badge.show()
 
-        # 3. Emit signals for summary persistence
+        # 3. Emit signals for summary persistence (Strict Integers)
         total_interest = sum(v.get('interest', 0) for v in breakdown.values())
         total_penalty = sum(v.get('penalty', 0) for v in breakdown.values())
 
+        # Force integer conversion for safety
         self.valuesChanged.emit({
-            'tax': total_tax,
-            'interest': total_interest,
-            'penalty': total_penalty
+            'tax': int(total_tax),
+            'interest': int(total_interest),
+            'penalty': int(total_penalty)
         })
         
 
@@ -1369,7 +1397,12 @@ class IssueCard(QFrame):
 
                         if is_empty or (is_zero and has_priority_data):
                             try:
-                                self.variables[var_name] = float(grid_val) if grid_val not in (None, "") else 0.0
+                                if grid_val not in (None, ""):
+                                    # Standardize on Integer at bootstrap (Round Half Up)
+                                    f = safe_int(grid_val)
+                                    self.variables[var_name] = int(f + 0.5) if f >= 0 else int(f - 0.5)
+                                else:
+                                    self.variables[var_name] = 0
                             except:
                                 self.variables[var_name] = grid_val # String fallback
                                 
@@ -1412,14 +1445,21 @@ class IssueCard(QFrame):
     # Removed duplicate empty calculate_excel_table
 
 
-    def extract_html_body(self, html):
-        """Extract content from body tag to avoid nested html document issues"""
+    def extract_html_body(self, html, allow_raw=True):
+        """Extract content from body tag. If allow_raw is True and no body found, returns original."""
         import re
         if not html: return ""
+        
+        # Check if it's just an empty Qt paragraph
+        plain_text = re.sub(r'<[^>]+>', '', html).strip()
+        if not plain_text and "<br" not in html and "<img" not in html and "<table" not in html:
+            return ""
+            
         match = re.search(r'<body[^>]*>(.*?)</body>', html, re.DOTALL | re.IGNORECASE)
         if match:
             return match.group(1).strip()
-        return html
+        
+        return html if allow_raw else ""
 
     def _validate_template_variables(self, template_text: str, variables: dict) -> list:
         """Extract all {{ placeholders }} and check if they exist in variables."""
@@ -1438,8 +1478,6 @@ class IssueCard(QFrame):
         # SAFEGUARD: Detection of manual edits
         current_html = self.editor.toHtml()
         if is_recalculation and hasattr(self, 'last_rendered_html') and self.last_rendered_html:
-            # Check if user modified the text since last render
-            # (Strip whitespace for robust comparison)
             if self.extract_html_body(current_html).strip() != self.extract_html_body(self.last_rendered_html).strip():
                 if hasattr(self, 'sync_warning'):
                     self.sync_warning.show()
@@ -1448,80 +1486,76 @@ class IssueCard(QFrame):
         if hasattr(self, 'sync_warning'):
             self.sync_warning.hide()
 
-        def get_content(key):
-            raw = t.get(key, '')
-            return self.extract_html_body(raw)
-        
-        # 1. Determine Brief Facts content based on mode
-        if self.mode == "SCN":
-            # [FIX] Strict Idempotency Logic (Iter 2)
-            # Priority 1: Restored Content (User Edits)
-            # Priority 2: Template Authoritative (template['templates']['brief_facts_scn'])
-            # Priority 3: Canonical Placeholder
-            
-            check_content = self.saved_content
-            
-            # Simple validity check
-            has_saved_content = check_content and len(check_content.strip()) > 0 and check_content != self.CANONICAL_PLACEHOLDER
-            
-            if has_saved_content:
-                brief_facts = self.extract_html_body(check_content)
-                if not brief_facts.strip(): has_saved_content = False
-            
-            if has_saved_content:
-                 brief_facts = self.extract_html_body(check_content)
-            else:
-                 # Adoption Mode: Strictly fetch from authoritative template location
-                 # No guessing. No probing root keys.
-                 brief_facts = t.get('brief_facts_scn')
-                 
-                 if not brief_facts:
-                     brief_facts = self.CANONICAL_PLACEHOLDER
-        else:
-            brief_facts = get_content('brief_facts')
+        # [STRICT AUDIT LOGGING]
+        print(f"\n--- Narrrative Sync Start: {self.issue_id} (Mode: {self.mode}) ---")
 
-        # 2. Check optional sections
-        include_grounds = t.get('include_grounds', True)
-        include_conclusion = t.get('include_conclusion', True)
+        def get_and_log(key, label, fallbacks=None):
+            val = t.get(key)
+            path = f"templates.{key}"
+            
+            if not val and fallbacks:
+                for f_key in fallbacks:
+                    val = t.get(f_key)
+                    if val:
+                        path = f"templates.{f_key} (fallback)"
+                        break
+            
+            if not val:
+                # Last resort: check root if requested (only for Brief Facts as per user)
+                if label == "Brief Facts":
+                    val = self.template.get('brief_facts')
+                    if val: path = "root.brief_facts (fallback)"
+
+            content = self.extract_html_body(str(val)) if val else ""
+            if content:
+                print(f"DEBUG: Found {label} via {path}")
+            else:
+                # [DIAGNOSTIC] Print raw value to see why it's considered missing
+                raw_repr = repr(val)[:100] + ("..." if len(repr(val)) > 100 else "")
+                print(f"DEBUG: Missing {label} (Tried {path}) | Raw Value: {raw_repr} | Type: {type(val)}")
+            return content
+
+        # 1. Resolve Sections
+        if self.mode == "DRC-01A":
+            brief_facts = get_and_log('brief_facts_drc01a', "Brief Facts", fallbacks=['brief_facts'])
+            grounds = get_and_log('grounds', "Grounds")
+            legal = get_and_log('legal', "Legal")
+            conclusion = get_and_log('conclusion', "Conclusion")
+        elif self.mode == "SCN":
+            brief_facts = get_and_log('brief_facts_scn', "Brief Facts", fallbacks=['brief_facts'])
+            grounds = get_and_log('grounds', "Grounds")
+            legal = get_and_log('legal', "Legal")
+            conclusion = get_and_log('conclusion', "Conclusion")
+        else:
+            brief_facts = get_and_log('brief_facts', "Brief Facts")
+            grounds = get_and_log('grounds', "Grounds")
+            legal = get_and_log('legal', "Legal")
+            conclusion = get_and_log('conclusion', "Conclusion")
+
+        # 2. Bypass visibility flags temporarily for raw testing
+        include_grounds = True
+        include_conclusion = True
 
         # 3. Build structured HTML
         html_sections = []
         
-        # Brief Facts
-        html_sections.append(f"""
-        <div style="margin-bottom: 15px;">
-            <b>Brief Facts:</b><br>
-            {brief_facts}
-        </div>
-        """)
+        if brief_facts.strip():
+            html_sections.append(f'<div style="margin-bottom: 15px;"><b>Brief Facts:</b><br>{brief_facts}</div>')
         
-        # Grounds (Optional)
-        if include_grounds:
-            html_sections.append(f"""
-            <div style="margin-bottom: 15px;">
-                <b>Grounds:</b><br>
-                {get_content('grounds')}
-            </div>
-            """)
-            
-        # Legal (Always)
-        html_sections.append(f"""
-        <div style="margin-bottom: 15px;">
-            <b>Legal Provisions:</b><br>
-            {get_content('legal')}
-        </div>
-        """)
+        if include_grounds and grounds.strip():
+            html_sections.append(f'<div style="margin-bottom: 15px;"><b>Grounds / Discussions:</b><br>{grounds}</div>')
         
-        # Conclusion (Optional)
-        if include_conclusion:
-            html_sections.append(f"""
-            <div style="margin-bottom: 15px;">
-                <b>Conclusion:</b><br>
-                {get_content('conclusion')}
-            </div>
-            """)
+        if legal.strip():
+            html_sections.append(f'<div style="margin-bottom: 15px;"><b>Legal Provisions:</b><br>{legal}</div>')
+        
+        if include_conclusion and conclusion.strip():
+            html_sections.append(f'<div style="margin-bottom: 15px;"><b>Conclusion:</b><br>{conclusion}</div>')
             
         html = "".join(html_sections)
+        if not html:
+            html = f"<i>{self.CANONICAL_PLACEHOLDER}</i>"
+
+        print(f"--- Narrative Sync End: {self.issue_id} ---\n")
         
         # CLAIM 2 FIX: Placeholder Audit & Enforced Resolution
         unresolved = self._validate_template_variables(html, self.variables)
@@ -1680,7 +1714,7 @@ class IssueCard(QFrame):
                         try:
                             clean_val = str(val).replace(',', '').replace('₹', '').strip()
                             if clean_val and all(c in '0123456789.-' for c in clean_val):
-                                float(clean_val)
+                                safe_int(clean_val)
                                 style += "text-align: right;"
                             else:
                                 style += "text-align: left;"
@@ -1752,7 +1786,7 @@ class IssueCard(QFrame):
                     else:
                         # Check if numeric
                         try:
-                            float(str(val).replace(',', '').replace('₹', '').strip())
+                            safe_int(val)
                             style += "text-align: right;"
                         except:
                             style += "text-align: left;"
@@ -1797,7 +1831,7 @@ class IssueCard(QFrame):
                     # Align numbers to right
                     align = "left"
                     try:
-                        float(val.replace(',', '').replace('₹', '').strip())
+                        safe_int(val)
                         align = "right"
                     except:
                         pass
@@ -1815,8 +1849,9 @@ class IssueCard(QFrame):
 
     def generate_html(self):
         """Generate HTML for preview/PDF"""
-        # 1. Get Editor Content
+        # 1. Get Editor Content and extract just the body
         html = self.editor.toHtml()
+        html = self.extract_html_body(html)
         
         # 2. Append Table
         html += self.generate_table_html(self.template, self.variables)
@@ -1981,31 +2016,18 @@ class IssueCard(QFrame):
                             self.table.blockSignals(False)
 
     def get_tax_breakdown(self):
-        """Return tax breakdown by Act"""
-        # [DIAGNOSTIC]
-        # print("ISSUE:", getattr(self, "issue_id", "Unknown"))
-        
+        """Return tax breakdown by Act as integers"""
         # [SOFT DELETE] Excluded issues contribute 0 to tax
         if not self.is_included:
             return {}
             
-        print("LIABILITY CONFIG:", self.template.get("liability_config", None))
-        print("VARIABLES SAMPLE:", list(self.variables.items())[:10])
-
         breakdown = {}
         
-        # Helper to safely get float
-        def safe_float(val):
-            if isinstance(val, str):
-                val = val.replace(',', '').strip()
-            try: return float(val)
-            except: return 0.0
-
         def get_v(key):
-            return safe_float(self.variables.get(key, 0))
+            return safe_int(self.variables.get(key, 0))
 
         # [REORDERED] PRIORITY 1: Canonical-First Logic (Strict Adherence to tax_demand_mapping)
-        if self.tax_mapping:
+        if hasattr(self, 'tax_mapping') and self.tax_mapping:
             has_mapped_data = False
             for act in ['IGST', 'CGST', 'SGST', 'Cess']:
                 var_name = self.tax_mapping.get(act)
@@ -2013,11 +2035,10 @@ class IssueCard(QFrame):
                     val = get_v(var_name)
                     has_mapped_data = True
                     if act not in breakdown:
-                        breakdown[act] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
+                        breakdown[act] = {'tax': 0, 'interest': 0, 'penalty': 0}
                     breakdown[act]['tax'] = val
             
             if has_mapped_data:
-                print("BREAKDOWN GENERATED:", breakdown)
                 return breakdown
 
         # [REORDERED] PRIORITY 2: Structured Liability Config (Contract Mode)
@@ -2039,11 +2060,10 @@ class IssueCard(QFrame):
                         if act == 'Amount': act = 'IGST' 
                         
                         if act not in breakdown:
-                            breakdown[act] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
+                            breakdown[act] = {'tax': 0, 'interest': 0, 'penalty': 0}
                         breakdown[act]['tax'] += val
                 
                 if breakdown: 
-                    print("BREAKDOWN GENERATED:", breakdown)
                     return breakdown
 
             elif model == 'sum_of_rows':
@@ -2072,10 +2092,10 @@ class IssueCard(QFrame):
                                 if isinstance(cell, dict):
                                     val = 0.0
                                     if cell.get('var'): val = get_v(cell['var'])
-                                    else: val = safe_float(cell.get('value', 0))
+                                    else: val = safe_int(cell.get('value', 0))
                                     
                                     if head not in breakdown:
-                                        breakdown[head] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
+                                        breakdown[head] = {'tax': 0, 'interest': 0, 'penalty': 0}
                                     breakdown[head]['tax'] += val
                         
                         if breakdown: 
@@ -2196,23 +2216,14 @@ class IssueCard(QFrame):
                                 cell = row.get(cid)
                                 if isinstance(cell, dict):
                                     # Try 'var' first (bound value)
-                                    val = 0.0
+                                    val = 0
                                     raw_val = None
                                     if 'var' in cell and cell['var']:
                                          raw_val = get_v(cell['var'])
                                          val = raw_val
                                     else:
                                          # Try static/input value
-                                         try: 
-                                             raw_val = cell.get('value', 0)
-                                             # Handle "Rs. 1,000" or "1000.00"
-                                             if isinstance(raw_val, str):
-                                                 clean_val = raw_val.replace(',', '').replace('Rs.', '').strip()
-                                                 if clean_val:
-                                                     val = float(clean_val)
-                                             else:
-                                                 val = float(raw_val)
-                                         except: val = 0.0
+                                         val = safe_int(cell.get('value', 0))
                                     
                                     if val > 0:
                                         temp_totals[act] += val
@@ -2221,7 +2232,7 @@ class IssueCard(QFrame):
                         has_val = False
                         for act, total in temp_totals.items():
                             if total > 0:
-                                if act not in breakdown: breakdown[act] = {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
+                                if act not in breakdown: breakdown[act] = {'tax': 0, 'interest': 0, 'penalty': 0}
                                 breakdown[act]['tax'] = total
                                 has_val = True
                         

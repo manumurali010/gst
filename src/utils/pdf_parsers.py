@@ -3,6 +3,7 @@ import re
 import os
 import logging
 from src.utils.date_utils import normalize_financial_year
+from src.utils.number_utils import safe_int
 
 # Set up logger for PDF Parsers
 logger = logging.getLogger("pdf_parsers")
@@ -14,14 +15,7 @@ if not logger.handlers:
     logger.setLevel(logging.INFO)
 
 def _clean_amount(amt_str):
-    if not amt_str: return 0.0
-    # Handle spacing in standard Indian format that might occur (e.g. "1, 12, 123.00")
-    # Our regex captures it, but we need to remove space before float conversion
-    amt_str = amt_str.replace(' ', '').replace(',', '')
-    try:
-        return float(amt_str)
-    except:
-        return 0.0
+    return safe_int(amt_str)
 
 def _extract_fy_from_text(text):
     """
@@ -93,7 +87,7 @@ def parse_gstr3b_pdf_table_3_1_a(file_path):
     Uses robust dynamic column mapping to handle variations in tax head order.
     Returns: {taxable_value, igst, cgst, sgst, cess}
     """
-    results = {"taxable_value": 0.0, "igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
+    results = {"taxable_value": 0, "igst": 0, "cgst": 0, "sgst": 0, "cess": 0}
     if not file_path: return results
 
     try:
@@ -148,7 +142,7 @@ def parse_gstr1_pdf_total_liability(file_path):
     Extracts "Total Liability (Outward supplies other than Reverse charge)" from GSTR-1 PDF.
     Returns: { "igst": float, "cgst": float, "sgst": float, "cess": float }
     """
-    results = { "igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0 }
+    results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
     
     try:
         import fitz
@@ -202,7 +196,7 @@ def parse_gstr3b_pdf_table_3_1_d(file_path):
     Target Row: "(d) Inward supplies liable to reverse charge"
     Returns: { "igst": float, "cgst": float, "sgst": float, "cess": float }
     """
-    results = { "igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0 }
+    results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
     
     try:
         import fitz
@@ -244,7 +238,7 @@ def parse_gstr3b_pdf_table_4_a_2_3(file_path):
     4(A)(3): Inward supplies liable to reverse charge (other than 1 & 2 above)
     Returns: { "igst": float, "cgst": float, "sgst": float, "cess": float }
     """
-    results = { "igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0 }
+    results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
     
     try:
         import fitz
@@ -317,7 +311,7 @@ def parse_gstr3b_pdf_table_4_a_4(file_path):
     2. Searches strictly within this block.
     3. Returns None if table/row not found or ambiguous.
     """
-    results = { "igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0 }
+    results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
     
     try:
         import fitz
@@ -385,7 +379,7 @@ def parse_gstr3b_pdf_table_4_a_5(file_path):
     2. Uses strict anchoring for row (5) "All other ITC".
     3. Fails if headers or data are ambiguous (No guessing).
     """
-    results = { "igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0 }
+    results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
     
     try:
         print(f"DEBUG: Starting strict parse of GSTR-3B PDF: {file_path}")
@@ -505,7 +499,7 @@ def parse_gstr3b_pdf_table_4_a_1(file_path):
     Extracts ITC from Table 4(A)(1) - Import of Goods.
     Returns: {igst, cgst, sgst, cess}
     """
-    results = { "igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0 }
+    results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
     if not file_path: return results
 
     try:
@@ -586,7 +580,7 @@ def parse_gstr3b_metadata(file_path):
         
         for k in meta["itc"]:
             val = (r1.get(k, 0) if r1 else 0) + (r23.get(k, 0) if r23 else 0) + (r4.get(k, 0) if r4 else 0) + (r5.get(k, 0) if r5 else 0)
-            meta["itc"][k] = float(f"{val:.2f}")
+            meta["itc"][k] = safe_int(val)
 
     except Exception as e:
         logger.error(f"Error extracting GSTR-3B metadata from {file_path}: {e}")
@@ -657,7 +651,7 @@ def _parse_3_1_row(file_path, row_regex):
     2. Returns 'None' if Row Label IS found but NO numeric values are extracted.
     3. Returns dict only if valid data is extracted.
     """
-    vals = {'taxable_value': 0.0, 'igst': 0.0, 'cgst': 0.0, 'sgst': 0.0, 'cess': 0.0}
+    vals = {'taxable_value': 0, 'igst': 0, 'cgst': 0, 'sgst': 0, 'cess': 0}
     try:
         import fitz
         doc = fitz.open(file_path)
@@ -741,7 +735,7 @@ def parse_gstr3b_pdf_table_4_b_1(file_path):
     Extracts Table 4(B)(1) ITC Reversed (Rule 42 & 43).
     Columns: I, C, S, Cess. (Taxable Value not applicable).
     """
-    vals = {'igst': 0.0, 'cgst': 0.0, 'sgst': 0.0, 'cess': 0.0}
+    vals = {'igst': 0, 'cgst': 0, 'sgst': 0, 'cess': 0}
     try:
         import fitz
         doc = fitz.open(file_path)

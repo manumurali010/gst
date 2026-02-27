@@ -1,10 +1,11 @@
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                            QTableWidget, QTableWidgetItem, QPushButton, 
+                            QTableWidget, QTableWidgetItem, QPushButton, QSizePolicy,
                             QFrame, QCheckBox, QAbstractItemView, QHeaderView)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QFont
 from src.utils.formatting import format_indian_number
+from src.utils.number_utils import safe_int
 
 from src.ui.components.modern_card import ModernCard
 
@@ -163,12 +164,14 @@ class FinalizationPanel(QWidget):
         # --- PREVIEW BROWSER (New) ---
         from PyQt6.QtWebEngineWidgets import QWebEngineView
         self.browser = QWebEngineView()
-        self.browser.setMinimumHeight(600)
+        self.browser.setMinimumHeight(120)
+        self.browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.browser.setStyleSheet("border: 1px solid #bdc3c7;")
-        # Hidden by default, toggled via UI or logic? 
-        # User requested "Preview Panel Must Be Visible". 
-        # Let's show it by default or allow collapsing the summary.
         self.layout.addWidget(self.browser)
+        
+        # Set individual stretch factors
+        self.layout.setStretch(0, 0) # Summary Card
+        self.layout.setStretch(1, 1) # Browser
         
         # --- 5. ACTION FOOTER (Always Visible) ---
         footer_frame = QFrame()
@@ -215,7 +218,7 @@ class FinalizationPanel(QWidget):
         footer_layout.addWidget(self.refresh_btn)
         
         # Preview Button (PDF)
-        self.pdf_btn = QPushButton("👁 Draft PDF")
+        self.pdf_btn = QPushButton("⬇️ Download Draft PDF")
         self.pdf_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pdf_btn.setStyleSheet("""
             QPushButton {
@@ -233,7 +236,7 @@ class FinalizationPanel(QWidget):
         footer_layout.addWidget(self.pdf_btn)
 
         # DOCX Button
-        self.docx_btn = QPushButton("📝 Draft DOCX")
+        self.docx_btn = QPushButton("⬇️ Download Draft Word")
         self.docx_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.docx_btn.setStyleSheet("""
             QPushButton {
@@ -353,13 +356,13 @@ class FinalizationPanel(QWidget):
         # 3. Issues List
         issue_names = []
         act_totals = {
-            'CGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0},
-            'SGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0},
-            'IGST': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0},
-            'Cess': {'tax': 0.0, 'interest': 0.0, 'penalty': 0.0}
+            'CGST': {'tax': 0, 'interest': 0, 'penalty': 0},
+            'SGST': {'tax': 0, 'interest': 0, 'penalty': 0},
+            'IGST': {'tax': 0, 'interest': 0, 'penalty': 0},
+            'Cess': {'tax': 0, 'interest': 0, 'penalty': 0}
         }
         
-        grand_total = 0.0
+        grand_total = 0
         
         # Handle both list of dicts (from DB) or list of objects (IssueCard)
         for issue in issues_list:
@@ -387,9 +390,9 @@ class FinalizationPanel(QWidget):
             # Aggregate Totals
             for act, vals in breakdown.items():
                 if act in act_totals:
-                    t = float(vals.get('tax', 0))
-                    i = float(vals.get('interest', 0))
-                    p = float(vals.get('penalty', 0))
+                    t = safe_int(vals.get('tax', 0))
+                    i = safe_int(vals.get('interest', 0))
+                    p = safe_int(vals.get('penalty', 0))
                     
                     act_totals[act]['tax'] += t
                     act_totals[act]['interest'] += i

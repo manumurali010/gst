@@ -6,6 +6,7 @@ import os
 import json
 from src.database.db_manager import DatabaseManager
 from src.utils.formatting import format_indian_number
+from src.utils.number_utils import safe_int
 
 class CaseManagement(QWidget):
     def __init__(self, wizard_callback):
@@ -323,19 +324,13 @@ class CaseManagement(QWidget):
                 try: demands = json.loads(demands)
                 except: demands = []
             
-            cgst = sgst = igst = cess = total = 0.0
+            cgst = sgst = igst = cess = total = 0
             for d in demands:
                 breakdown = d.get('tax_breakdown', {})
-                
-                def safe_float(val):
-                    if not val: return 0.0
-                    try: return float(val)
-                    except: return 0.0
-
-                cgst += safe_float(breakdown.get('CGST', {}).get('tax', 0))
-                sgst += safe_float(breakdown.get('SGST', {}).get('tax', 0))
-                igst += safe_float(breakdown.get('IGST', {}).get('tax', 0))
-                cess += safe_float(breakdown.get('Cess', {}).get('tax', 0))
+                cgst += safe_int(breakdown.get('CGST', {}).get('tax', 0))
+                sgst += safe_int(breakdown.get('SGST', {}).get('tax', 0))
+                igst += safe_int(breakdown.get('IGST', {}).get('tax', 0))
+                cess += safe_int(breakdown.get('Cess', {}).get('tax', 0))
             
             total = cgst + sgst + igst + cess
             
@@ -633,13 +628,13 @@ class CaseManagement(QWidget):
         
         # B. Issues List
         try:
-            cgst = float(self.get_safe_val(data, ["CGST_Demand"], "0"))
-            sgst = float(self.get_safe_val(data, ["SGST_Demand"], "0"))
-            igst = float(self.get_safe_val(data, ["IGST_Demand"], "0"))
-            cess = float(self.get_safe_val(data, ["Cess_Demand"], "0"))
-            total = float(self.get_safe_val(data, ["Total_Demand"], "0"))
+            cgst = safe_int(self.get_safe_val(data, ["CGST_Demand"], "0"))
+            sgst = safe_int(self.get_safe_val(data, ["SGST_Demand"], "0"))
+            igst = safe_int(self.get_safe_val(data, ["IGST_Demand"], "0"))
+            cess = safe_int(self.get_safe_val(data, ["Cess_Demand"], "0"))
+            total = safe_int(self.get_safe_val(data, ["Total_Demand"], "0"))
         except:
-            cgst=sgst=igst=cess=total=0.0
+            cgst=sgst=igst=cess=total=0
             
         issues_title = QLabel("Issues Involved")
         issues_title.setStyleSheet("font-weight: bold; margin-top: 10px;")

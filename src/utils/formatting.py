@@ -1,3 +1,4 @@
+from src.utils.number_utils import safe_int
 
 def format_indian_number(value, prefix_rs=False):
     """
@@ -12,10 +13,7 @@ def format_indian_number(value, prefix_rs=False):
         str: Formatted string (e.g., "1,23,456", "Rs. 1,000", "0", "Rs. 0").
     """
     try:
-        if value is None or value == "":
-            num = 0
-        else:
-            num = float(value)
+        num = safe_int(value)
     except (ValueError, TypeError):
         return str(value) # Return as-is if not numeric
 

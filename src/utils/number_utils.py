@@ -1,3 +1,32 @@
+def safe_int(val):
+    """
+    Standardizes monetary conversion to integers project-wide.
+    - Handles None, empty strings, and "null".
+    - Removes commas and currency symbols (₹, Rs., etc.).
+    - Implements Round Half Up logic for decimal strings.
+    - Always returns int.
+    """
+    if val in (None, "", "null", "None"):
+        return 0
+    
+    if isinstance(val, (int, float)):
+        # Apply Round Half Up
+        return int(val + 0.5) if val >= 0 else int(val - 0.5)
+        
+    if isinstance(val, str):
+        # Clean string
+        clean = val.replace(',', '').replace('₹', '').replace('Rs.', '').replace('Rs', '').strip()
+        if not clean:
+            return 0
+        try:
+            # Handle potential float string
+            f = float(clean)
+            return int(f + 0.5) if f >= 0 else int(f - 0.5)
+        except (ValueError, TypeError):
+            return 0
+            
+    return 0
+
 def amount_to_words(amount):
     """
     Convert a floating point number to Indian Currency words.

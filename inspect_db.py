@@ -1,41 +1,35 @@
 import sqlite3
-import json
 import os
 
-DB_PATH = r"data\adjudication.db"
-
-def inspect_proceedings():
-    if not os.path.exists(DB_PATH):
-        print(f"Database not found at {DB_PATH}")
-        return
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Get the most recent proceeding
+def check_sop_points():
+    db_path = os.path.join(os.path.dirname(__file__), 'data', 'adjudication.db')
+    print(f"Connecting to {db_path}...")
     try:
-        cursor.execute("SELECT id, taxpayer_details FROM proceedings ORDER BY id DESC LIMIT 1")
-        row = cursor.fetchone()
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
         
-        if row:
-            print(f"Propceeding ID: {row[0]}")
-            tp_details = row[1]
-            print(f"Raw Taxpayer Details: {tp_details}")
+        issues = ('LIABILITY_3B_R1', 'RCM_3B_VS_CASH', 'RCM_ITC_VS_CASH', 'RCM_ITC_VS_2B', 'RCM_CASH_VS_2B')
+        placeholders = ','.join('?' for _ in issues)
+        query = f"SELECT issue_id, category, description, sop_point FROM issues_master WHERE issue_id IN ({placeholders})"
+        
+        c.execute(query, issues)
+        rows = c.fetchall()
+        
+        print("\n--- DB RESULTS ---")
+        if not rows:
+            print("No matching rows found. Are these issue_ids in this database?")
             
-            if tp_details:
-                try:
-                    tp = json.loads(tp_details)
-                    print(f"Parsed Taxpayer Details: {json.dumps(tp, indent=2)}")
-                    print(f"Constitution of Business: {tp.get('Constitution of Business', 'NOT FOUND')}")
-                except json.JSONDecodeError:
-                    print("Failed to parse taxpayer_details JSON")
-        else:
-            print("No proceedings found")
+        for row in rows:
+            print(f"ID: {row[0]}")
+            print(f"Category: {row[1]}")
+            print(f"SOP Point: {repr(row[3])} (Type: {type(row[3])})")
+            print("-" * 30)
             
     except Exception as e:
         print(f"Error: {e}")
     finally:
-        conn.close()
+        if 'conn' in locals():
+            conn.close()
 
 if __name__ == "__main__":
-    inspect_proceedings()
+    check_sop_points()

@@ -1,6 +1,7 @@
 import json
 import re
 from src.utils.config_manager import ConfigManager
+from src.utils.number_utils import safe_int
 from jinja2 import Template, Environment, FileSystemLoader
 
 class SCNRenderer:
@@ -155,7 +156,7 @@ class SCNRenderer:
                 # Totals
                 breakdown = issue.get('tax_breakdown', {})
                 for act, vals in breakdown.items():
-                    tax = vals.get('tax', 0)
+                    tax = safe_int(vals.get('tax', 0))
                     total_tax += tax
                     if act == 'IGST': igst_total += tax
                     elif act == 'CGST': cgst_total += tax
@@ -256,10 +257,10 @@ class SCNRenderer:
             def fmt(v):
                 try: 
                     # Handle string "0"
-                    f = float(v)
-                    return f"{f:,.2f}"
+                    f = safe_int(v)
+                    return f"{f:,}"
                 except: 
-                    return "0.00"
+                    return "0"
                 
             # Fonts & Styles
             font_family = "Bookman Old Style"
@@ -439,8 +440,8 @@ class SCNRenderer:
                                      
                                      # Zero check logic
                                      try:
-                                         fval = float(str(val_str).replace(',', '').strip())
-                                         if fval != 0: all_zeros = False
+                                         ival = safe_int(val_str)
+                                         if ival != 0: all_zeros = False
                                      except:
                                          # If text (e.g. Description), it's not a zero.
                                          if val_str.strip() and val_str.strip() not in ['0', '0.00']:

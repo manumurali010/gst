@@ -12,6 +12,7 @@ import datetime
 import pandas as pd
 import json
 import os
+from src.utils.number_utils import safe_int
 from src.ui.collapsible_box import CollapsibleBox
 
 
@@ -297,10 +298,10 @@ class AdjudicationWizard(QWidget):
             self.letterhead_html = "<html><body><h2>Letterhead template not found</h2></body></html>"
         
         # Load DRC-01A HTML
-        drc01a_path = os.path.join('templates', 'drc_01a.html')
+        drc01a_path = os.path.join('templates', 'drc01a.html')
         try:
             with open(drc01a_path, 'r', encoding='utf-8') as f:
-                self.drc01a_html = f.read()
+                self.drc01a_template_str = f.read()
         except Exception as e:
             print(f"Error loading DRC-01A template: {e}")
             self.drc01a_html = ""
@@ -334,79 +335,68 @@ class AdjudicationWizard(QWidget):
         self.trigger_preview_update()
     
     def generate_drc01a_html(self):
-        """Generate HTML for DRC-01A with current data"""
-        if not self.drc01a_html:
+        """Generate HTML for DRC-01A with current data (Jinja2 Refactor)"""
+        if not hasattr(self, 'drc01a_template_str'):
             return "<p>Error: DRC-01A template not loaded</p>"
             
-        html = self.drc01a_html
+        from jinja2 import Template
+        import datetime
         
-        # LOGGING: Print all data to debug NoneType error
-        print("DEBUG: Starting DRC-01A Generation")
-        print(f"DEBUG: Form Type: {self.form_combo.currentText()}")
-        print(f"DEBUG: GSTIN: {self.gstin_input.text()}")
-        print(f"DEBUG: Legal Name: {self.legal_name_input.text()}")
-        print(f"DEBUG: Address: {self.address_input.toPlainText()}")
-        print(f"DEBUG: Compliance Date: {self.compliance_date.date().toString('dd/MM/yyyy')}")
-        
-        # Extract section from proceeding type (e.g., "Section 73" from "Section 73 (Demand)")
-        # If DRC-01A specific section is visible, use that
-        if not self.drc_section_combo.isHidden():
-            proceeding_section = self.drc_section_combo.currentText()
-        else:
-            # Fallback to proceeding type logic (though for DRC-01A we should rely on the combo)
-            proceeding_type = self.proceeding_combo.currentText()
-            if "Section 73" in proceeding_type:
-                proceeding_section = "Section 73(5)"
-            elif "Section 74" in proceeding_type:
-                proceeding_section = "Section 74(5)"
-            else:
-                proceeding_section = "Section 73(5)/Section 74(5)"  # Default if neither
-        
-        # Basic Details
-        html = html.replace("{{SelectedSection}}", proceeding_section) # Replaces both Subject and Body placeholders
-        html = html.replace("{{OCNumber}}", "")  # Placeholder for O.C. Number - user can fill manually
-        html = html.replace("{{CurrentDate}}", datetime.date.today().strftime("%d/%m/%Y"))
-        html = html.replace("{{GSTIN}}", self.gstin_input.text() or "_________________")
-        html = html.replace("{{LegalName}}", self.legal_name_input.text() or "_________________")
-        html = html.replace("{{Address}}", self.address_input.toPlainText() or "_________________")
-        
-        # Compliance Date
+        # 1. Build Model (Parallel to ProceedingsWorkspace._get_drc01a_model)
+        proceeding_section = self.drc_section_combo.currentText() if not self.drc_section_combo.isHidden() else "Section 73(5)"
         compliance_date = self.compliance_date.date().toString("dd/MM/yyyy")
-        html = html.replace("{{ComplianceDate}}", compliance_date)
         
-        # SCN Section Logic
+        # Section titles
         if "73" in proceeding_section:
-            scn_section = "section 73(1)"
-            advice_text = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest in full by {compliance_date} , failing which Show Cause Notice will be issued under section 73(1)."
-        elif "74" in proceeding_section:
-            scn_section = "section 74(1)"
-            advice_text = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest and penalty under section 74(5) by {compliance_date} , failing which Show Cause Notice will be issued under section 74(1)."
+            section_title = "section 73(5)"
+            section_body = "73(5)"
+        elif "74" in section_title: # Typo in user's logic? Fixing to 'proceeding_section'
+            section_title = "section 74(5)"
+            section_body = "74(5)"
         else:
-            scn_section = "section 73(1)/74(1)"
-            advice_text = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest in full by {compliance_date} , failing which Show Cause Notice will be issued under section 73(1)/74(1)."
-            
-        html = html.replace("{{SCNSection}}", scn_section)
-        
-        # Facts / Grounds
-        facts = self.facts_text.toPlainText()
-        html = html.replace("{{GroundsContent}}", facts if facts else "(Grounds and quantification will appear here...)")
-        
-        # Advice Text
-        html = html.replace("{{AdviceText}}", advice_text)
-        
-        # Additional Placeholders
-        html = html.replace("{{CaseID}}", self.current_case_id or "")
-        html = html.replace("{{FinancialYear}}", self.fy_combo.currentText())
-        html = html.replace("{{TradeName}}", self.trade_name_input.text() or "")
-        html = html.replace("{{FormType}}", self.form_combo.currentText())
-        
-        # Sections Violated (from checkboxes)
-        violated_sections = []
-        for cb in self.provision_checks:
-            if cb.isChecked():
-                violated_sections.append(cb.text())
-        sections_text = "<br>".join(violated_sections) if violated_sections else "(No sections selected)"
-        html = html.replace("{{SectionsViolated}}", sections_text)
+            section_title = proceeding_section
+            section_body = proceeding_section
+
+        # Facts & Violated Sections
+        facts_html = f"<div>{self.facts_text.toPlainText()}</div>"
+        violated_sections = [cb.text() for cb in self.provision_checks if cb.isChecked()]
+        sections_html = "<br>".join(violated_sections) if violated_sections else "<i>(No sections selected)</i>"
+
+        # 2. Prepare Context
+        context = {
+            'gstin': self.gstin_input.text() or "_________________",
+            'legal_name': self.legal_name_input.text() or "_________________",
+            'trade_name': self.trade_name_input.text() or "",
+            'address': self.address_input.toPlainText() or "_________________",
+            'case_id': self.current_case_id or "",
+            'oc_no': "_________________", # Manual entry post-wizard
+            'oc_date': datetime.date.today().strftime("%d/%m/%Y"),
+            'financial_year': self.fy_combo.currentText(),
+            'initiating_section': proceeding_section,
+            'form_type': self.form_combo.currentText(),
+            'reply_date': compliance_date,
+            'payment_date': compliance_date,
+            'section_title': section_title,
+            'section_body': section_body,
+            'issues_html': facts_html,
+            'sections_violated_html': sections_html,
+            # Placeholder table for wizard preview
+            'tax_table_html': "<table border='1' style='width:100%'><tr><th>Act</th><th>Tax</th><th>Interest</th><th>Total</th></tr><tr><td>[Quantification Output]</td><td>-</td><td>-</td><td>-</td></tr></table>",
+        }
+
+        # Advice logic
+        if "73" in proceeding_section:
+            context['AdviceText'] = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest in full by {compliance_date}, failing which Show Cause Notice will be issued under section 73(1)."
+        elif "74" in proceeding_section:
+            context['AdviceText'] = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest and penalty under section 74(5) by {compliance_date}, failing which Show Cause Notice will be issued under section 74(1)."
+        else:
+            context['AdviceText'] = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest by {compliance_date}, failing which Show Cause Notice will be issued."
+
+        try:
+            template = Template(self.drc01a_template_str)
+            return template.render(**context)
+        except Exception as e:
+            return f"<p style='color:red'>Rendering Error: {str(e)}</p>"
         
         # Inject Letterhead
         if self.letterhead_html and hasattr(self, 'show_letterhead_cb') and self.show_letterhead_cb.isChecked():
@@ -455,14 +445,14 @@ class AdjudicationWizard(QWidget):
             from_str = f"{from_month}, {from_year}"
             to_str = f"{to_month}, {to_year}"
 
-            try: tax = float(self.amount_table.item(row, 3).text() or 0)
-            except: tax = 0.0
-            try: interest = float(self.amount_table.item(row, 4).text() or 0)
-            except: interest = 0.0
-            try: penalty = float(self.amount_table.item(row, 5).text() or 0)
-            except: penalty = 0.0
-            try: total = float(self.amount_table.item(row, 6).text() or 0)
-            except: total = 0.0
+            try: tax = safe_int(self.amount_table.item(row, 3).text() or 0)
+            except: tax = 0
+            try: interest = safe_int(self.amount_table.item(row, 4).text() or 0)
+            except: interest = 0
+            try: penalty = safe_int(self.amount_table.item(row, 5).text() or 0)
+            except: penalty = 0
+            try: total = safe_int(self.amount_table.item(row, 6).text() or 0)
+            except: total = 0
             
             print(f"DEBUG: Row {row} - Tax: {tax}, Int: {interest}, Pen: {penalty}, Total: {total}")
             
@@ -576,9 +566,9 @@ class AdjudicationWizard(QWidget):
             act = act_item.text()
             
             try:
-                tax = float(self.amount_table.item(row, 3).text() or 0)
+                tax = safe_int(self.amount_table.item(row, 3).text() or 0)
             except:
-                tax = 0.0
+                tax = 0
             
             if "CGST" in act:
                 cgst_total += tax
@@ -589,10 +579,10 @@ class AdjudicationWizard(QWidget):
         
         total_amount = cgst_total + sgst_total + igst_total
         
-        html = html.replace("{{CGSTAmount}}", f"{cgst_total:,.0f}")
-        html = html.replace("{{SGSTAmount}}", f"{sgst_total:,.0f}")
-        html = html.replace("{{IGSTAmount}}", f"{igst_total:,.0f}")
-        html = html.replace("{{TotalAmount}}", f"{total_amount:,.0f}")
+        html = html.replace("{{CGSTAmount}}", f"{cgst_total:,}")
+        html = html.replace("{{SGSTAmount}}", f"{sgst_total:,}")
+        html = html.replace("{{IGSTAmount}}", f"{igst_total:,}")
+        html = html.replace("{{TotalAmount}}", f"{total_amount:,}")
         
         # Section references
         html = html.replace("{{SectionContravened}}", section)

@@ -156,15 +156,15 @@ def init_db(db_file=None):
     );
     """)
 
-    # 7. Issues Data Table (Full JSON)
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS issues_data (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        issue_id TEXT NOT NULL,
-        issue_json TEXT NOT NULL, -- Full JSON Object
-        FOREIGN KEY (issue_id) REFERENCES issues_master(issue_id) ON DELETE CASCADE
-    );
-    """)
+    # 7. Issues Data Table (Full JSON) [RETIRED]
+    # cursor.execute("""
+    # CREATE TABLE IF NOT EXISTS issues_data (
+    #     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    #     issue_id TEXT NOT NULL,
+    #     issue_json TEXT NOT NULL, -- Full JSON Object
+    #     FOREIGN KEY (issue_id) REFERENCES issues_master(issue_id) ON DELETE CASCADE
+    # );
+    # """)
 
     # 8. OC Register Table
     cursor.execute("""
@@ -218,12 +218,12 @@ def init_db(db_file=None):
     except: pass
 
     
-    # Migration: Add liability columns if missing
+    # Migration: Add liability columns if missing [RETIRED for issues_data]
     lib_cols = [
         ("issues_master", "liability_config TEXT"),
-        ("issues_master", "tax_demand_mapping TEXT"),
-        ("issues_data", "liability_config TEXT"),
-        ("issues_data", "tax_demand_mapping TEXT")
+        ("issues_master", "tax_demand_mapping TEXT")
+        # ("issues_data", "liability_config TEXT"),
+        # ("issues_data", "tax_demand_mapping TEXT")
     ]
     for table, col_def in lib_cols:
         try: cursor.execute(f"ALTER TABLE {table} ADD COLUMN {col_def}")
@@ -353,21 +353,54 @@ def init_db(db_file=None):
             END;
         """)
         
-        # [PHASE 5] Strict DRC-01A Immutability
-        cursor.execute("DROP TRIGGER IF EXISTS block_drc01a_modification")
+        # [PHASE 5] Strict DRC-01A Immutability (Splitted Triggers for SQLite Support)
+        cursor.execute("DROP TRIGGER IF EXISTS block_drc01a_insert")
         cursor.execute("""
-            CREATE TRIGGER block_drc01a_modification
-            BEFORE INSERT OR UPDATE OR DELETE ON case_issues
+            CREATE TRIGGER block_drc01a_insert
+            BEFORE INSERT ON case_issues
             FOR EACH ROW
-            WHEN NEW.stage = 'DRC-01A' OR OLD.stage = 'DRC-01A'
+            WHEN NEW.stage = 'DRC-01A'
             BEGIN
                 SELECT
                     CASE
-                        WHEN (SELECT workflow_stage FROM adjudication_cases WHERE id = COALESCE(NEW.proceeding_id, OLD.proceeding_id)) >= 40 
+                        WHEN (SELECT workflow_stage FROM adjudication_cases WHERE id = NEW.proceeding_id) >= 40 
                         THEN RAISE(FAIL, 'Modification Blocked: DRC-01A is already issued.')
                     END;
             END;
         """)
+
+        cursor.execute("DROP TRIGGER IF EXISTS block_drc01a_update")
+        cursor.execute("""
+            CREATE TRIGGER block_drc01a_update
+            BEFORE UPDATE ON case_issues
+            FOR EACH ROW
+            WHEN OLD.stage = 'DRC-01A' OR NEW.stage = 'DRC-01A'
+            BEGIN
+                SELECT
+                    CASE
+                        WHEN (SELECT workflow_stage FROM adjudication_cases WHERE id = NEW.proceeding_id) >= 40 
+                        THEN RAISE(FAIL, 'Modification Blocked: DRC-01A is already issued.')
+                    END;
+            END;
+        """)
+
+        cursor.execute("DROP TRIGGER IF EXISTS block_drc01a_delete")
+        cursor.execute("""
+            CREATE TRIGGER block_drc01a_delete
+            BEFORE DELETE ON case_issues
+            FOR EACH ROW
+            WHEN OLD.stage = 'DRC-01A'
+            BEGIN
+                SELECT
+                    CASE
+                        WHEN (SELECT workflow_stage FROM adjudication_cases WHERE id = OLD.proceeding_id) >= 40 
+                        THEN RAISE(FAIL, 'Modification Blocked: DRC-01A is already issued.')
+                    END;
+            END;
+        """)
+        
+        # Cleanup legacy consolidated trigger
+        cursor.execute("DROP TRIGGER IF EXISTS block_drc01a_modification")
     except Exception as e:
         print(f"Warning creating immutability triggers: {e}")
 

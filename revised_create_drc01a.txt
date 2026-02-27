@@ -1,0 +1,220 @@
+    def create_drc01a_tab(self):
+        print("ProceedingsWorkspace: create_drc01a_tab start (4-Step Refactor)")
+        # Initialize
+        self.issue_cards = []
+        self.ACT_PRIORITY = ["IGST", "CGST", "SGST", "UTGST", "Cess"]
+        
+        # Debounce timer for preview refresh
+        self.drc01a_refresh_timer = QtCore.QTimer()
+        self.drc01a_refresh_timer.setSingleShot(True)
+        self.drc01a_refresh_timer.timeout.connect(self._run_refresh_step4)
+
+        # --- DRAFT CONTAINER ---
+        self.drc01a_draft_container = QWidget()
+        draft_layout = QVBoxLayout(self.drc01a_draft_container)
+        draft_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # --- STEP 1: Reference Details ---
+        ref_widget = QWidget()
+        ref_layout = QVBoxLayout(ref_widget)
+        ref_layout.setContentsMargins(20, 20, 20, 20)
+        
+        ref_card = QWidget()
+        ref_card.setStyleSheet("background-color: white; border: 1px solid #e0e0e0; border-radius: 8px;")
+        ref_inner = QVBoxLayout(ref_card)
+        
+        ref_grid = QGridLayout()
+        ref_grid.setSpacing(15)
+        
+        ref_grid.addWidget(QLabel("OC No (Intimation):"), 0, 0)
+        self.oc_number_input = QLineEdit()
+        ref_grid.addWidget(self.oc_number_input, 0, 1)
+        
+        suggest_btn = QPushButton("Get Next")
+        suggest_btn.clicked.connect(lambda: self.suggest_next_oc(self.oc_number_input))
+        ref_grid.addWidget(suggest_btn, 0, 2)
+        
+        ref_grid.addWidget(QLabel("OC Date:"), 0, 3)
+        self.oc_date_input = QDateEdit()
+        self.oc_date_input.setCalendarPopup(True)
+        self.oc_date_input.setDate(QDate.currentDate())
+        ref_grid.addWidget(self.oc_date_input, 0, 4)
+
+        ref_grid.addWidget(QLabel("Financial Year:"), 1, 0)
+        lbl_fy = QLabel(f"<b>{self.proceeding_data.get('financial_year', 'N/A')}</b>")
+        ref_grid.addWidget(lbl_fy, 1, 1)
+
+        ref_grid.addWidget(QLabel("Adjudication Section:"), 1, 3)
+        sec_val = self.proceeding_data.get('adjudication_section', 'N/A')
+        self.section_display = QLabel(f"<b>{sec_val}</b>")
+        self.section_display.setStyleSheet("color: #e67e22; padding: 4px; background: #fff3e0; border-radius: 4px;")
+        ref_grid.addWidget(self.section_display, 1, 4)
+        
+        ref_grid.addWidget(QLabel("Proper Officer:"), 2, 0)
+        self.officer_name_input = QLineEdit()
+        self.officer_name_input.setPlaceholderText("Name of Issuing Officer")
+        ref_grid.addWidget(self.officer_name_input, 2, 1, 1, 4)
+        
+        ref_inner.addLayout(ref_grid)
+        ref_layout.addWidget(ref_card)
+        ref_layout.addStretch()
+
+        # --- STEP 2: Issues Involved ---
+        issues_widget = QWidget()
+        issues_vbox = QVBoxLayout(issues_widget)
+        issues_vbox.setContentsMargins(0,0,0,0)
+        issues_vbox.setSpacing(0)
+        
+        # Toolbar
+        toolbar = QWidget()
+        toolbar.setStyleSheet("background-color: #f8f9fa; border-bottom: 1px solid #e0e0e0;")
+        tb_layout = QHBoxLayout(toolbar)
+        self.issue_combo = QComboBox()
+        self.issue_combo.addItem("Select Issue Template...", None)
+        self.load_issue_templates()
+        tb_layout.addWidget(QLabel("<b>Add Issue:</b>"))
+        tb_layout.addWidget(self.issue_combo, 1)
+        add_btn = QPushButton("Insert")
+        add_btn.setStyleSheet("background-color: #3498db; color: white;")
+        add_btn.clicked.connect(self.insert_selected_issue)
+        tb_layout.addWidget(add_btn)
+        issues_vbox.addWidget(toolbar)
+        
+        # Scroll Area for Issues
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.issues_container = QWidget()
+        self.issues_layout = QVBoxLayout(self.issues_container)
+        self.issues_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.issues_layout.setSpacing(20)
+        self.issues_layout.setContentsMargins(20, 20, 20, 20)
+        scroll.setWidget(self.issues_container)
+        issues_vbox.addWidget(scroll, 1) # Take space
+
+        # Bottom Total Card (Always Visible in Step 2)
+        self.step2_total_card = QFrame()
+        self.step2_total_card.setStyleSheet("background-color: #2c3e50; color: white; border-bottom-left-radius: 0px; border-bottom-right-radius: 0px;")
+        st2_layout = QHBoxLayout(self.step2_total_card)
+        st2_layout.setContentsMargins(20, 15, 20, 15)
+        st2_layout.addWidget(QLabel("<b>Total Liability:</b>"))
+        self.lbl_total_tax = QLabel("₹ 0")
+        self.lbl_total_tax.setStyleSheet("font-size: 16px; font-weight: bold; color: #f1c40f;")
+        st2_layout.addWidget(self.lbl_total_tax)
+        st2_layout.addStretch()
+        issues_vbox.addWidget(self.step2_total_card)
+
+        # --- STEP 3: Compliance & Summary ---
+        comp_widget = QWidget()
+        comp_layout = QVBoxLayout(comp_widget)
+        comp_layout.setContentsMargins(20, 20, 20, 20)
+        comp_layout.setSpacing(20)
+
+        # Dates & Summary Table Grid
+        comp_top_card = QWidget()
+        comp_top_card.setStyleSheet("background: white; border: 1px solid #e0e0e0; border-radius: 8px;")
+        ctc_layout = QVBoxLayout(comp_top_card)
+        
+        date_grid = QGridLayout()
+        date_grid.addWidget(QLabel("<b>Reply Deadline:</b>"), 0, 0)
+        self.reply_deadline_input = QDateEdit()
+        self.reply_deadline_input.setCalendarPopup(True)
+        self.reply_deadline_input.setDate(QDate.currentDate().addDays(15))
+        date_grid.addWidget(self.reply_deadline_input, 0, 1)
+        
+        date_grid.addWidget(QLabel("<b>Payment Deadline:</b>"), 0, 2)
+        self.payment_deadline_input = QDateEdit()
+        self.payment_deadline_input.setCalendarPopup(True)
+        self.payment_deadline_input.setDate(QDate.currentDate().addDays(15))
+        date_grid.addWidget(self.payment_deadline_input, 0, 3)
+        ctc_layout.addLayout(date_grid)
+        
+        # Overarching Legal Provisions (Read-Only Aggregated View)
+        ctc_layout.addWidget(QLabel("<b>Aggregated Legal Provisions (From Issues):</b>"))
+        self.legal_summary_browser = QTextBrowser()
+        self.legal_summary_browser.setMaximumHeight(120)
+        self.legal_summary_browser.setStyleSheet("background: #f8f9fa; border: 1px solid #ddd;")
+        ctc_layout.addWidget(self.legal_summary_browser)
+        
+        comp_layout.addWidget(comp_top_card)
+
+        # Tax Summary Table
+        self.tax_summary_table = QTableWidget()
+        self.tax_summary_table.setColumnCount(6)
+        self.tax_summary_table.setHorizontalHeaderLabels(["Act", "Period", "Tax", "Interest", "Penalty", "Total"])
+        self.tax_summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tax_summary_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tax_summary_table.setStyleSheet("background: white; border: 1px solid #e0e0e0; border-radius: 8px;")
+        comp_layout.addWidget(QLabel("<b>Demand Summary:</b>"))
+        comp_layout.addWidget(self.tax_summary_table)
+
+        # Step 3 Detailed Breakdown Label
+        self.step3_breakdown_lbl = QLabel("")
+        self.step3_breakdown_lbl.setStyleSheet("color: #2c3e50; font-weight: bold; font-size: 11pt;")
+        comp_layout.addWidget(self.step3_breakdown_lbl)
+        comp_layout.addStretch()
+
+        # --- STEP 4: Actions & Finalize ---
+        actions_widget = QWidget()
+        actions_layout = QVBoxLayout(actions_widget)
+        
+        self.step4_browser = QWebEngineView()
+        self.step4_browser.setMinimumHeight(400)
+        actions_layout.addWidget(self.step4_browser)
+        
+        # Action Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        refresh_btn = QPushButton("🔄 Refresh Preview")
+        refresh_btn.clicked.connect(self.trigger_drc01a_refresh)
+        btn_row.addWidget(refresh_btn)
+        
+        pdf_btn = QPushButton("⬇️ Draft PDF")
+        pdf_btn.clicked.connect(lambda: self.export_drc01a(format="pdf"))
+        btn_row.addWidget(pdf_btn)
+        
+        save_btn = QPushButton("Save Draft")
+        save_btn.clicked.connect(self.save_drc01a)
+        btn_row.addWidget(save_btn)
+        
+        finalize_btn = QPushButton("Proceed to Finalize")
+        finalize_btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+        finalize_btn.clicked.connect(self.show_drc01a_finalization_panel)
+        btn_row.addWidget(finalize_btn)
+        btn_row.addStretch()
+        actions_layout.addLayout(btn_row)
+
+        # Side Nav Connection
+        nav_items = [
+            ("Reference Details", "1", ref_widget),
+            ("Issues Involved", "2", issues_widget),
+            ("Compliance & Summary", "3", comp_widget),
+            ("Actions & Finalize", "4", actions_widget)
+        ]
+        side_nav = self.create_side_nav_layout(nav_items)
+        draft_layout.addWidget(side_nav)
+
+        # Containers
+        self.drc01a_view_container = QWidget()
+        self.drc01a_view_container.hide()
+        view_layout = QVBoxLayout(self.drc01a_view_container)
+        view_layout.addWidget(QLabel("<b>DRC-01A Issued</b>"))
+        self.drc01a_browser = QWebEngineView()
+        view_layout.addWidget(self.drc01a_browser, 1)
+
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0,0,0,0)
+        wrapper_layout.addWidget(self.drc01a_draft_container)
+        wrapper_layout.addWidget(self.drc01a_view_container)
+        
+        # Sections Editor (Hidden but used for migration/legacy)
+        self.sections_editor = RichTextEditor()
+        self.sections_editor.hide()
+
+        # Final layout connection
+        self.drc01a_tab_layout.addWidget(wrapper)
+        self.restore_drc01a_draft_state()
+        
+        print("ProceedingsWorkspace: create_drc01a_tab done")
+        return wrapper

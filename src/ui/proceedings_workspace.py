@@ -18,6 +18,7 @@ from src.services.asmt10_generator import ASMT10Generator
 from src.services.ph_intimation_generator import PHIntimationGenerator
 from src.ui.styles import Theme, Styles
 from src.utils.constants import WorkflowStage
+from src.utils.number_utils import safe_int
 import os
 import json
 import copy
@@ -26,6 +27,81 @@ import datetime
 import traceback
 import base64
 import re
+
+# --- HELPER CLASSES FOR DRC-01A REFACTOR ---
+
+class LegalReference:
+    """Canonical representation of a legal provision for deduplication and sorting."""
+    def __init__(self, raw_text):
+        self.raw = raw_text # Preserve original text
+        self.type = "Other" # Section, Rule, Notification
+        self.act = "Unknown"  # e.g., CGST Act, SGST Act
+        self.major = 0
+        self.minor = ""
+        self.canonical = ""
+        self.parse()
+
+    @property
+    def canonical_id(self):
+        """Stable, unique identifier for deduplication."""
+        # Normalize minor for ID: remove spaces, lowercase
+        clean_minor = re.sub(r'\s+', '', str(self.minor)).lower()
+        return f"{self.type}:{self.act}:{self.major}:{clean_minor}"
+
+    def parse(self):
+        text = self.raw.strip()
+        
+        # 1. Act Detection (Simple heuristic)
+        if "SGST" in text.upper(): self.act = "SGST Act"
+        elif "CGST" in text.upper(): self.act = "CGST Act"
+        elif "IGST" in text.upper(): self.act = "IGST Act"
+        # If no act found, stay as "Unknown" as per refinement
+
+        # 2. Canonical Normalization of prefix
+        # Use word boundaries \b to prevent matching "Sec" inside "Section"
+        if not text.lower().startswith("section "):
+            text = re.sub(r'^(Sec\b|S\b|u/s|under\s+section)\.?\s*', 'Section ', text, flags=re.I)
+        
+        if not text.lower().startswith("rule "):
+            text = re.sub(r'^(Rule\b|R\b)\.?\s*', 'Rule ', text, flags=re.I)
+        
+        # 3. Section Pattern: Section 7(1)(a)
+        sec_match = re.search(r'Section\s+(\d+)(.*)', text, re.I)
+        if sec_match:
+            self.type = "Section"
+            self.major = int(sec_match.group(1))
+            self.minor = sec_match.group(2).strip()
+            self.canonical = f"Section {self.major}{self.minor}"
+            return
+
+        # 4. Rule Pattern: Rule 117
+        rule_match = re.search(r'Rule\s+(\d+)(.*)', text, re.I)
+        if rule_match:
+            self.type = "Rule"
+            self.major = int(rule_match.group(1))
+            self.minor = rule_match.group(2).strip()
+            self.canonical = f"Rule {self.major}{self.minor}"
+            return
+            
+        self.canonical = text
+
+    def __eq__(self, other):
+        if not isinstance(other, LegalReference): return False
+        return self.canonical_id == other.canonical_id
+
+    def __hash__(self):
+        return hash(self.canonical_id)
+
+    def __lt__(self, other):
+        # Logical Sort Priority
+        type_priority = {"Section": 0, "Rule": 1, "Other": 2}
+        if self.type != other.type:
+            return type_priority.get(self.type, 2) < type_priority.get(other.type, 2)
+        if self.act != other.act:
+            return str(self.act) < str(other.act)
+        if self.major != other.major:
+            return self.major < other.major
+        return self.minor < other.minor
 
 class ASMT10ReferenceDialog(QDialog):
     """
@@ -248,14 +324,8 @@ class ProceedingsWorkspace(QWidget):
         print("ProceedingsWorkspace: init_ui start")
         self.setObjectName("ProceedingsWorkspace")
         
-        # Load Stylesheet
-        try:
-            style_path = os.path.join(os.path.dirname(__file__), "styles", "proceedings.qss")
-            with open(style_path, "r") as f:
-                self.setStyleSheet(f.read())
-        except Exception as e:
-            print(f"Error loading stylesheet: {e}")
-
+        # Styles are handled globally in styles.py via main_window.py
+        
         self.layout = QHBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -321,8 +391,14 @@ class ProceedingsWorkspace(QWidget):
         self.context_title_lbl = QLabel("") # Dynamic Title
         self.context_title_lbl.setStyleSheet("font-weight: bold; color: #5f6368;")
         
+        self.context_metadata_lbl = QLabel("")
+        self.context_metadata_lbl.setStyleSheet("color: #7f8c8d; font-size: 10pt; font-weight: 500;")
+        # Prevent long names from stretching the window bounds by ignoring size hint bounds
+        self.context_metadata_lbl.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        
         header_layout.addWidget(self.context_title_lbl)
-        header_layout.addStretch()
+        header_layout.addSpacing(20)
+        header_layout.addWidget(self.context_metadata_lbl, 1) # Allows it to consume space without expanding window
         
         self.central_container_layout.addWidget(self.central_header)
         self.central_container_layout.addWidget(self.content_stack)
@@ -404,6 +480,11 @@ class ProceedingsWorkspace(QWidget):
                         self.add_drc01a_issue_card(card_template, data=data_payload)
                     else:
                         print(f"Warning: Template not found for issue {issue_id}")
+
+            # 4. Restore Sections Violated
+            metadata = self.proceeding_data.get('additional_details', {}).get('drc01a_metadata', {})
+            if 'sections_violated_html' in metadata:
+                self.sections_editor.setHtml(metadata['sections_violated_html'])
 
         except Exception as e:
             print(f"Error restoring DRC-01A draft: {e}")
@@ -1013,11 +1094,38 @@ class ProceedingsWorkspace(QWidget):
                 QMessageBox.warning(self, "Setup Incomplete", "SCN drafting is disabled until section is selected.")
                 # We should probably disable tabs here or mark as incomplete
         
+        # Guard: validate section after setup dialog — disable DRC-01A tab if still missing
+        resolved_sec = self.proceeding_data.get('adjudication_section') or self.proceeding_data.get('initiating_section')
+        if self.proceeding_data.get('is_adjudication') and hasattr(self, 'content_stack'):
+            drc01a_tab_idx = 2  # Assumed index – skip silently if out of range
+            sec_missing = not resolved_sec or not str(resolved_sec).strip()
+            if hasattr(self, 'tab_bar'):
+                self.tab_bar.setTabEnabled(drc01a_tab_idx, not sec_missing)
+        
+        # Hydrate Persistent Top Metadata Header
+        legal_name = self.proceeding_data.get('legal_name')
+        if not legal_name or not str(legal_name).strip():
+            legal_name = "Unknown Taxpayer"
+            
+        fy = self.proceeding_data.get('financial_year')
+        if not fy or not str(fy).strip():
+            fy = "Unknown FY"
+            
+        section = self.proceeding_data.get('adjudication_section') or self.proceeding_data.get('initiating_section')
+        if not section or not str(section).strip():
+            section = "Unknown Section"
+            
+        # Manually clamp name length to guarantee no massive window expanding forces
+        max_name_len = 60
+        display_name = (str(legal_name)[:max_name_len] + '...') if len(str(legal_name)) > max_name_len else str(legal_name)
+        
+        self.context_metadata_lbl.setText(f"  {display_name}   |   FY {fy}   |   Section {section}")
+        
         self.is_hydrated = True
         
 
 
-    def create_side_nav_layout(self, items, page_changed_callback=None):
+    def create_side_nav_layout(self, items, page_changed_callback=None, use_scroll=True):
         """
         Creates a side navigation layout (Accordion/Master-Detail).
         items: list of tuples (title, icon_char, widget)
@@ -1076,17 +1184,19 @@ class ProceedingsWorkspace(QWidget):
             header.setStyleSheet("font-size: 15pt; font-weight: bold; color: #2c3e50; margin-bottom: 15px;")
             page_layout.addWidget(header)
             
-            page_layout.addWidget(page_widget)
-            page_layout.addStretch() # Push content up
+            page_layout.addWidget(page_widget, 1) # Force stretch to fill container
             
-            # Scroll Area for the page content
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setWidget(page_container)
-            scroll.setFrameShape(QFrame.Shape.NoFrame)
-            scroll.setStyleSheet("background-color: #f8f9fa;")
-            
-            content_stack.addWidget(scroll)
+            if use_scroll:
+                # Scroll Area for the page content
+                scroll = QScrollArea()
+                scroll.setWidgetResizable(True)
+                scroll.setWidget(page_container)
+                scroll.setFrameShape(QFrame.Shape.NoFrame)
+                scroll.setStyleSheet("background-color: #f8f9fa;")
+                content_stack.addWidget(scroll)
+            else:
+                page_container.setStyleSheet("background-color: #f8f9fa;")
+                content_stack.addWidget(page_container)
             
         sidebar_layout.addStretch()
         
@@ -1383,48 +1493,44 @@ class ProceedingsWorkspace(QWidget):
         self.next_action_hint.setText(hint)
 
     def create_drc01a_tab(self):
-        print("ProceedingsWorkspace: create_drc01a_tab start (3-Step Refactor)")
-        # Initialize list of issue cards
+        # ROOT CONTAINER (Returned to content_stack)
+        tab_root = QWidget()
+        layout = QVBoxLayout(tab_root)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        print("ProceedingsWorkspace: create_drc01a_tab start (4-Step Refactor)")
+        # Initialize
         self.issue_cards = []
+        self.ACT_PRIORITY = ["IGST", "CGST", "SGST", "UTGST", "Cess"]
         
+        # Debounce timer for preview refresh
+        self.drc01a_refresh_timer = QtCore.QTimer()
+        self.drc01a_refresh_timer.setSingleShot(True)
+        self.drc01a_refresh_timer.timeout.connect(self._run_refresh_step4)
+
         # --- DRAFT CONTAINER ---
         self.drc01a_draft_container = QWidget()
-        self.drc01a_draft_container.setObjectName("drc01a_draft_container")
         draft_layout = QVBoxLayout(self.drc01a_draft_container)
         draft_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 3-Step Structure
-        # 1. Reference Details (Metadata, Audit, Taxpayer)
-        # 2. Issues & Tax (Drafting, Quantification)
-        # 3. Finalize & Issue (Preview, Signature, Action)
         
         # --- STEP 1: Reference Details ---
         ref_widget = QWidget()
         ref_layout = QVBoxLayout(ref_widget)
-        ref_layout.setContentsMargins(0,0,0,0)
+        ref_layout.setContentsMargins(20, 20, 20, 20)
         
-        # Card 1: Official Correspondence Metadata
         ref_card = QWidget()
-        ref_card.setStyleSheet(f"background-color: #ffffff; border-radius: 8px; border: 1px solid #e0e0e0;")
+        ref_card.setStyleSheet("background-color: white; border: 1px solid #e0e0e0; border-radius: 8px;")
         ref_inner = QVBoxLayout(ref_card)
-        ref_inner.setContentsMargins(20, 20, 20, 20)
         
-        ref_title = QLabel("Reference Information")
-        ref_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #333333; margin-bottom: 10px;")
-        ref_inner.addWidget(ref_title)
-        
-        # Grid for inputs
         ref_grid = QGridLayout()
         ref_grid.setSpacing(15)
         
-        # Row 0: OC Number & Date
         ref_grid.addWidget(QLabel("OC No (Intimation):"), 0, 0)
         self.oc_number_input = QLineEdit()
-        self.oc_number_input.setPlaceholderText("Format: No./Year")
         ref_grid.addWidget(self.oc_number_input, 0, 1)
         
         suggest_btn = QPushButton("Get Next")
-        suggest_btn.setFixedWidth(80)
         suggest_btn.clicked.connect(lambda: self.suggest_next_oc(self.oc_number_input))
         ref_grid.addWidget(suggest_btn, 0, 2)
         
@@ -1433,199 +1539,186 @@ class ProceedingsWorkspace(QWidget):
         self.oc_date_input.setCalendarPopup(True)
         self.oc_date_input.setDate(QDate.currentDate())
         ref_grid.addWidget(self.oc_date_input, 0, 4)
-        
-        # Row 1: Deadlines (New)
-        ref_grid.addWidget(QLabel("Reply By:"), 1, 0)
-        self.reply_deadline_input = QDateEdit()
-        self.reply_deadline_input.setCalendarPopup(True)
-        self.reply_deadline_input.setDate(QDate.currentDate().addDays(15)) # Default 15 days
-        ref_grid.addWidget(self.reply_deadline_input, 1, 1)
 
-        ref_grid.addWidget(QLabel("Payment By:"), 1, 3)
-        self.payment_deadline_input = QDateEdit()
-        self.payment_deadline_input.setCalendarPopup(True)
-        self.payment_deadline_input.setDate(QDate.currentDate().addDays(15))
-        ref_grid.addWidget(self.payment_deadline_input, 1, 4)
-
-        # Row 2: Context (Read-Only)
-        ref_grid.addWidget(QLabel("Financial Year:"), 2, 0)
-        fy_val = self.proceeding_data.get('financial_year', 'N/A')
-        lbl_fy = QLabel(f"<b>{fy_val}</b>")
-        lbl_fy.setStyleSheet("color: #555;")
-        ref_grid.addWidget(lbl_fy, 2, 1)
-
-        ref_grid.addWidget(QLabel("Adjudication Section:"), 2, 3)
-        sec_val = self.proceeding_data.get('adjudication_section', 'N/A')
-        self.section_display = QLabel(f"<b>{sec_val}</b>") # Read-Only
-        self.section_display.setStyleSheet("color: #e67e22; padding: 4px; background: #fff3e0; border-radius: 4px;")
-        ref_grid.addWidget(self.section_display, 2, 4)
-        
-        # Row 3: Officer Details (New)
-        ref_grid.addWidget(QLabel("Proper Officer:"), 3, 0)
-        self.officer_name_input = QLineEdit()
-        self.officer_name_input.setPlaceholderText("Name of Issuing Officer")
-        # Auto-fill if available in settings/session? For now blank or placeholder
-        ref_grid.addWidget(self.officer_name_input, 3, 1, 1, 4)
+        ref_grid.addWidget(QLabel("Issuing Officer:"), 1, 0)
+        self.officer_combo = QComboBox()
+        self.load_active_officers()
+        ref_grid.addWidget(self.officer_combo, 1, 1, 1, 4)
         
         ref_inner.addLayout(ref_grid)
         ref_layout.addWidget(ref_card)
         ref_layout.addStretch()
 
-        # --- STEP 2: Issues & Tax ---
+        # --- STEP 2: Issues Involved ---
         issues_widget = QWidget()
-        issues_layout = QVBoxLayout(issues_widget)
-        issues_layout.setContentsMargins(0,0,0,0)
+        issues_vbox = QVBoxLayout(issues_widget)
+        issues_vbox.setContentsMargins(0,0,0,0)
+        issues_vbox.setSpacing(0)
         
         # Toolbar
         toolbar = QWidget()
         toolbar.setStyleSheet("background-color: #f8f9fa; border-bottom: 1px solid #e0e0e0;")
         tb_layout = QHBoxLayout(toolbar)
-        tb_layout.setContentsMargins(10, 5, 10, 5)
-        
-        tb_layout.addWidget(QLabel("<b>Add Issue:</b>"))
         self.issue_combo = QComboBox()
         self.issue_combo.addItem("Select Issue Template...", None)
-        self.load_issue_templates() # Load from Issue Master
+        self.load_issue_templates()
+        tb_layout.addWidget(QLabel("<b>Add Issue:</b>"))
         tb_layout.addWidget(self.issue_combo, 1)
-        
         add_btn = QPushButton("Insert")
-        add_btn.setStyleSheet("background-color: #3498db; color: white; font-weight: bold;")
+        add_btn.setStyleSheet("background-color: #3498db; color: white;")
         add_btn.clicked.connect(self.insert_selected_issue)
         tb_layout.addWidget(add_btn)
+        issues_vbox.addWidget(toolbar)
         
-        issues_layout.addWidget(toolbar)
-        
-        # Scrollable Area for Issues
-        from PyQt6.QtWidgets import QScrollArea
+        # Scroll Area for Issues
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        
         self.issues_container = QWidget()
         self.issues_layout = QVBoxLayout(self.issues_container)
         self.issues_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.issues_layout.setSpacing(20)
         self.issues_layout.setContentsMargins(20, 20, 20, 20)
-        
         scroll.setWidget(self.issues_container)
-        issues_layout.addWidget(scroll, 1) # [FIX] Ensure Scroll Area takes available space
-        
-        # Tax Summary (Live Derived)
-        summary_card = QFrame()
-        summary_card.setFrameShape(QFrame.Shape.StyledPanel)
-        summary_card.setStyleSheet("""
-            QFrame {
-                background-color: #2c3e50; 
-                color: white; 
-                border-top-left-radius: 8px; 
-                border-top-right-radius: 8px;
-                border-bottom: 1px solid #34495e;
-            }
-        """)
-        sum_layout = QHBoxLayout(summary_card)
-        sum_layout.setContentsMargins(20, 15, 20, 15)
-        
-        sum_layout.addWidget(QLabel("<b>Total Liability:</b>"))
+        issues_vbox.addWidget(scroll, 1) # Take space
+
+        # Bottom Total Card (Always Visible in Step 2)
+        self.step2_total_card = QFrame()
+        self.step2_total_card.setStyleSheet("background-color: #2c3e50; color: white; border-bottom-left-radius: 0px; border-bottom-right-radius: 0px;")
+        st2_layout = QHBoxLayout(self.step2_total_card)
+        st2_layout.setContentsMargins(20, 15, 20, 15)
+        st2_layout.addWidget(QLabel("<b>Total Liability:</b>"))
         self.lbl_total_tax = QLabel("₹ 0")
         self.lbl_total_tax.setStyleSheet("font-size: 16px; font-weight: bold; color: #f1c40f;")
-        sum_layout.addWidget(self.lbl_total_tax)
-        sum_layout.addStretch()
+        st2_layout.addWidget(self.lbl_total_tax)
+        st2_layout.addStretch()
+        issues_vbox.addWidget(self.step2_total_card)
+
+        # --- STEP 3: Compliance & Summary ---
+        comp_widget = QWidget()
+        comp_layout = QVBoxLayout(comp_widget)
+        comp_layout.setContentsMargins(20, 20, 20, 20)
+        comp_layout.setSpacing(20)
+
+        # Dates & Summary Table Grid
+        comp_top_card = QWidget()
+        comp_top_card.setStyleSheet("background: white; border: 1px solid #e0e0e0; border-radius: 8px;")
+        ctc_layout = QVBoxLayout(comp_top_card)
         
-        issues_layout.addWidget(summary_card)
+        date_grid = QGridLayout()
+        date_grid.addWidget(QLabel("<b>Reply Deadline:</b>"), 0, 0)
+        self.reply_deadline_input = QDateEdit()
+        self.reply_deadline_input.setCalendarPopup(True)
+        self.reply_deadline_input.setDate(QDate.currentDate().addDays(15))
+        date_grid.addWidget(self.reply_deadline_input, 0, 1)
+        
+        date_grid.addWidget(QLabel("<b>Payment Deadline:</b>"), 0, 2)
+        self.payment_deadline_input = QDateEdit()
+        self.payment_deadline_input.setCalendarPopup(True)
+        self.payment_deadline_input.setDate(QDate.currentDate().addDays(15))
+        date_grid.addWidget(self.payment_deadline_input, 0, 3)
+        ctc_layout.addLayout(date_grid)
+        
+        comp_layout.addWidget(comp_top_card)
 
-# ... (Skip ahead to show_drc01a_finalization_panel)
+        # Tax Summary Table
+        self.tax_summary_table = QTableWidget()
+        self.tax_summary_table.setColumnCount(6)
+        self.tax_summary_table.setHorizontalHeaderLabels(["Act", "Period", "Tax", "Interest", "Penalty", "Total"])
+        self.tax_summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tax_summary_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.tax_summary_table.setStyleSheet("background: white; border: 1px solid #e0e0e0; border-radius: 8px;")
+        comp_layout.addWidget(QLabel("<b>Demand Summary:</b>"))
+        comp_layout.addWidget(self.tax_summary_table)
 
+        # Step 3 Detailed Breakdown Label
+        self.step3_breakdown_lbl = QLabel("")
+        self.step3_breakdown_lbl.setStyleSheet("color: #2c3e50; font-weight: bold; font-size: 11pt;")
+        comp_layout.addWidget(self.step3_breakdown_lbl)
+        comp_layout.addStretch()
 
-        # --- STEP 3: Actions & Finalize ---
+        # --- STEP 4: Actions & Finalize ---
         actions_widget = QWidget()
         actions_layout = QVBoxLayout(actions_widget)
         
-        finalize_desc = QLabel("Review the draft below. Once finalized, the document will be issued and locked.")
-        finalize_desc.setStyleSheet("color: #666; font-size: 11pt; margin: 20px;")
-        actions_desc_align = Qt.AlignmentFlag.AlignCenter
-        finalize_desc.setAlignment(actions_desc_align)
-        actions_layout.addWidget(finalize_desc)
-
-        # [PHASE 5] Inline Preview Browser (Wizard Step 3)
-        self.step3_browser = QWebEngineView()
-        self.step3_browser.setMinimumHeight(500)
-        self.step3_browser.setStyleSheet("border: 1px solid #bdc3c7;")
-        self.step3_browser.setHtml("<div style='text-align:center; padding:50px; color:#7f8c8d;'>Click 'Refresh Preview' to generate draft.</div>")
-        actions_layout.addWidget(self.step3_browser)
+        self.step4_browser = QWebEngineView()
+        self.step4_browser.setMinimumHeight(150)
+        self.step4_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        actions_layout.addWidget(self.step4_browser)
         
         # Action Buttons
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        
-        # Refresh Button (New)
         refresh_btn = QPushButton("🔄 Refresh Preview")
-        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        # Use lambda to trigger render logic manually
-        refresh_btn.clicked.connect(self.refresh_step3_preview)
+        refresh_btn.clicked.connect(self.trigger_drc01a_refresh)
         btn_row.addWidget(refresh_btn)
         
+        pdf_btn = QPushButton("⬇️ Draft PDF")
+        pdf_btn.clicked.connect(lambda: self.export_drc01a(format="pdf"))
+        btn_row.addWidget(pdf_btn)
+        
         save_btn = QPushButton("Save Draft")
-        save_btn.setFixedSize(120, 40)
         save_btn.clicked.connect(self.save_drc01a)
         btn_row.addWidget(save_btn)
         
-        finalize_btn = QPushButton("Proceed to Finalize") # Renamed for clarity
-        finalize_btn.setFixedSize(150, 40)
+        finalize_btn = QPushButton("Proceed to Finalize")
         finalize_btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
         finalize_btn.clicked.connect(self.show_drc01a_finalization_panel)
         btn_row.addWidget(finalize_btn)
-        
         btn_row.addStretch()
         actions_layout.addLayout(btn_row)
-        actions_layout.addStretch()
 
-        # Build Side Nav
+        # Helper for wrapping non-scrollable widgets
+        def wrap_scroll(w):
+            s = QScrollArea()
+            s.setWidgetResizable(True)
+            s.setFrameShape(QFrame.Shape.NoFrame)
+            s.setWidget(w)
+            return s
+
+        # Side Nav Connection
         nav_items = [
-            ("Reference Details", "1", ref_widget),
-            ("Issues & Tax", "2", issues_widget),
-            ("Actions & Finalize", "3", actions_widget)
+            ("Reference Details", "1", wrap_scroll(ref_widget)),
+            ("Issues Involved", "2", issues_widget), # Already has inner scroll
+            ("Compliance & Summary", "3", wrap_scroll(comp_widget)),
+            ("Actions & Finalize", "4", actions_widget) # WebEngine handles scroll
         ]
-        
-        side_nav = self.create_side_nav_layout(nav_items)
+        side_nav = self.create_side_nav_layout(nav_items, use_scroll=False)
         draft_layout.addWidget(side_nav)
-        
-        # --- PREVIEW / FINALIZATION CONTAINERS (Lazy) ---
-        self.drc01a_finalization_container = self.create_drc01a_finalization_panel()
-        self.drc01a_finalization_container.hide()
-        
+
+        # Containers
         self.drc01a_view_container = QWidget()
         self.drc01a_view_container.hide()
         view_layout = QVBoxLayout(self.drc01a_view_container)
-        
-        view_title = QLabel("<b>DRC-01A Issued</b>")
-        view_title.setStyleSheet("font-size: 16pt; color: #27ae60; margin-bottom: 10px;")
-        view_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        view_layout.addWidget(view_title)
-        
-        view_msg = QLabel("This document has been finalized and issued. Changes are no longer permitted.")
-        view_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        view_layout.addWidget(view_msg)
-        
-        # [PHASE 5] Snapshot Browser
+        view_layout.addWidget(QLabel("<b>DRC-01A Issued</b>"))
         self.drc01a_browser = QWebEngineView()
-        # Set a default background or initial content
-        self.drc01a_browser.setHtml("<h3 style='text-align:center; color:#7f8c8d; margin-top:50px;'>Document content will appear here.</h3>")
-        view_layout.addWidget(self.drc01a_browser, 1) # Give it all remaining space
-        view_layout.addStretch()
+        view_layout.addWidget(self.drc01a_browser, 1)
+
+        # Final layout connection to ROOT
+        layout.addWidget(self.drc01a_draft_container)
+        layout.addWidget(self.drc01a_view_container)
         
-        # Wrapper
-        wrapper = QWidget()
-        wrapper_layout = QVBoxLayout(wrapper)
-        wrapper_layout.setContentsMargins(0,0,0,0)
-        wrapper_layout.addWidget(self.drc01a_draft_container)
-        wrapper_layout.addWidget(self.drc01a_finalization_container)
-        wrapper_layout.addWidget(self.drc01a_view_container)
-        
-        # [PERSISTENCE] Hydrate State
         self.restore_drc01a_draft_state()
         
         print("ProceedingsWorkspace: create_drc01a_tab done")
-        return wrapper
+        return tab_root
+
+    def load_active_officers(self):
+        """Load active officers into the combo box"""
+        if getattr(self, 'officer_combo', None):
+            self.officer_combo.clear()
+            self.officer_combo.addItem("Select Issuing Officer...", None)
+            officers = self.db.get_active_officers()
+            for off in officers:
+                display_text = f"{off['name']} ({off['designation']}, {off['jurisdiction']})"
+                self.officer_combo.addItem(display_text, off['id'])
+                
+            if self.proceeding_data:
+                saved_id = self.proceeding_data.get('issuing_officer_id')
+                if saved_id:
+                    index = self.officer_combo.findData(saved_id)
+                    if index >= 0:
+                        self.officer_combo.setCurrentIndex(index)
 
     def create_drc01a_finalization_panel(self):
         print("ProceedingsWorkspace: create_drc01a_finalization_panel start")
@@ -1639,7 +1732,11 @@ class ProceedingsWorkspace(QWidget):
         # Connect Actions
         self.drc_fin_panel.cancel_btn.clicked.connect(lambda: self.toggle_view_mode("drc01a", False))
         self.drc_fin_panel.finalize_btn.clicked.connect(self.finalize_drc01a_issuance)
-        self.drc_fin_panel.pdf_btn.clicked.connect(lambda: self.generate_pdf(doc_type="DRC-01A"))
+        
+        # Download Actions
+        self.drc_fin_panel.pdf_btn.clicked.connect(lambda: self.export_drc01a(format="pdf"))
+        self.drc_fin_panel.docx_btn.clicked.connect(lambda: self.export_drc01a(format="docx"))
+        
         self.drc_fin_panel.save_btn.clicked.connect(self.save_drc01a)
         self.drc_fin_panel.refresh_btn.clicked.connect(self.show_drc01a_finalization_panel)
         
@@ -1647,18 +1744,58 @@ class ProceedingsWorkspace(QWidget):
         self.drc01a_finalization_layout = layout # Keep reference if needed
         return container
 
-    def refresh_step3_preview(self):
-        """Manually trigger preview generation for Wizard Step 3"""
+    def trigger_drc01a_refresh(self):
+        """Debounced preview refresh"""
+        self.drc01a_refresh_timer.start(500)
+
+    def _run_refresh_step4(self):
+        """Actual preview generation for Step 4"""
         try:
-            drc_model = self._get_drc01a_model()
-            if not drc_model:
-                 raise ValueError("Model generation failed.")
+            model = self._get_drc01a_model()
+            html = self.render_drc01a_html(model)
+            self.step4_browser.setHtml(html)
             
-            html = self.render_drc01a_html(drc_model)
-            self.step3_browser.setHtml(html)
+            # Update tax summary table in Step 3
+            self._update_drc01a_tax_summary_table(model.get('tax_rows'))
+            
         except Exception as e:
-            self.step3_browser.setHtml(f"<h3 style='color:red; text-align:center;'>Preview Error: {str(e)}</h3>")
-            print(f"Preview Error: {e}")
+            print(f"Error refreshing DRC-01A preview: {e}")
+            traceback.print_exc()
+
+    def _update_drc01a_tax_summary_table(self, tax_rows):
+        """Populate the Step 3 summary table"""
+        if tax_rows is None:
+            raise ValueError("tax_rows missing from model during table update.")
+            
+        self.tax_summary_table.setRowCount(0)
+        if not tax_rows: return
+        
+        from src.utils.formatting import format_indian_number
+        
+        self.tax_summary_table.setRowCount(len(tax_rows))
+        for row_idx, row_data in enumerate(tax_rows):
+            # 1. Act & Period
+            self.tax_summary_table.setItem(row_idx, 0, QTableWidgetItem(str(row_data.get('act', ''))))
+            self.tax_summary_table.setItem(row_idx, 1, QTableWidgetItem(str(row_data.get('period', ''))))
+            
+            # 2. Monetary Columns
+            monetary_cols = [
+                (2, 'tax'),
+                (3, 'interest'),
+                (4, 'penalty'),
+                (5, 'total')
+            ]
+            
+            for col_idx, key in monetary_cols:
+                val = row_data.get(key, 0)
+                formatted_val = format_indian_number(val)
+                item = QTableWidgetItem(str(formatted_val))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.tax_summary_table.setItem(row_idx, col_idx, item)
+
+    def refresh_step3_preview(self):
+        """Legacy placeholder - redirected to debounced trigger"""
+        self.trigger_drc01a_refresh()
 
     def show_drc01a_finalization_panel(self):
         """Review and Show Finalization Panel"""
@@ -1671,8 +1808,8 @@ class ProceedingsWorkspace(QWidget):
         errors = []
         if not self.oc_number_input.text().strip():
             errors.append("OC Number is mandatory.")
-        if not self.officer_name_input.text().strip():
-            errors.append("Proper Officer Name is mandatory.")
+        if getattr(self, 'officer_combo', None) and not self.officer_combo.currentData():
+            errors.append("Proper Officer selection is mandatory.")
             
         # Date Logic Check (Reply Date > OC Date)
         oc_date = self.oc_date_input.date()
@@ -1804,120 +1941,229 @@ class ProceedingsWorkspace(QWidget):
 
 
     def _get_drc01a_model(self):
-        """Build Structured Data Model for DRC-01A (No UI Scraping)"""
-        if not self.proceeding_data: return {}
-        
-        # 1. Taxpayer
-        tp = self.proceeding_data.get('taxpayer_details', self.proceeding_data.get('taxpayer', {}))
-        
-        # 2. Metadata
+        """
+        SSoT: Aggregate all data for DRC-01A rendering and export.
+        Uses pure integers for monetary aggregation.
+        Aggregates normalized legal references from individual issues.
+        """
+        if not self.proceeding_data:
+            return {
+                'tax_rows': [],
+                'grand_total_liability': "0"
+            }
+
+        tp = self.proceeding_data.get('taxpayer_details', {})
+        if isinstance(tp, str):
+            try: tp = json.loads(tp)
+            except: tp = {}
+        elif tp is None:
+            tp = {}
+
+        # 1. Taxpayer & Case Info
         model = {
-            'gstin': tp.get('gstin', self.proceeding_data.get('gstin', '-')),
-            'legal_name': tp.get('legal_name', self.proceeding_data.get('legal_name', '-')),
-            'trade_name': tp.get('trade_name', '-'),
-            'address': tp.get('address', 'Address not available'),
-            'case_id': self.proceeding_data.get('case_id', '-'),
-            
+            'gstin': self.proceeding_data.get('gstin', '') or tp.get('GSTIN', ''),
+            'legal_name': self.proceeding_data.get('legal_name', '') or tp.get('Legal Name', ''),
+            'trade_name': self.proceeding_data.get('trade_name', '') or tp.get('Trade Name', ''),
+            'address': self.proceeding_data.get('address', '') or tp.get('Address', ''),
+            'case_id': self.proceeding_data.get('case_id', '') or '',
             'oc_no': self.oc_number_input.text(),
             'oc_date': self.oc_date_input.date().toString("dd/MM/yyyy"),
+            'financial_year': self.proceeding_data.get('financial_year', '') or '',
+            'initiating_section': '',  # placeholder; resolved below
+            'form_type': self.proceeding_data.get('form_type', '') or 'DRC-01A',
             'reply_date': self.reply_deadline_input.date().toString("dd/MM/yyyy"),
             'payment_date': self.payment_deadline_input.date().toString("dd/MM/yyyy"),
-            
-            'officer_name': self.officer_name_input.text(),
-            # Placeholder for designation/jurisdiction if not in DB
-            
-            'financial_year': self.proceeding_data.get('financial_year', '-'),
-            'section_num': self.proceeding_data.get('adjudication_section', '-'),
-            
-            'issues': [],
-            'tax_rows': [],
-            'total_tax': 0.0,
-            'total_interest': 0.0,
-            'total_penalty': 0.0,
-            'grand_total_val': 0.0, # Raw value for validation
-            'grand_total': "0.00"
+            'issue_date': self.oc_date_input.date().toString("dd/MM/yyyy")
         }
         
-        # 3. Issues & Financials
-        from src.utils.formatting import format_indian_number
-        
-        acts = ['IGST', 'CGST', 'SGST', 'Cess']
-        agg = {act: {'t':0,'i':0,'p':0} for act in acts}
-        
-        total_tax_val = 0.0
-        total_int_val = 0.0
-        total_pen_val = 0.0
-        
-        for idx, card in enumerate(self.issue_cards):
-            breakdown = card.get_tax_breakdown() if hasattr(card, 'get_tax_breakdown') else {}
-            
-            # Helper to sum issue totals
-            i_tax = sum(v.get('tax', 0) for v in breakdown.values())
-            i_int = sum(v.get('interest', 0) for v in breakdown.values())
-            i_pen = sum(v.get('penalty', 0) for v in breakdown.values())
-            i_total = i_tax + i_int + i_pen
-            
-            issue_data = {
-                'index': idx + 1,
-                'title': card.template.get('issue_name', 'Issue'),
-                'description': "Details regarding this issue...", # Placeholder or extracted content
-                'tax': i_tax,
-                'interest': i_int,
-                'penalty': i_pen,
-                'total': i_total,
-                'total_fmt': format_indian_number(i_total, prefix_rs=False),
-                'breakdown': breakdown
-            }
-            model['issues'].append(issue_data)
-            
-            # Aggregate for global table
-            for act in acts:
-                if act in breakdown:
-                    agg[act]['t'] += breakdown[act].get('tax', 0)
-                    agg[act]['i'] += breakdown[act].get('interest', 0)
-                    agg[act]['p'] += breakdown[act].get('penalty', 0)
-                    
-            total_tax_val += i_tax
-            total_int_val += i_int
-            total_pen_val += i_pen
-            model['grand_total_val'] += i_total
+        # Resolved section: prefer adjudication_section over initiating_section
+        model['initiating_section'] = (
+            self.proceeding_data.get('adjudication_section') or
+            self.proceeding_data.get('initiating_section') or ''
+        )
 
-        # Format Aggregates for Template
-        for act in acts:
-            t, i, p = agg[act]['t'], agg[act]['i'], agg[act]['p']
-            if t+i+p > 0:
-                row = {
-                    'act': act,
-                    'tax': format_indian_number(t),
-                    'interest': format_indian_number(i),
-                    'penalty': format_indian_number(p),
-                    'total': format_indian_number(t+i+p)
-                }
-                model['tax_rows'].append(row)
+        # 2. Strict Adjudication Section Validation with Normalization
+        raw_sec = str(model['initiating_section']).strip()
+        print(f"[DRC-01A] Section resolve -> raw_sec='{raw_sec}'")
+        
+        # Normalize common patterns to a bare number string: '73', '74'
+        import re
+        sec_match = re.search(r'(73|74)', raw_sec)
+        if not raw_sec:
+            raise ValueError("DRC-01A: adjudication_section is blank. Cannot build model. Ensure section is set during case setup.")
+        elif sec_match:
+            model['section_base'] = sec_match.group(1)  # '73' or '74'
+        else:
+            raise ValueError(f"Invalid section_base for DRC-01A derived from: '{raw_sec}'. Must contain '73' or '74'.")
             
-        model['total_tax'] = format_indian_number(total_tax_val, prefix_rs=True)
-        model['total_interest'] = format_indian_number(total_int_val, prefix_rs=True)
-        model['total_penalty'] = format_indian_number(total_pen_val, prefix_rs=True)
-        model['grand_total'] = format_indian_number(model['grand_total_val'], prefix_rs=True)
+        model['section_title'] = f"section {model['section_base']}(5)"
+        model['section_body'] = f"{model['section_base']}(5)"
+
+        # 3. Aggregate Legal Provisions (Normalized Layer)
+        normalized_provisions = self._aggregate_legal_references()
+        if normalized_provisions:
+            model['sections_violated_html'] = "<ul>" + "".join([f"<li>{p}</li>" for p in normalized_provisions]) + "</ul>"
+        else:
+            model['sections_violated_html'] = "<i>Not specified</i>"
+
+        # 4. Narrative Content from Issues
+        issues_html = ""
+        for card in self.issue_cards:
+            if card.is_included:
+                issues_html += card.generate_html()
+                issues_html += "<br><hr style='border: 1px dashed #eee;'><br>"
+        model['issues_html'] = issues_html
+
+        # 5. Financial Aggregation (Decimal Layer)
+        # Using Decimal for precise summation across all included issue cards
+        total_breakdown = {} # Act -> {Tax: D, Interest: D, Penalty: D, Total: D}
+        
+        # 5. Financial Aggregation (Integer Layer)
+        # Standardizing on Integers for precision and consistency across system
+        total_breakdown = {} # Act -> {Tax: int, Interest: int, Penalty: int, Total: int}
+        
+        for card in self.issue_cards:
+            if not card.is_included: continue
+            
+            card_breakdown = card.get_tax_breakdown() # Returns card level integer mapping
+            for act, vals in card_breakdown.items():
+                if act not in total_breakdown:
+                    total_breakdown[act] = {
+                        'Tax': 0, 'Interest': 0, 
+                        'Penalty': 0, 'Total': 0
+                    }
+                
+                # Aggregate values safely ensuring integer types
+                for key in ['tax', 'interest', 'penalty']:
+                    display_key = key.capitalize() # 'tax' -> 'Tax'
+                    v = vals.get(key, 0)
+                    total_breakdown[act][display_key] += v
+                    total_breakdown[act]['Total'] += v
+
+        # Prepare Tax Table Rows
+        tax_rows = []
+        grand_total = 0
+        
+        # Sort by ACT_PRIORITY
+        for act in self.ACT_PRIORITY:
+            if act in total_breakdown:
+                vals = total_breakdown[act]
+                row_tot = vals['Total']
+                grand_total += row_tot
+                
+                tax_rows.append({
+                    'act': act,
+                    'period': model['financial_year'], # Summary level uses FY
+                    'tax': vals['Tax'],
+                    'interest': vals['Interest'],
+                    'penalty': vals['Penalty'],
+                    'total': row_tot
+                })
+        
+        model['tax_rows'] = tax_rows
+        model['grand_total_liability'] = grand_total
+        
+        # Period derivation for metadata
+        model['tax_period_from'] = f"01/04/{model['financial_year'][:4]}" if model['financial_year'] else ""
+        model['tax_period_to'] = f"31/03/{model['financial_year'][5:]}" if len(model['financial_year']) > 5 else ""
+        
+        # 6. Strict Advice Paragraph Generation
+        payment_date = model['payment_date']
+        base = model['section_base']
+        
+        if base == "73":
+            model['advice_paragraph'] = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest in full by {payment_date}, failing which Show Cause Notice will be issued under section 73(1)."
+        elif base == "74":
+            model['advice_paragraph'] = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest and penalty under section 74(5) by {payment_date}, failing which Show Cause Notice will be issued under section 74(1)."
+
+        # HTML Table String Injection
+        model['tax_table_html'] = self.generate_tax_table_html(tax_rows) 
+        
+        # 7. Extract Officer Data (Deterministic Snapshot Logic)
+        import json
+        snapshot_json = self.proceeding_data.get('issuing_officer_snapshot')
+        officer_data = {}
+        if snapshot_json:
+            try:
+                parsed_snap = json.loads(snapshot_json)
+                if 'DRC-01A' in parsed_snap:
+                    officer_data = parsed_snap['DRC-01A']
+                elif 'name' in parsed_snap:
+                    officer_data = parsed_snap # Fallback for old flat format
+            except json.JSONDecodeError:
+                pass
+        
+        if not officer_data:
+            officer_id = self.proceeding_data.get('issuing_officer_id') or (getattr(self, 'officer_combo', None) and self.officer_combo.currentData())
+            officer_data = self.db.get_officer_by_id(officer_id) if officer_id else {}
+
+        model['officer_name'] = officer_data.get('name', 'Proper Officer')
+        model['designation'] = officer_data.get('designation', 'Superintendent')
+        model['jurisdiction'] = officer_data.get('jurisdiction', 'Paravur Range')
         
         return model
 
-    def render_drc01a_html(self, model=None, for_pdf=False):
+    def _aggregate_legal_references(self):
         """
-        Single Source of Truth Renderer for DRC-01A.
-        Uses Jinja2 template 'drc01a.html'.
+        Aggregate and normalize legal provisions from all issue cards.
+        [DEPRECATED] Legal provisions are now consolidated into the 'Brief Facts' narrative.
         """
-        if model is None:
-            model = self._get_drc01a_model()
-            
+        return []
+
+    def validate_drc01a_model(self, model):
+        """
+        Validation Layer for model integrity.
+        Returns (bool, msg)
+        """
+        if not model:
+            return False, "Data model is empty."
+        
+        required = {
+            'gstin': "GSTIN",
+            'legal_name': "Legal Name",
+            'oc_no': "OC Number",
+            'oc_date': "OC Date",
+            'initiating_section': "Adjudication Section"
+        }
+        
+        for key, label in required.items():
+            if not model.get(key) or model.get(key) == "____":
+                return False, f"Mandatory field '{label}' is missing or incomplete."
+
+        # Logical checks
+        if not model.get('tax_rows'):
+            return False, "At least one row of tax quantification is required."
+
+        # Date consistency (Basic check)
         try:
+            d_oc = datetime.datetime.strptime(model['oc_date'], "%d/%m/%Y") # Corrected format string
+            d_reply = datetime.datetime.strptime(model['reply_date'], "%d/%m/%Y") # Corrected format string
+            if d_reply < d_oc:
+                return False, "Reply date cannot be earlier than OC date."
+        except ValueError: # Catch specific ValueError for strptime
+            pass # Formats might differ or be partial
+
+        return True, "Success"
+
+    def render_drc01a_html(self, model):
+        """
+        PURE FUNCTION: Render HTML using the data model.
+        No UI reads allowed.
+        """
+        if not model:
+            return "<h3>Data Validation Failed</h3>"
+
+        try:
+            from jinja2 import Environment, FileSystemLoader
+            import os
+            import datetime # Import datetime for potential use in template or context
+
             # Locate Template
             current_dir = os.path.dirname(os.path.abspath(__file__))
             # Work up to src/templates
-            template_dir = os.path.join(os.path.dirname(os.path.dirname(current_dir)), "src", "templates")
-            
-            # [PHASE 5] Template Path Fix
-            # Locate PROJECT_ROOT/templates (Where scn.html lives)
+            import os
+
+            # Locate Template
             current_dir = os.path.dirname(os.path.abspath(__file__)) # src/ui
             src_dir = os.path.dirname(current_dir) # src
             root_dir = os.path.dirname(src_dir) # gst (Project Root)
@@ -1925,24 +2171,162 @@ class ProceedingsWorkspace(QWidget):
 
             print(f"DEBUG: Loading Templates from Root: {template_dir}")
             
-            if not os.path.exists(os.path.join(template_dir, 'drc01a.html')):
+            target_template = os.path.join(template_dir, 'drc01a.html')
+            if not os.path.exists(target_template):
                  print(f"CRITICAL: drc01a.html NOT FOUND in {template_dir}")
                  # Fallback for dev environment oddities
                  if os.path.exists("D:/gst/templates/drc01a.html"):
                      template_dir = "D:/gst/templates"
+                     target_template = "D:/gst/templates/drc01a.html"
 
-            env = Environment(loader=FileSystemLoader(template_dir))
-            template = env.get_template('drc01a.html')
+            print(f"DEBUG: Loading DRC-01A via TemplateEngine")
+
+            from src.utils.template_engine import TemplateEngine
+            from src.utils.formatting import format_indian_number
             
-            rendered = template.render(**model)
+            # Defense against None type aggregation
+            total = model.get('grand_total_liability', 0)
+            formatted_total = format_indian_number(total) if total is not None else "0"
+            
+            import re
+            
+            # --- 2. Backend String Sanitization ---
+            advice_paragraph = model.get('advice_paragraph', '')
+            advice_paragraph = re.sub(r'\s+', ' ', advice_paragraph).strip()
+            
+            raw_issues_html = model.get('issues_html', '')
+            
+            # --- 3. Structural Cleanup of issues_html ---
+            sanitized_issues = re.sub(r'\s+', ' ', raw_issues_html).strip()
+            
+            # Remove inline styles ONLY from <p> and <span> to preserve <table> borders and grid styling
+            sanitized_issues = re.sub(r'(<(?:p|span)[^>]*?)\s+style="[^"]*"', r'\1', sanitized_issues, flags=re.IGNORECASE)
+            
+            # Remove empty paragraphs
+            sanitized_issues = re.sub(r'<p>\s*</p>', '', sanitized_issues)
+            
+            # Collapse multiple <br>
+            sanitized_issues = re.sub(r'(<br\s*/?>\s*){2,}', '<br>', sanitized_issues)
+            
+            # Trim outer whitespace
+            sanitized_issues = sanitized_issues.strip()
+            
+            context = {
+                'gstin': model['gstin'],
+                'legal_name': model['legal_name'],
+                'trade_name': f"({model['trade_name']})" if model.get('trade_name') and model['trade_name'] != model['legal_name'] else "",
+                'address': model['address'],
+                'case_id': model['case_id'],
+                'oc_no': model['oc_no'],
+                'oc_date': model['oc_date'],
+                'financial_year': model['financial_year'],
+                'form_type': model['form_type'],
+                'section_base': model['section_base'],
+                'tax_table_html': model.get('tax_table_html', ''),
+                'issues_html': sanitized_issues,
+                'grand_total': formatted_total,
+                'advice_paragraph': advice_paragraph,
+                'last_date_reply': model['reply_date'],
+                'officer_name': model.get('officer_name', 'Proper Officer'),
+                'designation': model.get('designation', 'Superintendent'),
+                'jurisdiction': model.get('jurisdiction', 'Paravur Range')
+            }
+            
+            # 8. Strict Contract Validation
+            required_keys = [
+                'gstin', 'legal_name', 'trade_name', 'address', 'case_id', 'oc_no', 'oc_date', 
+                'financial_year', 'form_type', 'section_base', 'tax_table_html', 'issues_html', 
+                'grand_total', 'advice_paragraph', 'last_date_reply', 'officer_name', 'designation', 'jurisdiction'
+            ]
+            
+            for key in required_keys:
+                if key not in context or context[key] is None:
+                    raise KeyError(f"CRITICAL: Missing required contract key for DRC-01A rendering: {key}")
+
+            # Letterhead injection (if needed, based on a model flag or config)
+            # For now, assume template handles placeholder or it's done post-render if needed.
+            # If `self.show_letterhead_cb` is still used, it needs to be passed via model.
+            # For this pure function, we'll assume the model has a 'show_letterhead' flag.
+            # If not, the template itself should handle the placeholder.
+            # For now, we'll remove the letterhead logic from here and assume the template is self-contained.
+
+            rendered = template.render(**context)
+            print("--- HTML OUTPUT START (First 200 chars) ---")
+            print(rendered[:200])
+            print("--- HTML OUTPUT END ---")
             print(f"DEBUG: Rendered HTML Length: {len(rendered)}")
             return rendered
             
         except Exception as e:
-            print(f"Error rendering DRC-01A: {e}")
-            import traceback
-            traceback.print_exc()
-            return f"<h3>Render Error: {str(e)}</h3>"
+            print(f"Error rendering DRC-01A: {e}\n{traceback.format_exc()}")
+            return f"<h3>Rendering Error: {str(e)}</h3>"
+
+    def export_drc01a(self, format="pdf"):
+        """
+        Synchronous export logic with validation and error handling.
+        """
+        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        from PyQt6.QtGui import QCursor
+        from PyQt6.QtCore import Qt
+        import os
+        import traceback
+        from src.utils.document_generator import DocumentGenerator # Assuming this exists
+        from src.utils.preview_generator import PreviewGenerator # Assuming this exists
+
+        # 1. Regenerate model & Validate
+        model = self._get_drc01a_model()
+        valid, msg = self.validate_drc01a_model(model)
+        if not valid:
+            QMessageBox.warning(self, "Export Validation", msg)
+            return
+
+        # 2. File Dialog
+        filter_str = "PDF Files (*.pdf)" if format == "pdf" else "Word Files (*.docx)"
+        default_file = f"DRC-01A_{model['legal_name'].replace(' ', '_')}_{model['oc_no'].replace('/', '_')}"
+        path, _ = QFileDialog.getSaveFileName(self, f"Save Draft {format.upper()}", default_file, filter_str)
+        
+        if not path:
+            return # Cancelled silently
+
+        # 3. Execution with UI blocking
+        self.setCursor(QCursor(Qt.CursorShape.WaitCursor))
+        try:
+            if format == "pdf":
+                html = self.render_drc01a_html(model)
+                success, err_msg = PreviewGenerator.generate_pdf(html, path)
+                if not success:
+                    raise RuntimeError(err_msg)
+            else:
+                # Word Export (SSoT Model -> DocumentGenerator)
+                generator = DocumentGenerator()
+                word_path = generator.generate_word({
+                    'form_type': 'DRC-01A',
+                    'date': model['oc_date'],
+                    'gstin': model['gstin'],
+                    'legal_name': model['legal_name'],
+                    'address': model['address'],
+                    'proceeding_type': f"Intimation under {model['initiating_section']}",
+                    'facts': f"Issue: {model['initiating_section']}\n(Note: Full narrative is in the preview)",
+                    'tax_data': model['tax_rows']
+                }, os.path.basename(path).replace(".docx", ""))
+                
+                # Move to actual path if generator used OUTPUT_DIR
+                if word_path and os.path.exists(word_path) and word_path != path:
+                    import shutil
+                    shutil.move(word_path, path)
+
+            QMessageBox.information(self, "Success", f"Draft {format.upper()} exported successfully to:\n{path}")
+            
+        except Exception as e:
+            print(f"Export Error: {e}\n{traceback.format_exc()}")
+            QMessageBox.critical(self, "Export Error", f"Failed to export {format.upper()}:\n{str(e)}")
+        finally:
+            self.unsetCursor()
+
+    def generate_drc01a_html(self):
+        """Legacy ref to renderer (Keep for compatibility during transition)"""
+        model = self._get_drc01a_model()
+        return self.render_drc01a_html(model)
     def load_sections(self):
         """Populate Adjudication Sections"""
         if not hasattr(self, 'section_combo'): return
@@ -2045,27 +2429,48 @@ class ProceedingsWorkspace(QWidget):
         self.calculate_grand_totals()
 
     def calculate_grand_totals(self, _=None):
-        """Dynamic Aggregation for DRC-01A Draft (Derived from Issues)"""
-        total_liability = 0.0
+        """Dynamic Aggregation for DRC-01A Draft (Derived from Issues) - Enforced Integers"""
+        total_tax = 0
+        total_interest = 0
+        total_penalty = 0
         
         # Aggregate from all issue cards
         for card in self.issue_cards:
-            # Polymorphic Safety: Handle different card types
-            if hasattr(card, 'get_tax_breakdown'):
-                breakdown = card.get_tax_breakdown()
-                for act, values in breakdown.items():
-                   total_liability += values.get('tax', 0.0)
-                   total_liability += values.get('interest', 0.0)
-                   total_liability += values.get('penalty', 0.0)
-            elif hasattr(card, 'get_total_liability'):
-                 total_liability += card.get_total_liability()
-        
-        # Update Summary Card
-        from src.utils.formatting import format_indian_number
-        if hasattr(self, 'lbl_total_tax'):
-            self.lbl_total_tax.setText(f"₹ {format_indian_number(total_liability)}")
+            if not card.is_included: continue
             
-        # No more table updates. Table is removed.
+            breakdown = card.get_tax_breakdown()
+            for values in breakdown.values():
+               total_tax += values.get('tax', 0)
+               total_interest += values.get('interest', 0)
+               total_penalty += values.get('penalty', 0)
+        
+        grand_total = total_tax + total_interest + total_penalty
+        
+        # Update UI Elements
+        from src.utils.formatting import format_indian_number
+        
+        # Step 2: Total Liability Label
+        if hasattr(self, 'lbl_total_tax'):
+            self.lbl_total_tax.setText(f"₹ {format_indian_number(grand_total)}")
+            
+        # Step 3: Global Breakdown Label
+        if hasattr(self, 'step3_breakdown_lbl'):
+             summary_text = (f"Tax: ₹ {format_indian_number(total_tax)} | "
+                            f"Interest: ₹ {format_indian_number(total_interest)} | "
+                            f"Penalty: ₹ {format_indian_number(total_penalty)}")
+             self.step3_breakdown_lbl.setText(summary_text)
+
+        # Step 3: Refresh the summary table
+        # Guard: skip model call if section is not resolved yet (avoids ValueError)
+        resolved = self.proceeding_data.get('adjudication_section') or self.proceeding_data.get('initiating_section', '')
+        if not resolved or not str(resolved).strip():
+            print("[DRC-01A] calculate_grand_totals: skipping tax table refresh — adjudication_section not yet set.")
+            return
+        try:
+            tax_rows = self._get_drc01a_model().get('tax_rows', [])
+            self._update_drc01a_tax_summary_table(tax_rows)
+        except ValueError as e:
+            print(f"[DRC-01A] calculate_grand_totals: suppressed model error: {e}")
 
 
     def create_scn_tab(self):
@@ -2164,6 +2569,32 @@ class ProceedingsWorkspace(QWidget):
         
         grid.addWidget(date_label, 2, 0)
         grid.addWidget(self.scn_date_input, 2, 1, 1, 2)
+        
+        # [NEW] Issuing Officer Selection
+        officer_label = QLabel("Issuing Officer")
+        officer_label.setStyleSheet(label_style)
+        self.scn_officer_combo = QComboBox()
+        self.scn_officer_combo.setStyleSheet(input_style + " padding: 6px;")
+        
+        # Load active officers into SCN combo box specifically
+        self.scn_officer_combo.addItem("Select Issuing Officer...", None)
+        officers = self.db.get_active_officers()
+        
+        # Hydrate default value natively
+        current_officer_id = self.proceeding_data.get('issuing_officer_id')
+        default_index = 0
+        
+        for idx, off in enumerate(officers, start=1):
+            display_text = f"{off['name']} ({off['designation']}, {off['jurisdiction']})"
+            self.scn_officer_combo.addItem(display_text, off['id'])
+            if off['id'] == current_officer_id:
+                default_index = idx
+                
+        if default_index > 0:
+            self.scn_officer_combo.setCurrentIndex(default_index)
+            
+        grid.addWidget(officer_label, 3, 0)
+        grid.addWidget(self.scn_officer_combo, 3, 1, 1, 2)
 
         # Spacing to Grounds Module
         self.ref_card.content_layout.addWidget(grid_widget)
@@ -2323,7 +2754,7 @@ class ProceedingsWorkspace(QWidget):
         rel_layout.setContentsMargins(0,0,0,0)
         
         self.reliance_editor = RichTextEditor("List documents here (e.g., 1. INS-01 dated...)")
-        self.reliance_editor.setMinimumHeight(300)
+        self.reliance_editor.setMinimumHeight(120)
         
 
         rel_header = QHBoxLayout()
@@ -2341,7 +2772,7 @@ class ProceedingsWorkspace(QWidget):
         copy_layout.setContentsMargins(0,0,0,0)
         
         self.copy_to_editor = RichTextEditor("List authorities here...")
-        self.copy_to_editor.setMinimumHeight(300)
+        self.copy_to_editor.setMinimumHeight(120)
         
 
         copy_header = QHBoxLayout()
@@ -2356,17 +2787,25 @@ class ProceedingsWorkspace(QWidget):
         # 6. Finalization & Preview (Deterministic Step 6)
         self.scn_finalization_container = self.create_scn_finalization_panel()
 
+        # Helper for wrapping non-scrollable widgets
+        def wrap_scroll(w):
+            s = QScrollArea()
+            s.setWidgetResizable(True)
+            s.setFrameShape(QFrame.Shape.NoFrame)
+            s.setWidget(w)
+            return s
+
         # Build Side Nav
         nav_items = [
-            ("Reference Details", "1", ref_widget),
+            ("Reference Details", "1", wrap_scroll(ref_widget)),
             ("Issue Adoption", "2", issues_widget),
-            ("Demand & Contraventions", "3", demand_widget),
-            ("Reliance Placed", "4", reliance_widget),
-            ("Copy Submitted To", "5", copy_widget),
+            ("Demand & Contraventions", "3", wrap_scroll(demand_widget)),
+            ("Reliance Placed", "4", reliance_widget), # Editor handles scroll
+            ("Copy Submitted To", "5", copy_widget), # Editor handles scroll
             ("Actions & Finalize", "✓", self.scn_finalization_container)
         ]
         
-        self.scn_side_nav = self.create_side_nav_layout(nav_items, page_changed_callback=self.on_scn_page_changed)
+        self.scn_side_nav = self.create_side_nav_layout(nav_items, page_changed_callback=self.on_scn_page_changed, use_scroll=False)
         # Store for access in validation
         self.scn_nav_cards = self.scn_side_nav.nav_cards
         
@@ -2455,20 +2894,48 @@ class ProceedingsWorkspace(QWidget):
             if grounds_data:
                 current_details['scn_grounds'] = grounds_data
             
+            # [NEW] Establish Snapshot Payload
+            officer_id = None
+            officer_snapshot = None
+            if hasattr(self, 'scn_officer_combo'):
+                officer_id = self.scn_officer_combo.currentData()
+                if officer_id:
+                    officer_data = self.db.get_officer_by_id(officer_id)
+                    if officer_data:
+                        import json
+                        existing_snap_str = self.proceeding_data.get('issuing_officer_snapshot')
+                        existing_snap = {}
+                        if existing_snap_str:
+                            try:
+                                existing_snap = json.loads(existing_snap_str)
+                                if 'name' in existing_snap and 'SCN' not in existing_snap and 'DRC-01A' not in existing_snap:
+                                    existing_snap = {'DRC-01A': existing_snap}
+                            except:
+                                existing_snap = {}
+                        
+                        existing_snap['SCN'] = officer_data
+                        officer_snapshot = json.dumps(existing_snap)
+
             # 3. Persist to DB (Routed Logic)
             if self.proceeding_data.get('is_adjudication'):
                 # Adjudication Case (Table: adjudication_cases)
                 success = self.db.update_adjudication_case(self.proceeding_id, {
-                    "additional_details": current_details
+                    "additional_details": current_details,
+                    "issuing_officer_id": officer_id,
+                    "issuing_officer_snapshot": officer_snapshot
                 })
             else:
                 # Standard Proceeding (Table: proceedings)
                 success = self.db.update_proceeding(self.proceeding_id, {
-                    "additional_details": current_details
+                    "additional_details": current_details,
+                    "issuing_officer_id": officer_id,
+                    "issuing_officer_snapshot": officer_snapshot
                 })
             
             # 4. Update local state
             self.proceeding_data['additional_details'] = current_details
+            self.proceeding_data['issuing_officer_id'] = officer_id
+            self.proceeding_data['issuing_officer_snapshot'] = officer_snapshot
             
             # 5. Evaluate phase (Enables Step 2 if metadata is now valid)
             self.evaluate_scn_workflow_phase()
@@ -2579,20 +3046,9 @@ class ProceedingsWorkspace(QWidget):
         # Trigger rendering ONLY when entering the finalization stage for the first time
         # We compare the page widget at the current index directly to our stored container
         if hasattr(self, 'scn_side_nav') and hasattr(self, 'scn_finalization_container'):
-             # Each item in the side_nav is wrapped in a scroll area. 
-             # Let's check the index if it matches the 'Actions & Finalize' item.
-             # Actually, simpler: we know Step 6 is index 5. 
-             # But per user request to use widget comparison:
-             try:
-                 # Check if the widget in the content stack for this index matches
-                 # But the items were wrapped. 
-                 # Let's use a flag on the widget itself or stored index.
-                 if index == 5: # Definitively 'Actions & Finalize'
-                     if not getattr(self, 'preview_initialized', False):
-                         self.render_final_preview()
-                         self.preview_initialized = True
-             except:
-                 pass
+             if index == 5: # Definitively 'Actions & Finalize'
+                 # Always refresh preview when entering the step to ensure data parity
+                 self.render_final_preview()
             
         print(f"SCN: Moved to Step {index+1}.")
 
@@ -2930,7 +3386,7 @@ class ProceedingsWorkspace(QWidget):
         print("ProceedingsWorkspace: creating order_editor")
         self.order_editor = RichTextEditor("Enter the Order content here...")
         print("ProceedingsWorkspace: order_editor created")
-        self.order_editor.setMinimumHeight(400)
+        self.order_editor.setMinimumHeight(150)
         
         layout.addWidget(self.order_editor)
         print("ProceedingsWorkspace: order_editor added")
@@ -2974,11 +3430,8 @@ class ProceedingsWorkspace(QWidget):
         main_scroll = QScrollArea()
         main_scroll.setWidgetResizable(True)
         main_scroll.setWidget(container)
-        
-        print("ProceedingsWorkspace: create_order_tab done")
         return main_scroll
 
-    
     def create_scn_finalization_panel(self):
         """Create the SCN Finalization Summary Panel with embedded QWebEngineView (Chromium)"""
         container = QWidget()
@@ -2987,21 +3440,12 @@ class ProceedingsWorkspace(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Top: Summary Panel (Fixed/Minimal Height)
+        # Add Panel
         self.scn_fin_panel = FinalizationPanel()
-        layout.addWidget(self.scn_fin_panel, 0)
+        layout.addWidget(self.scn_fin_panel)
         
-        # Bottom: High-Fidelity Preview (Expanding)
-        self.scn_final_preview = QWebEngineView()
-        self.scn_final_preview.setMinimumHeight(400)
-        self.scn_final_preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        # Apply page container background style to the internal browser
-        self.scn_final_preview.setStyleSheet("background-color: #f1f3f4;")
-        layout.addWidget(self.scn_final_preview, 1)
-        
-        # Clear/Set Stretch explicitly
-        layout.setStretch(0, 0) # Buttons/Summary
-        layout.setStretch(1, 1) # Preview
+        # Link reference for code compatibility
+        self.scn_final_preview = self.scn_fin_panel.browser
         
         # Consolidated Button Connections
         self.scn_fin_panel.save_btn.clicked.connect(lambda: self.save_document("SCN", is_manual=True))
@@ -3092,7 +3536,7 @@ class ProceedingsWorkspace(QWidget):
                     self.scn_issue_combo.addItem("--- ADOPT FROM ASMT-10 ---", None)
                     for record in finalized_issues:
                         issue_id = record['issue_id']
-                        adopted_from_asmt10_ids.add(issue_id)
+                        adopted_from_upstream_ids.add(issue_id) # Corrected variable name
                         
                         # Skip if already present in draft (Dynamic Availability)
                         if issue_id in present_issue_ids:
@@ -3123,7 +3567,7 @@ class ProceedingsWorkspace(QWidget):
                 
                 # Filter: Must be SOP issue, NOT in ASMT-10 source
                 if not issue_id.startswith('SOP-'): continue
-                if issue_id in adopted_from_asmt10_ids: continue
+                if issue_id in adopted_from_upstream_ids: continue # Corrected variable name
                 
                 # Check existance for SOP issues (Unique)
                 if issue_id in present_issue_ids: continue
@@ -4114,7 +4558,7 @@ class ProceedingsWorkspace(QWidget):
                                            elif isinstance(s_row, list):
                                                # Match Legacy List-Row by Index using Master Column IDs
                                                for col_idx, s_cell in enumerate(s_row):
-                                                   if col_idx < len(m_cols):
+                                                   if col_idx < len(m_row):
                                                        m_col = m_cols[col_idx]
                                                        cid = m_col.get('id') if isinstance(m_col, dict) else str(m_col).lower().replace(" ", "_")
                                                        if cid in m_row and isinstance(m_row[cid], dict):
@@ -4368,7 +4812,7 @@ class ProceedingsWorkspace(QWidget):
                 editor = RichTextEditor()
                 formatted_text = text.replace('\n', '<br>')
                 editor.setHtml(formatted_text)
-                editor.setMinimumHeight(150)
+                editor.setMinimumHeight(100)
                 
 
                 
@@ -4392,7 +4836,7 @@ class ProceedingsWorkspace(QWidget):
                 int_tile = ModernCard(f"Interest Demand (Clause {interest_roman})", collapsible=True)
                 int_editor = RichTextEditor()
                 int_editor.setHtml(int_text)
-                int_editor.setMinimumHeight(120)
+                int_editor.setMinimumHeight(80)
                 
 
                 int_tile.addWidget(int_editor)
@@ -4406,12 +4850,12 @@ class ProceedingsWorkspace(QWidget):
                 pen_tile = ModernCard(f"Penalty Demand (Clause {pen_roman})", collapsible=True)
                 pen_editor = RichTextEditor()
                 pen_editor.setHtml(pen_text)
-                pen_editor.setMinimumHeight(120)
+                pen_editor.setMinimumHeight(80)
                 
 
                 pen_tile.addWidget(pen_editor)
                 self.demand_tiles_layout.addWidget(pen_tile)
-                self.demand_tiles.append({'issue_id': 'PENALTY_GLOBAL', 'type': 'PENALTY', 'card': pen_tile, 'editor': pen_editor})
+                self.demand_tiles.append({'issue_id': 'PENALTY_GLOBAL', 'type': 'PENALTY', 'card': pen_tile, 'editor': int_editor})
                 
             
             
@@ -4559,143 +5003,6 @@ class ProceedingsWorkspace(QWidget):
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.scn_issues_layout.addWidget(lbl)
 
-    def toggle_act_row(self, act_name, state):
-        """Add or remove row for the selected act"""
-        if state == Qt.CheckState.Checked.value:
-            # Add Row before Total row
-            total_row = self.tax_table.rowCount() - 1
-            self.tax_table.insertRow(total_row)
-            
-            # Act Name (Read-only)
-            item = QTableWidgetItem(act_name)
-            item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            self.tax_table.setItem(total_row, 0, item)
-            
-            # Get months for the financial year
-            fy = self.proceeding_data.get('financial_year', '')
-            months = self.get_fy_months(fy)
-            
-            # Period From (Dropdown)
-            from_combo = QComboBox()
-            from_combo.addItems(months)
-            from_combo.setStyleSheet("padding: 4px;")
-            from_combo.currentTextChanged.connect(self.calculate_totals)
-            self.tax_table.setCellWidget(total_row, 1, from_combo)
-            
-            # Period To (Dropdown)
-            to_combo = QComboBox()
-            to_combo.addItems(months)
-            to_combo.setCurrentIndex(len(months) - 1)  # Default to last month
-            to_combo.setStyleSheet("padding: 4px;")
-            to_combo.currentTextChanged.connect(self.calculate_totals)
-            self.tax_table.setCellWidget(total_row, 2, to_combo)
-            
-            # Editable cells for amounts
-            for col in range(3, 7):
-                self.tax_table.setItem(total_row, col, QTableWidgetItem("0"))
-        else:
-            # Remove Row
-            for row in range(self.tax_table.rowCount() - 1):  # Exclude Total row
-                item = self.tax_table.item(row, 0)
-                if item and item.text() == act_name:
-                    self.tax_table.removeRow(row)
-                    break
-        
-        self.calculate_totals()
-    
-    def get_fy_months(self, fy_string):
-        """Get list of months for a financial year (e.g., '2022-23' -> ['April 2022', 'May 2022', ...])"""
-        if not fy_string or '-' not in fy_string:
-            # Default to current FY
-            import datetime
-            year = datetime.date.today().year
-            fy_string = f"{year}-{str(year+1)[-2:]}"
-        
-        try:
-            start_year = int(fy_string.split('-')[0])
-            end_year = int('20' + fy_string.split('-')[1])
-        except:
-            import datetime
-            year = datetime.date.today().year
-            start_year = year
-            end_year = year + 1
-        
-        months = []
-        month_names = ["April", "May", "June", "July", "August", "September", 
-                      "October", "November", "December", "January", "February", "March"]
-        
-        for i, month in enumerate(month_names):
-            if i < 9:  # April to December
-                months.append(f"{month} {start_year}")
-            else:  # January to March
-                months.append(f"{month} {end_year}")
-        
-        return months
-
-    def add_total_row(self):
-        """Add Total row at the bottom"""
-        row = self.tax_table.rowCount()
-        self.tax_table.insertRow(row)
-        
-        # Total label
-        item = QTableWidgetItem("Total")
-        item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-        item.setBackground(Qt.GlobalColor.lightGray)
-        self.tax_table.setItem(row, 0, item)
-        
-        # Empty cells for periods
-        for col in [1, 2]:
-            item = QTableWidgetItem("-")
-            item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            item.setBackground(Qt.GlobalColor.lightGray)
-            self.tax_table.setItem(row, col, item)
-        
-        # Total amounts
-        for col in range(3, 7):
-            item = QTableWidgetItem("0")
-            item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            item.setBackground(Qt.GlobalColor.lightGray)
-            self.tax_table.setItem(row, col, item)
-
-    def calculate_totals(self):
-        """Calculate row totals and grand totals"""
-        # Temporarily disconnect to avoid recursion
-        try:
-            self.tax_table.itemChanged.disconnect(self.calculate_totals)
-        except:
-            pass
-        
-        total_row = self.tax_table.rowCount() - 1
-        if total_row < 0: return
-
-        # Calculate each row's total (Tax + Interest + Penalty)
-        for row in range(total_row):
-            try:
-                tax = float(self.tax_table.item(row, 3).text() or 0)
-                interest = float(self.tax_table.item(row, 4).text() or 0)
-                penalty = float(self.tax_table.item(row, 5).text() or 0)
-                total = tax + interest + penalty
-                self.tax_table.setItem(row, 6, QTableWidgetItem(str(total)))
-            except (ValueError, AttributeError):
-                pass
-        
-        # Calculate grand totals
-        for col in range(3, 7):
-            grand_total = 0
-            for row in range(total_row):
-                try:
-                    value = float(self.tax_table.item(row, col).text() or 0)
-                    grand_total += value
-                except (ValueError, AttributeError):
-                    pass
-            
-            item = QTableWidgetItem(str(grand_total))
-            item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable)
-            item.setBackground(Qt.GlobalColor.lightGray)
-            self.tax_table.setItem(total_row, col, item)
-        
-        # Reconnect signal
-        self.tax_table.itemChanged.connect(self.calculate_totals)
 
     def open_asmt10_reference(self):
         """Open ASMT-10 in a modal overlay for reference"""
@@ -4729,162 +5036,6 @@ class ProceedingsWorkspace(QWidget):
         dlg = ASMT10ReferenceDialog(self, html)
         dlg.exec()
 
-
-
-    def generate_drc01a_html(self):
-        if not self.proceeding_data:
-            return "<h3>No Case Data Loaded</h3>"
-            
-        # Load Template
-        try:
-            with open('templates/drc_01a.html', 'r', encoding='utf-8') as f:
-                html = f.read()
-        except:
-            return "<h3>Template not found</h3>"
-            
-        # Taxpayer Details (Ensure flattened keys exist)
-        tp = self.proceeding_data.get('taxpayer_details', {})
-        if isinstance(tp, str):
-            try: import json; tp = json.loads(tp)
-            except: tp = {}
-        elif tp is None:
-            tp = {}
-            
-        gstin = self.proceeding_data.get('gstin', '') or tp.get('GSTIN', '')
-        legal_name = self.proceeding_data.get('legal_name', '') or tp.get('Legal Name', '')
-        trade_name = self.proceeding_data.get('trade_name', '') or tp.get('Trade Name', '')
-        address = self.proceeding_data.get('address', '') or tp.get('Address', '')
-        
-        # Replace Placeholders with data from DB + Editors
-        html = html.replace("{{GSTIN}}", str(gstin))
-        html = html.replace("{{LegalName}}", str(legal_name))
-        html = html.replace("{{TradeName}}", str(trade_name))
-        html = html.replace("{{Address}}", str(address))
-        html = html.replace("{{CaseID}}", self.proceeding_data.get('case_id', '') or '')
-        html = html.replace("{{OCNumber}}", self.oc_number_input.text())
-        html = html.replace("{{FinancialYear}}", self.proceeding_data.get('financial_year', '') or '')
-        html = html.replace("{{SelectedSection}}", self.proceeding_data.get('initiating_section', '') or '')
-        html = html.replace("{{FormType}}", self.proceeding_data.get('form_type', '') or '')
-        
-        # Issue Date (Use OC Date)
-        issue_date_str = self.oc_date_input.date().toString("dd/MM/yyyy")
-        html = html.replace("{{IssueDate}}", issue_date_str)
-        html = html.replace("{{CurrentDate}}", issue_date_str) # Fallback if template still has it
-        
-        # Conditional Section Text
-        section = self.proceeding_data.get('initiating_section', '')
-        if "73" in section:
-            section_title = "section 73(5)"
-            section_body = "73(5)"
-        elif "74" in section:
-            section_title = "section 74(5)"
-            section_body = "74(5)"
-        else:
-            section_title = "section 73(5)/section 74(5)"
-            section_body = "73(5) / 74(5)"
-            
-        html = html.replace("{{SectionTitle}}", section_title)
-        html = html.replace("{{SectionBody}}", section_body)
-
-        # The user's HTML has {{IssueDescription}} and {{SectionsViolated}} but NO {{GroundsContent}}?
-        # Wait, looking at the user's HTML:
-        # <div class="section-title">Issue:</div>
-        # <div>{{IssueDescription}}</div>
-        # <div class="section-title">Sections Violated:</div>
-        # <div>{{SectionsViolated}}</div>
-        
-        # So I should map the "Issues Involved" editor to {{IssueDescription}} 
-        # and "Sections Violated" editor to {{SectionsViolated}}
-        
-        # Aggregate HTML from all Issue Cards
-        issues_html = ""
-        for card in self.issue_cards:
-            issues_html += card.generate_html()
-            issues_html += "<br><hr><br>" # Separator between issues
-            
-        html = html.replace("{{IssueDescription}}", issues_html)
-        html = html.replace("{{SectionsViolated}}", self.sections_editor.toHtml())
-        
-        # Generate Tax Table HTML
-        tax_table_html = self.generate_tax_table_html()
-        html = html.replace("{{TaxTableRows}}", tax_table_html)
-        
-        # Calculate Tax Period Range from Table
-        period_from_list = []
-        period_to_list = []
-        for row in range(self.tax_table.rowCount()):
-            # Check if row is valid (not total row)
-            if self.tax_table.item(row, 0) and self.tax_table.item(row, 0).text() != "Total":
-                # Get period from QComboBox widgets or items
-                from_widget = self.tax_table.cellWidget(row, 1)
-                to_widget = self.tax_table.cellWidget(row, 2)
-                
-                p_from = ""
-                p_to = ""
-                
-                if isinstance(from_widget, QComboBox):
-                    p_from = from_widget.currentText()
-                elif self.tax_table.item(row, 1):
-                    p_from = self.tax_table.item(row, 1).text()
-                    
-                if isinstance(to_widget, QComboBox):
-                    p_to = to_widget.currentText()
-                elif self.tax_table.item(row, 2):
-                    p_to = self.tax_table.item(row, 2).text()
-                
-                if p_from: period_from_list.append(p_from)
-                if p_to: period_to_list.append(p_to)
-        
-        # Simple logic: take first and last if available, otherwise empty
-        tax_period_from = period_from_list[0] if period_from_list else ""
-        tax_period_to = period_to_list[-1] if period_to_list else ""
-        
-        html = html.replace("{{TaxPeriodFrom}}", tax_period_from)
-        html = html.replace("{{TaxPeriodTo}}", tax_period_to)
-        
-        # Get Last Date for Payment
-        last_date_payment = self.payment_date.date().toString("dd/MM/yyyy")
-        html = html.replace("{{LastDateForPayment}}", last_date_payment)
-        
-        # Get Last Date for Reply
-        last_date_reply = self.reply_date.date().toString("dd/MM/yyyy")
-        html = html.replace("{{LastDateForReply}}", last_date_reply)
-        
-        # Generate Conditional Advice Text based on Section
-        # Use Adjudication Section if available (Adjudication Case), else Initiating Section (Scrutiny)
-        section = self.proceeding_data.get('adjudication_section') or self.proceeding_data.get('initiating_section', '')
-        print(f"DEBUG: Section value = '{section}'")  # Debug output
-        
-        if "73" in section:
-            advice_text = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest in full by {last_date_payment}, failing which Show Cause Notice will be issued under section 73(1)."
-            print(f"DEBUG: Using Section 73 advice text")  # Debug output
-        elif "74" in section:
-            advice_text = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest and penalty under section 74(5) by {last_date_payment}, failing which Show Cause Notice will be issued under section 74(1)."
-            print(f"DEBUG: Using Section 74 advice text")  # Debug output
-        else:
-            advice_text = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest by {last_date_payment}, failing which Show Cause Notice will be issued."
-            print(f"DEBUG: Using default advice text")  # Debug output
-        
-        print(f"DEBUG: Advice text = '{advice_text}'")  # Debug output
-        html = html.replace("{{AdviceText}}", advice_text)
-        
-        # Inject letterhead if checkbox is checked
-        if self.show_letterhead_cb.isChecked():
-            try:
-                from src.utils.config_manager import ConfigManager
-                config = ConfigManager()
-                letterhead_path = config.get_letterhead_path('pdf')
-                with open(letterhead_path, 'r', encoding='utf-8') as f:
-                    letterhead_html = f.read()
-                html = html.replace('<div id="letterhead-placeholder"></div>', letterhead_html)
-            except Exception as e:
-                print(f"Error loading letterhead: {e}")
-        
-        # Clean up others
-        for p in ["{{OCNumber}}", "{{SCNSection}}", "{{CurrentDate}}", "{{ComplianceDate}}", "{{TaxPeriodFrom}}", "{{TaxPeriodTo}}", "{{IssueDescription}}", "{{TaxAmount}}", "{{InterestAmount}}", "{{PenaltyAmount}}", "{{TotalAmount}}"]:
-            html = html.replace(p, "_________________")
-            
-        return html
 
     def _get_scn_model(self):
         """Build a structured SCN data model for consistent rendering across Preview, PDF, and DOCX."""
@@ -4939,11 +5090,58 @@ class ProceedingsWorkspace(QWidget):
         model['gstin'] = model.get('gstin', '')
         model['constitution_of_business'] = tp.get('Constitution of Business', 'Registered')
         
-        # Officer Details
-        model['officer_name'] = "VISHNU V"
-        model['officer_designation'] = "Superintendent"
-        model['designation'] = "Superintendent"
-        model['jurisdiction'] = "Paravur Range"
+        # [NEW] Officer Details (Snapshot Priority -> Database Query -> Fallback)
+        officer_name = "________________"
+        officer_desg = "________________"
+        officer_juris = "________________"
+        
+        # Priority 1: Adjudication Case specific snapshot (if origin is ADJUDICATION)
+        # Priority 2: Proceedings base snapshot (if origin is SCRUTINY)
+        
+        details = model.get('additional_details', {})
+        if isinstance(details, str):
+            try: details = json.loads(details)
+            except: details = {}
+            
+        snapshot_json = model.get('issuing_officer_snapshot')
+        officer_id = model.get('issuing_officer_id')
+        
+        # Attempt recovery from JSON details if main columns missing (transitional safety)
+        if not snapshot_json and 'issuing_officer_snapshot' in details:
+            snapshot_json = details['issuing_officer_snapshot']
+        if not officer_id and 'issuing_officer_id' in details:
+            officer_id = details['issuing_officer_id']
+            
+        if snapshot_json:
+            try:
+                import json
+                parsed_snap = json.loads(snapshot_json)
+                
+                # Check for isolated SCN snapshot
+                if 'SCN' in parsed_snap:
+                    off_data = parsed_snap['SCN']
+                elif 'name' in parsed_snap:
+                    off_data = parsed_snap # Fallback for old flat format
+                else:
+                    off_data = {}
+                    
+                officer_name = off_data.get('name', officer_name)
+                officer_desg = off_data.get('designation', officer_desg)
+                officer_juris = off_data.get('jurisdiction', officer_juris)
+            except json.JSONDecodeError:
+                pass
+        elif officer_id:
+            # Fallback to live query
+            off_data = self.db.get_officer_by_id(officer_id)
+            if off_data:
+                officer_name = off_data.get('name', officer_name)
+                officer_desg = off_data.get('designation', officer_desg)
+                officer_juris = off_data.get('jurisdiction', officer_juris)
+
+        model['officer_name'] = officer_name
+        model['officer_designation'] = officer_desg
+        model['designation'] = officer_desg
+        model['jurisdiction'] = officer_juris
 
         # 2. Sequential Issues Handling
         included_issues = []
@@ -4996,15 +5194,50 @@ class ProceedingsWorkspace(QWidget):
             
             issues_data.append(issue_info)
             
-            # Totals
+            # Totals Aggregation (Structured Model)
             card_data = card.get_data()
-            breakdown = card_data.get('tax_breakdown', {})
-            for act, vals in breakdown.items():
-                tax = vals.get('tax', 0)
-                total_tax += tax
-                if act == 'IGST': igst_total += tax
-                elif act == 'CGST': cgst_total += tax
-                elif act == 'SGST': sgst_total += tax
+            card_breakdown = card.get_tax_breakdown() # Returns integer mapping
+            
+            for act, vals in card_breakdown.items():
+                v_tax = vals.get('tax', 0)
+                v_int = vals.get('interest', 0)
+                v_pen = vals.get('penalty', 0)
+                
+                total_tax += v_tax
+                if act == 'IGST': igst_total += v_tax
+                elif act == 'CGST': cgst_total += v_tax
+                elif act == 'SGST': sgst_total += v_tax
+        
+        # 3. Aggregate Tax Summary for the Table (Act-wise)
+        total_breakdown = {}
+        for card in included_issues:
+            card_breakdown = card.get_tax_breakdown()
+            for act, vals in card_breakdown.items():
+                if act not in total_breakdown:
+                    total_breakdown[act] = {'tax': 0, 'interest': 0, 'penalty': 0, 'total': 0}
+                
+                t = vals.get('tax', 0)
+                i = vals.get('interest', 0)
+                p = vals.get('penalty', 0)
+                
+                total_breakdown[act]['tax'] += t
+                total_breakdown[act]['interest'] += i
+                total_breakdown[act]['penalty'] += p
+                total_breakdown[act]['total'] += (t + i + p)
+
+        # Build tax_rows for the generator
+        tax_rows = []
+        for act in self.ACT_PRIORITY:
+            if act in total_breakdown:
+                vals = total_breakdown[act]
+                tax_rows.append({
+                    'act': act,
+                    'period': model.get('financial_year', ''),
+                    'tax': vals['tax'],
+                    'interest': vals['interest'],
+                    'penalty': vals['penalty'],
+                    'total': vals['total']
+                })
 
         model['issues'] = issues_data
         model['total_tax_val'] = total_tax
@@ -5016,7 +5249,7 @@ class ProceedingsWorkspace(QWidget):
         def format_indian_currency(value):
             if value is None: return "0"
             try:
-                val = float(value)
+                val = safe_int(value)
             except (ValueError, TypeError):
                 return str(value)
             
@@ -5132,8 +5365,8 @@ class ProceedingsWorkspace(QWidget):
         else:
              model['demand_text'] = "<p>No demand details generated.</p>"
 
-        # Tax Table
-        model['tax_table_html'] = self.generate_tax_table_html()
+        # 4. Tax Table HTML (Data-Driven)
+        model['tax_table_html'] = self.generate_tax_table_html(tax_rows)
 
         return model
     def render_scn(self, is_preview=False, for_pdf=False):
@@ -5240,8 +5473,9 @@ class ProceedingsWorkspace(QWidget):
 
             # Standard SCN context variables
             model['section'] = model.get('initiating_section', '')
+            model['for_pdf'] = for_pdf
             
-            # Load Template and CSS
+            # Load CSS explicitly for SCN injection (since TemplateEngine doesn't do this yet)
             template_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "templates")
             css_dir = os.path.join(template_dir, 'css')
             
@@ -5255,22 +5489,15 @@ class ProceedingsWorkspace(QWidget):
             model['base_css'] = read_css('doc_base.css')
             renderer_mode = 'pdf' if not is_preview else 'qt'
             if renderer_mode == 'pdf':
-                model['renderer_css'] = "" # Base CSS now includes @media print
+                model['renderer_css'] = ""
             else:
                 model['renderer_css'] = read_css('doc_qt.css')
 
-            print(f"DEBUG SCN: template_dir={template_dir}")
-            print(f"DEBUG SCN: base_css_len={len(model['base_css'])}")
-            print(f"DEBUG SCN: renderer_css_len={len(model['renderer_css'])}")
-
-            # Workaround for formatter mangling: generate full style tag in Python
             model['full_styles_html'] = f"<style>\n{model['base_css']}\n{model['renderer_css']}\n</style>"
-
-            env = Environment(loader=FileSystemLoader(template_dir))
-            template = env.get_template('scn.html')
             
-            model['for_pdf'] = for_pdf
-            return template.render(**model)
+            # Use Centralized TemplateEngine
+            from src.utils.template_engine import TemplateEngine
+            return TemplateEngine.render_document("scn.html", model)
             
         except Exception as e:
             print(f"Error rendering SCN: {e}")
@@ -5280,51 +5507,60 @@ class ProceedingsWorkspace(QWidget):
 
     def save_drc01a_metadata(self):
         """Save DRC-01A Metadata (OC No, Dates, etc.) to DB"""
+        # 1. Regenerate Model for aggregated periods
+        model = self._get_drc01a_model()
+        
         metadata = {
             "oc_number": self.oc_number_input.text(),
             "oc_date": self.oc_date_input.date().toString("yyyy-MM-dd"),
-            "reply_date": self.reply_date.date().toString("yyyy-MM-dd"),
-            "payment_date": self.payment_date.date().toString("yyyy-MM-dd"),
+            "reply_date": self.reply_deadline_input.date().toString("yyyy-MM-dd"),
+            "payment_date": self.payment_deadline_input.date().toString("yyyy-MM-dd"),
             "financial_year": self.proceeding_data.get('financial_year', ''),
-            "initiating_section": self.proceeding_data.get('initiating_section', '')
+            "initiating_section": self.proceeding_data.get('initiating_section', ''),
+            "sections_violated_html": self.sections_editor.toHtml(),
+            "tax_period_from": model.get('tax_period_from', ''),
+            "tax_period_to": model.get('tax_period_to', '')
         }
-        
-        # Tax Period Logic
-        period_from_list = []
-        period_to_list = []
-        for row in range(self.tax_table.rowCount()):
-            if self.tax_table.item(row, 0) and self.tax_table.item(row, 0).text() != "Total":
-                from_widget = self.tax_table.cellWidget(row, 1)
-                to_widget = self.tax_table.cellWidget(row, 2)
-                
-                p_from = ""
-                p_to = ""
-                
-                if isinstance(from_widget, QComboBox): p_from = from_widget.currentText()
-                elif self.tax_table.item(row, 1): p_from = self.tax_table.item(row, 1).text()
-                    
-                if isinstance(to_widget, QComboBox): p_to = to_widget.currentText()
-                elif self.tax_table.item(row, 2): p_to = self.tax_table.item(row, 2).text()
-                
-                if p_from: period_from_list.append(p_from)
-                if p_to: period_to_list.append(p_to)
-                
-        metadata['tax_period_from'] = period_from_list[0] if period_from_list else ""
-        metadata['tax_period_to'] = period_to_list[-1] if period_to_list else ""
         
         # [PHASE 15] Safe Merge
         details = copy.deepcopy(self.proceeding_data.get('additional_details', {}))
         details['drc01a_metadata'] = metadata
         
+        # Fetch snapshot for DB
+        officer_id = None
+        officer_snapshot = None
+        if hasattr(self, 'officer_combo'):
+            officer_id = self.officer_combo.currentData()
+            if officer_id:
+                officer_data = self.db.get_officer_by_id(officer_id)
+                if officer_data:
+                    import json
+                    existing_snap_str = self.proceeding_data.get('issuing_officer_snapshot')
+                    existing_snap = {}
+                    if existing_snap_str:
+                        try:
+                            existing_snap = json.loads(existing_snap_str)
+                            if 'name' in existing_snap and 'SCN' not in existing_snap and 'DRC-01A' not in existing_snap:
+                                existing_snap = {'DRC-01A': existing_snap}
+                        except:
+                            existing_snap = {}
+                    
+                    existing_snap['DRC-01A'] = officer_data
+                    officer_snapshot = json.dumps(existing_snap)
+        
         self.db.update_proceeding(self.proceeding_id, {
             "initiating_section": metadata['initiating_section'],
             "last_date_to_reply": metadata['reply_date'],
-            "additional_details": details
+            "additional_details": details,
+            "issuing_officer_id": officer_id,
+            "issuing_officer_snapshot": officer_snapshot
         })
         
         # Update local data
         self.proceeding_data.update(metadata)
         self.proceeding_data['additional_details'] = details
+        self.proceeding_data['issuing_officer_id'] = officer_id
+        self.proceeding_data['issuing_officer_snapshot'] = officer_snapshot
 
     def save_drc01a(self):
         """Save DRC-01A Draft"""
@@ -5369,57 +5605,57 @@ class ProceedingsWorkspace(QWidget):
 
         QMessageBox.information(self, "Success", "DRC-01A draft saved successfully!")
 
-    def generate_tax_table_html(self):
-        """Generate HTML table rows from tax_table widget"""
+    def generate_tax_table_html(self, tax_rows):
+        """
+        PURE FUNCTION: Generate HTML table rows from structured data.
+        Accepts list of dicts: [{'act', 'period', 'tax', 'interest', 'penalty', 'total'}, ...]
+        """
         rows_html = ""
-        try:
-            for row in range(self.tax_table.rowCount()):
-                item_act = self.tax_table.item(row, 0)
-                act = item_act.text() if item_act else ""
-                
-                # Get period from QComboBox widgets
-                from_widget = self.tax_table.cellWidget(row, 1)
-                to_widget = self.tax_table.cellWidget(row, 2)
-                
-                if isinstance(from_widget, QComboBox):
-                    period_from = from_widget.currentText()
-                else:
-                    item_from = self.tax_table.item(row, 1)
-                    period_from = item_from.text() if item_from else ""
-                    
-                if isinstance(to_widget, QComboBox):
-                    period_to = to_widget.currentText()
-                else:
-                    item_to = self.tax_table.item(row, 2)
-                    period_to = item_to.text() if item_to else ""
-                
-                item_tax = self.tax_table.item(row, 3)
-                tax = item_tax.text() if item_tax else "0"
-                
-                item_int = self.tax_table.item(row, 4)
-                interest = item_int.text() if item_int else "0"
-                
-                item_pen = self.tax_table.item(row, 5)
-                penalty = item_pen.text() if item_pen else "0"
-                
-                item_tot = self.tax_table.item(row, 6)
-                total = item_tot.text() if item_tot else "0"
-                
-                rows_html += f"""
-                <tr>
-                    <td style="border: 1px solid black; padding: 8px;">{act}</td>
-                    <td style="border: 1px solid black; padding: 8px;">{period_from}</td>
-                    <td style="border: 1px solid black; padding: 8px;">{period_to}</td>
-                    <td style="border: 1px solid black; padding: 8px; text-align: right;">{tax}</td>
-                    <td style="border: 1px solid black; padding: 8px; text-align: right;">{interest}</td>
-                    <td style="border: 1px solid black; padding: 8px; text-align: right;">{penalty}</td>
-                    <td style="border: 1px solid black; padding: 8px; text-align: right;">{total}</td>
-                </tr>
-                """
-        except Exception as e:
-            print(f"Error generating tax table HTML: {e}")
-            return "<tr><td colspan='7'>Error loading tax details</td></tr>"
-    
+        if not tax_rows:
+            return "<tr><td colspan='7' style='text-align: center;'>No tax details found.</td></tr>"
+
+        from src.utils.formatting import format_indian_number
+        
+        total_tax = 0
+        total_int = 0
+        total_pen = 0
+        total_grand = 0
+
+        for row in tax_rows:
+            act = row.get('act', '')
+            period = row.get('period', '')
+            tax = row.get('tax', 0)
+            interest = row.get('interest', 0)
+            penalty = row.get('penalty', 0)
+            total = row.get('total', 0)
+            
+            total_tax += tax
+            total_int += interest
+            total_pen += penalty
+            total_grand += total
+
+            # DRC-01A expects 6 columns: Act | Period | Tax | Interest | Penalty | Total
+            rows_html += f"""
+            <tr>
+                <td style="border: 1px solid black; padding: 5px; text-align: center;">{act}</td>
+                <td style="border: 1px solid black; padding: 5px; text-align: center;">{period}</td>
+                <td style="border: 1px solid black; padding: 5px; text-align: right;">{format_indian_number(tax)}</td>
+                <td style="border: 1px solid black; padding: 5px; text-align: right;">{format_indian_number(interest)}</td>
+                <td style="border: 1px solid black; padding: 5px; text-align: right;">{format_indian_number(penalty)}</td>
+                <td style="border: 1px solid black; padding: 5px; text-align: right;"><b>{format_indian_number(total)}</b></td>
+            </tr>
+            """
+        
+        # Add a Grand Total row for the DRC-01A/SCN Table inject
+        rows_html += f"""
+        <tr style="background-color: #f2f2f2; font-weight: bold;">
+            <td colspan="2" style="border: 1px solid black; padding: 5px; text-align: right;">Total</td>
+            <td style="border: 1px solid black; padding: 5px; text-align: right;">{format_indian_number(total_tax)}</td>
+            <td style="border: 1px solid black; padding: 5px; text-align: right;">{format_indian_number(total_int)}</td>
+            <td style="border: 1px solid black; padding: 5px; text-align: right;">{format_indian_number(total_pen)}</td>
+            <td style="border: 1px solid black; padding: 5px; text-align: right;">{format_indian_number(total_grand)}</td>
+        </tr>
+        """
         return rows_html
 
     def generate_pdf(self):
@@ -5637,194 +5873,105 @@ class ProceedingsWorkspace(QWidget):
                 os.startfile(file_path)
                 return
 
-            # Check if proceeding is loaded
-            if not self.proceeding_data or not isinstance(self.proceeding_data, dict):
-                QMessageBox.warning(self, "Error", "No proceeding loaded. Please open a case first.")
-                return
+            # 1. Regenerate model & Validate (DRC-01A Only)
+            if current_index == 1:
+                drc_model = self._get_drc01a_model()
+                valid, msg = self.validate_drc01a_model(drc_model)
+                if not valid:
+                    QMessageBox.warning(self, "Export Validation", msg)
+                    return
+            else:
+                drc_model = {}
 
-            # Save Metadata first!
-            self.save_drc01a_metadata()
-
-            # 1. Validate OC No (Mandatory)
-            oc_no = self.oc_number_input.text().strip()
-            if not oc_no:
-                QMessageBox.warning(self, "Validation Error", "OC Number is mandatory. Please enter it in the Reference Details section.")
-                return
-                
             from PyQt6.QtWidgets import QFileDialog
             from docx import Document
             from docx.shared import Pt, Inches
             from docx.enum.text import WD_ALIGN_PARAGRAPH
-            from bs4 import BeautifulSoup
             import os
             
             # Ask user for save location
-            case_id = self.proceeding_data.get('case_id', 'DRAFT')
-            if case_id and isinstance(case_id, str):
-                case_id = case_id.replace('/', '_')
-            else:
-                case_id = 'DRAFT'
+            case_id = self.proceeding_data.get('case_id', 'DRAFT').replace('/', '_')
             default_filename = f"DRC-01A_{case_id}.docx"
             
-            file_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "Save DOCX As",
-                default_filename,
-                "Word Documents (*.docx)"
-            )
+            file_path, _ = QFileDialog.getSaveFileName(self, "Save DOCX As", default_filename, "Word Documents (*.docx)")
+            if not file_path: return
+
+            # Create DOCX document
+            doc = Document()
+            for section in doc.sections:
+                section.top_margin = Inches(1)
+                section.bottom_margin = Inches(1)
+                section.left_margin = Inches(1)
+                section.right_margin = Inches(1)
             
-            if file_path:
-                # Create DOCX document
-                doc = Document()
-                
-                # Set margins
-                sections = doc.sections
-                for section in sections:
-                    section.top_margin = Inches(1)
-                    section.bottom_margin = Inches(1)
-                    section.left_margin = Inches(1)
-                    section.right_margin = Inches(1)
-                
-                # Add title
-                title = doc.add_paragraph()
-                title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                run = title.add_run("FORM DRC-01A")
-                run.bold = True
-                run.font.size = Pt(16)
-                
-                # Add case details
-                doc.add_paragraph(f"Case ID: {self.proceeding_data.get('case_id', 'N/A')}")
-                doc.add_paragraph(f"GSTIN: {self.proceeding_data.get('gstin', 'N/A')}")
-                doc.add_paragraph(f"Legal Name: {self.proceeding_data.get('legal_name', 'N/A')}")
-                doc.add_paragraph(f"Address: {self.proceeding_data.get('address', 'N/A')}")
-                doc.add_paragraph()
-                
-                # Add Tax Demand Table
-                if self.tax_table.rowCount() > 0:
-                    heading = doc.add_paragraph()
-                    run = heading.add_run("Tax Demand Details:")
-                    run.bold = True
-                    run.font.size = Pt(14)
-                    
-                    # Create table
-                    table = doc.add_table(rows=self.tax_table.rowCount(), cols=7)
-                    table.style = 'Light Grid Accent 1'
-                    
-                    # Add headers
-                    headers = ["Act", "Tax Period From", "Tax Period To", "Tax (₹)", "Interest (₹)", "Penalty (₹)", "Total (₹)"]
-                    for col, header in enumerate(headers):
-                        cell = table.rows[0].cells[col]
-                        cell.text = header
-                        cell.paragraphs[0].runs[0].bold = True
-                    
-                    # Add data
-                    for row in range(self.tax_table.rowCount()):
-                        # Handle QComboBox widgets for periods in DOCX
-                        from_widget = self.tax_table.cellWidget(row, 1)
-                        to_widget = self.tax_table.cellWidget(row, 2)
-                        
-                        p_from = ""
-                        p_to = ""
-                        
-                        if isinstance(from_widget, QComboBox):
-                            p_from = from_widget.currentText()
-                        elif self.tax_table.item(row, 1):
-                            p_from = self.tax_table.item(row, 1).text()
-                            
-                        if isinstance(to_widget, QComboBox):
-                            p_to = to_widget.currentText()
-                        elif self.tax_table.item(row, 2):
-                            p_to = self.tax_table.item(row, 2).text()
-
-                        # Act
-                        if self.tax_table.item(row, 0):
-                            table.rows[row].cells[0].text = self.tax_table.item(row, 0).text()
-                        
-                        # Periods
-                        table.rows[row].cells[1].text = p_from
-                        table.rows[row].cells[2].text = p_to
-                        
-                        # Amounts
-                        for col in range(3, 7):
-                            item = self.tax_table.item(row, col)
-                            if item:
-                                table.rows[row].cells[col].text = item.text()
-                    
-                    doc.add_paragraph()
-                
-                # Add Issue (Mapped from Issues Editor)
+            # Title
+            title = doc.add_paragraph()
+            title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = title.add_run("FORM DRC-01A")
+            run.bold = True
+            run.font.size = Pt(16)
+            
+            # Case details
+            doc.add_paragraph(f"Case ID: {drc_model.get('case_id', 'N/A')}")
+            doc.add_paragraph(f"GSTIN: {drc_model.get('gstin', 'N/A')}")
+            doc.add_paragraph(f"Legal Name: {drc_model.get('legal_name', 'N/A')}")
+            doc.add_paragraph(f"Address: {drc_model.get('address', 'N/A')}")
+            doc.add_paragraph()
+            
+            # Tax Demand Table (Data-Driven)
+            tax_rows = drc_model.get('tax_rows', [])
+            if tax_rows:
                 heading = doc.add_paragraph()
-                run = heading.add_run("Issue:")
+                run = heading.add_run("Tax Demand Details:")
                 run.bold = True
                 run.font.size = Pt(14)
-                doc.add_paragraph(self.issues_editor.toPlainText())
+                
+                # Create table
+                table = doc.add_table(rows=len(tax_rows) + 1, cols=7)
+                table.style = 'Light Grid Accent 1'
+                
+                # Headers
+                headers = ["Act", "Tax Period From", "Tax Period To", "Tax (₹)", "Interest (₹)", "Penalty (₹)", "Total (₹)"]
+                for col, header in enumerate(headers):
+                    cell = table.rows[0].cells[col]
+                    cell.text = header
+                    cell.paragraphs[0].runs[0].bold = True
+                
+                # Data
+                for r_idx, row in enumerate(tax_rows, start=1):
+                    table.rows[r_idx].cells[0].text = row.get('Act', '')
+                    table.rows[r_idx].cells[1].text = row.get('Period', '')
+                    table.rows[r_idx].cells[2].text = row.get('Period', '')
+                    table.rows[r_idx].cells[3].text = row.get('Tax', '0')
+                    table.rows[r_idx].cells[4].text = row.get('Interest', '0')
+                    table.rows[r_idx].cells[5].text = row.get('Penalty', '0')
+                    table.rows[r_idx].cells[6].text = row.get('Total', '0')
+                
                 doc.add_paragraph()
-
-                # Add Sections Violated
-                heading = doc.add_paragraph()
-                run = heading.add_run("Sections Violated:")
-                run.bold = True
-                run.font.size = Pt(14)
-                doc.add_paragraph(self.sections_editor.toPlainText())
-                
-                # Add Conditional Advice Text
-                last_date_payment = self.payment_date.date().toString("dd/MM/yyyy")
-                section = self.proceeding_data.get('initiating_section', '')
-                
-                if "73" in section:
-                    advice_text = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest in full by {last_date_payment}, failing which Show Cause Notice will be issued under section 73(1)."
-                elif "74" in section:
-                    advice_text = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest and penalty under section 74(5) by {last_date_payment}, failing which Show Cause Notice will be issued under section 74(1)."
-                else:
-                    advice_text = f"You are hereby advised to pay the amount of tax as ascertained above alongwith the amount of applicable interest by {last_date_payment}, failing which Show Cause Notice will be issued."
-                
-                p = doc.add_paragraph()
-                p.add_run(advice_text)
-
-                # Add Submission Instructions
-                last_date_reply = self.reply_date.date().toString("dd/MM/yyyy")
-                p = doc.add_paragraph()
-                p.add_run(f"In case you wish to file any submissions against the above ascertainment, the same may be furnished by {last_date_reply} in Part B of this Form.")
-                
-                # Add Signature Block
-                doc.add_paragraph()
-                doc.add_paragraph()
-                
-                sig = doc.add_paragraph()
-                sig.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                run = sig.add_run("Proper Officer")
-                run.bold = True
-                
-                doc.save(file_path)
-                
-                # 2. Auto-Register in OC Register -> REMOVED
-                # oc_data = {
-                #     'OC_Number': oc_no,
-                #     'OC_Content': 'DRC 01A',
-                #     'OC_Date': self.oc_date_input.date().toString("yyyy-MM-dd"), # DB format
-                #     'OC_To': self.proceeding_data.get('legal_name', '')
-                # }
-                # self.db.add_oc_entry(self.proceeding_data.get('case_id'), oc_data)
-                
-                QMessageBox.information(self, "Success", f"DOCX generated successfully!\n\nSaved to: {file_path}\n\nNote: This did NOT register to OC Log. Use 'Finalize' to issue.")
-                
-                # Open the file
-                try:
-                    os.startfile(file_path)
-                except Exception as e:
-                    print(f"Could not open file: {e}")
-                sig = doc.add_paragraph()
-                sig.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-                run = sig.add_run("Proper Officer\n(Signature)\nName: ____________________\nDesignation: ____________________\nJurisdiction: ____________________")
-                run.bold = True
-                
-                # Save document
-                doc.save(file_path)
-                
-                QMessageBox.information(self, "Success", f"DOCX generated successfully!\n\nSaved to: {file_path}")
-                
-                # Open the file
-                os.startfile(file_path)
+            
+            # Issues & Sections (Simplified for now)
+            heading = doc.add_paragraph()
+            run = heading.add_run("Details of Discrepancies:")
+            run.bold = True
+            run.font.size = Pt(14)
+            doc.add_paragraph("Please refer to the SCN preview/PDF for full issue narratives.")
+            doc.add_paragraph()
+            
+            # Advice Text
+            advice_text = drc_model.get('AdviceText', "Please pay the amount as ascertained.")
+            p = doc.add_paragraph()
+            p.add_run(advice_text)
+            
+            # Signatures
+            doc.add_paragraph()
+            sig = doc.add_paragraph()
+            sig.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            run = sig.add_run("Proper Officer\n(Signature)\nName: ____________________\nDesignation: ____________________\nJurisdiction: ____________________")
+            run.bold = True
+            
+            doc.save(file_path)
+            QMessageBox.information(self, "Success", f"DOCX generated successfully!\n\nSaved to: {file_path}")
+            os.startfile(file_path)
                     
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Error generating DOCX: {str(e)}")

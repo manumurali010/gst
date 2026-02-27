@@ -470,25 +470,25 @@ def run_init():
             json.dumps(issue.get('tax_demand_mapping'))
         ))
         
-        # Legacy Sync (Optional but keeps issues_data alive if used elsewhere)
-        issue_payload = { 
-            "issue_id": issue['issue_id'], 
-            "issue_name": issue['issue_name'], 
-            "grid_data": issue['grid_data'], 
-            "templates": issue['templates'],
-            "liability_config": issue.get('liability_config'),
-            "tax_demand_mapping": issue.get('tax_demand_mapping')
-        }
-        c.execute("""
-            INSERT OR REPLACE INTO issues_data 
-            (issue_id, issue_json, liability_config, tax_demand_mapping) 
-            VALUES (?, ?, ?, ?)
-        """, (
-            issue['issue_id'], 
-            json.dumps(issue_payload),
-            json.dumps(issue.get('liability_config')),
-            json.dumps(issue.get('tax_demand_mapping'))
-        ))
+        # Legacy Sync [REMOVED]
+        # issue_payload = { 
+        #     "issue_id": issue['issue_id'], 
+        #     "issue_name": issue['issue_name'], 
+        #     "grid_data": issue['grid_data'], 
+        #     "templates": issue['templates'],
+        #     "liability_config": issue.get('liability_config'),
+        #     "tax_demand_mapping": issue.get('tax_demand_mapping')
+        # }
+        # c.execute("""
+        #     INSERT OR REPLACE INTO issues_data 
+        #     (issue_id, issue_json, liability_config, tax_demand_mapping) 
+        #     VALUES (?, ?, ?, ?)
+        # """, (
+        #     issue['issue_id'], 
+        #     json.dumps(issue_payload),
+        #     json.dumps(issue.get('liability_config')),
+        #     json.dumps(issue.get('tax_demand_mapping'))
+        # ))
     conn.commit()
     conn.close()
     print(f"Initialized {len(issues)} Scrutiny Points.")
