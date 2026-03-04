@@ -753,7 +753,6 @@ class IssueCard(QFrame):
                     self.variables[addr] = val
                     
         # Trigger update of editor content to reflect new variable values
-        self.update_editor_content()
         self.calculate_values() # Centralized badge and signal update
 
     # Removed duplicate get_tax_breakdown
@@ -1285,41 +1284,48 @@ class IssueCard(QFrame):
 
     def calculate_values(self):
         """Centralized value calculation and UI sync."""
-        if not hasattr(self, 'table'): return
-        
-        # Trigger validation
-        valid = self.validate_tax_inputs(show_ui=True)
-        # We don't block the calculation itself, just highlight the UI
-        
-        # 1. Handle Excel Grid Calculation
-        if 'grid_data' in self.template:
-            self.calculate_grid()
-        
-        # SOP-5 Multi-Table Support
-        if 'tables' in self.template and isinstance(self.template['tables'], list):
-            for tbl in self.template['tables']:
-                 self.calculate_grid(data=tbl)
-
-        elif isinstance(self.template.get('tables'), dict) and self.template['tables'].get('rows', 0) > 0:
-            self.calculate_excel_table()
+        if getattr(self, '_calculating', False):
+            return
             
-        # 2. Handle Legacy Python Logic
-        # (Execute legacy logic even if grid exists, to allow hybrid calcs)
-        if self.calc_logic:
-            try:
-                local_scope = {}
-                exec(self.calc_logic, {}, local_scope)
-                compute_func = local_scope.get('compute')
-                
-                if compute_func:
-                    results = compute_func(self.variables)
-                    self.variables.update(results)
-            except Exception as e:
-                print(f"Legacy Calculation Error: {e}")
+        self._calculating = True
+        try:
+            if not hasattr(self, 'table'): return
+            
+            # Trigger validation
+            valid = self.validate_tax_inputs(show_ui=True)
+            # We don't block the calculation itself, just highlight the UI
+            
+            # 1. Handle Excel Grid Calculation
+            if 'grid_data' in self.template:
+                self.calculate_grid()
+            
+            # SOP-5 Multi-Table Support
+            if 'tables' in self.template and isinstance(self.template['tables'], list):
+                for tbl in self.template['tables']:
+                     self.calculate_grid(data=tbl)
 
-        # 3. Update UI
-        self.refresh_totals_ui()
-        self.update_editor_content()
+            # (Recursion point removed: calculate_excel_table is handled via signals)
+                
+            # 2. Handle Legacy Python Logic
+            # (Execute legacy logic even if grid exists, to allow hybrid calcs)
+            if self.calc_logic:
+                try:
+                    local_scope = {}
+                    exec(self.calc_logic, {}, local_scope)
+                    compute_func = local_scope.get('compute')
+                    
+                    if compute_func:
+                        results = compute_func(self.variables)
+                        self.variables.update(results)
+                except Exception as e:
+                    print(f"Legacy Calculation Error: {e}")
+
+            # 3. Update UI
+            self.refresh_totals_ui()
+            self.update_editor_content()
+        finally:
+            self._calculating = False
+
 
     def refresh_totals_ui(self):
         """Update IGST/CGST/SGST labels and signals based on current breakdown"""
@@ -1557,13 +1563,33 @@ class IssueCard(QFrame):
 
         print(f"--- Narrative Sync End: {self.issue_id} ---\n")
         
+        # --- PHASE 3: Context-Aware Template Rendering (Optional Layer) ---
+        from src.utils.template_engine import TemplateEngine
+        
+        def template_contains_placeholders(text):
+            return "{{" in text and "}}" in text
+
+        # Prepare context based on current variables
+        render_context = dict(self.variables)
+        
+        # Try Jinja Rendering First, but keep raw on failure/missing
+        if template_contains_placeholders(html):
+             try:
+                 html = TemplateEngine.render_issue_template(html, render_context)
+                 print(f"[TemplateEngine] Rendered via Jinja for {self.issue_id}")
+             except Exception as e:
+                 print(f"[TemplateEngine] Jinja render failed: {e}. Falling back to manual replacement.")
+        else:
+             print(f"[TemplateEngine] No placeholders found in {self.issue_id}")
+             
         # CLAIM 2 FIX: Placeholder Audit & Enforced Resolution
         unresolved = self._validate_template_variables(html, self.variables)
         if unresolved:
             print(f"DEBUG: Unresolved variables in {self.template.get('issue_id')}: {unresolved}")
             # Log to a potential UI console or debug log if available
         
-        # 1. Replace valid placeholders
+        # 1. Replace valid placeholders (LEGACY FALLBACK)
+        print(f"[TemplateEngine] Running legacy manual replacement for backward compatibility.")
         for var_name, var_val in self.variables.items():
             # Format numbers with commas
             if isinstance(var_val, (int, float)):

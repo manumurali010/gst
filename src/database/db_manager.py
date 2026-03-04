@@ -1157,26 +1157,6 @@ class DatabaseManager:
             rows = cursor.fetchall()
             conn.close()
             
-            # [STATIC FALLBACK] Map for missing DB points
-            SOP_FALLBACK_MAP = {
-                "LIABILITY_3B_R1": 1,
-                "RCM_LIABILITY_ITC": 2,
-                "ISD_CREDIT_MISMATCH": 3,
-                "ITC_3B_2B_OTHER": 4,
-                "TDS_TCS_MISMATCH": 5,
-                "EWAY_BILL_MISMATCH": 6,
-                "CANCELLED_SUPPLIERS": 7,
-                "NON_FILER_SUPPLIERS": 8,
-                "INELIGIBLE_ITC_16_4": 9,
-                "IMPORT_ITC_MISMATCH": 10,
-                "RULE_42_43_VIOLATION": 11,
-                "ITC_3B_2B_9X4": 12,
-                "RCM_CASH_VS_2B": 13,
-                "RCM_3B_VS_CASH": 13,
-                "RCM_ITC_VS_CASH": 13,
-                "RCM_ITC_VS_2B": 13
-            }
-
             result = []
             for row in rows:
                 item = dict(row)
@@ -1189,11 +1169,7 @@ class DatabaseManager:
                 # [TYPE NORMALIZATION] DB Regression Guard (SOP_POINT IS NULL)
                 raw_sop = item.get("sop_point")
                 if raw_sop is None or str(raw_sop).lower() == "null" or str(raw_sop).strip() == "":
-                    fallback_val = SOP_FALLBACK_MAP.get(item["issue_id"])
-                    if fallback_val is None:
-                        raise RuntimeError(f"Data Error: Cannot determine sop_point for {item['issue_id']}")
-                    print(f"WARNING: issues_master DB missing sop_point for {item['issue_id']}. Using static fallback {fallback_val}.")
-                    raw_sop = fallback_val
+                    raise RuntimeError(f"Data Error: DB missing sop_point for {item['issue_id']}")
                 
                 # Enforce literal integer extraction
                 item["sop_point"] = int(float(raw_sop))
@@ -1202,6 +1178,14 @@ class DatabaseManager:
                 
             if not result:
                 raise RuntimeError("Dashboard Catalog is empty! Database may need seeding.")
+                
+            # [STARTUP VALIDATION] Phase 2: Uniqueness Guard
+            issue_ids = [item["issue_id"] for item in result]
+            sop_points = [item["sop_point"] for item in result]
+            if len(issue_ids) != len(set(issue_ids)):
+                raise RuntimeError("Data Integrity Violation: Duplicate issue_id found in Dashboard Catalog.")
+            if len(sop_points) != len(set(sop_points)):
+                raise RuntimeError("Data Integrity Violation: Duplicate sop_point found in Dashboard Catalog.")
                 
             return result
             
@@ -1965,6 +1949,14 @@ class DatabaseManager:
                 table_def_json, analysis_type, sop_version, app_fy,
                 datetime.now()
             ))
+            
+            # --- PHASE 3: Template Version History ---
+            # Save the new version of templates to the history table
+            if templates_json and templates_json != "{}":
+                cursor.execute("""
+                    INSERT INTO issue_template_history (issue_id, template_type, content, version)
+                    VALUES (?, ?, ?, ?)
+                """, (issue_id, "MASTER_TEMPLATES", templates_json, sop_version or "1.0"))
             
             # Legacy compatibility (optional, but good for safety)
             # cursor.execute("INSERT OR REPLACE INTO issues_data (issue_id, issue_json) VALUES (?, ?)", (issue_id, json.dumps(issue_json)))

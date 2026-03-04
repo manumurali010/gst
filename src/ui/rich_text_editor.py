@@ -225,6 +225,16 @@ class RichTextEditor(QWidget):
         
         toolbar.addSeparator()
         
+        # Placeholder Picker
+        from PyQt6.QtWidgets import QPushButton, QMenu
+        self.placeholder_btn = QPushButton("Insert Data ▼")
+        self.placeholder_menu = QMenu(self.placeholder_btn)
+        self.placeholder_btn.setMenu(self.placeholder_menu)
+        self.placeholder_btn.setToolTip("Insert a dynamic variable")
+        toolbar.addWidget(self.placeholder_btn)
+        
+        toolbar.addSeparator()
+        
         # Undo/Redo
         undo_btn = QPushButton("↶")
         undo_btn.setToolTip("Undo")
@@ -297,6 +307,42 @@ class RichTextEditor(QWidget):
         self.editor.mergeCurrentCharFormat(fmt)
     
     # Public API methods
+    def update_placeholders(self, grouped_variables: dict):
+        """Update the placeholder dropdown menu with categorized items.
+        grouped_variables format: {"Category": [{"label": "Variable Label", "name": "var_name"}]}
+        """
+        print(f"DEBUG: RichTextEditor updating placeholders menu with {len(grouped_variables)} categories: {list(grouped_variables.keys())}")
+        self.placeholder_menu.clear()
+        
+        from PyQt6.QtGui import QAction
+        for category, items in grouped_variables.items():
+            if not items: continue
+            
+            cat_menu = self.placeholder_menu.addMenu(category)
+            for item in items:
+                name = item.get('name')
+                label = item.get('label') or name
+                
+                action = QAction(label, self)
+                action.setToolTip(f"{{{{{name}}}}}")
+                # Use default arguments in lambda to capture the current value of name
+                action.triggered.connect(lambda checked, n=name: self.insert_placeholder(n))
+                cat_menu.addAction(action)
+                
+        if self.placeholder_menu.isEmpty():
+            empty_action = QAction("No Data Available", self)
+            empty_action.setEnabled(False)
+            self.placeholder_menu.addAction(empty_action)
+            
+    def insert_placeholder(self, var_name: str):
+        """Insert the selected placeholder into the text."""
+        if var_name:
+            placeholder_text = f"{{{{{var_name}}}}}"
+            # Use plain text insertion to match formatting of surroundings
+            cursor = self.editor.textCursor()
+            cursor.insertText(placeholder_text)
+            self.editor.setFocus()
+
     def toHtml(self):
         """Get HTML content"""
         return self.editor.toHtml()

@@ -97,6 +97,20 @@ class SCNRenderer:
                 editor_part = parts[0]
                 table_part = '<div style="margin-bottom: 20px;' + parts[1] if len(parts) > 1 else ""
                 
+                # --- PHASE 3: Context-Aware Template Rendering ---
+                from src.utils.issue_context_builder import IssueContextBuilder
+                from src.utils.template_engine import TemplateEngine
+                try:
+                    render_context = IssueContextBuilder.build_issue_context(
+                        issue_id=issue.get('issue_id', 'unknown'),
+                        case_data=data,
+                        grid_results=grid_data,
+                        issue_metadata=issue
+                    )
+                    editor_part = TemplateEngine.render_issue_template(editor_part, render_context)
+                except Exception as context_err:
+                    print(f"Warning: Failed to render context for {issue.get('issue_id')}: {context_err}")
+                
                 # Regex cleanup
                 editor_part = re.sub(r'<p>\s*&nbsp;\s*</p>', '', editor_part)
                 editor_part = re.sub(r'<p>\s*</p>', '', editor_part)
@@ -373,6 +387,20 @@ class SCNRenderer:
                      # Also remove legacy calculation table markers if any
                      stripped_content = re.sub(r'<p[^>]*>Calculation Table</p>', '', stripped_content, flags=re.IGNORECASE)
                 
+                # --- PHASE 3: Context-Aware Template Rendering ---
+                from src.utils.issue_context_builder import IssueContextBuilder
+                from src.utils.template_engine import TemplateEngine
+                try:
+                     render_context = IssueContextBuilder.build_issue_context(
+                         issue_id=issue.get('issue_id', 'unknown'),
+                         case_data=data,
+                         grid_results=grid_data,
+                         issue_metadata=issue
+                     )
+                     stripped_content = TemplateEngine.render_issue_template(stripped_content, render_context)
+                except Exception as context_err:
+                     print(f"Warning: Failed to render context for {issue.get('issue_id')}: {context_err}")
+
                 # [Fix] Div Indentation
                 content_html = f"""
                 <div style="margin-left: 40px; margin-bottom: 20px; {body_style} text-align: justify;">

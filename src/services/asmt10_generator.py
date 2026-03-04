@@ -494,6 +494,25 @@ class ASMT10Generator:
             name = issue.get('category') or issue.get('issue_name') or "Unknown Discrepancy"
             desc = issue.get('brief_facts') or issue.get('description') or "Details as per attached calculation sheet."
             
+            # --- PHASE 3: Context-Aware Template Rendering ---
+            # Isolate grid calculations as we do in Adjudication Wizard
+            grid_results = issue.get('grid_data') or issue.get('tables')
+            
+            from src.utils.issue_context_builder import IssueContextBuilder
+            from src.utils.template_engine import TemplateEngine
+            
+            try:
+                render_context = IssueContextBuilder.build_issue_context(
+                    issue_id=issue.get('issue_id', 'unknown'),
+                    case_data=data,
+                    grid_results=grid_results,
+                    issue_metadata=issue
+                )
+                rendered_desc = TemplateEngine.render_issue_template(desc, render_context)
+            except Exception as context_err:
+                print(f"Warning: Failed to render context for {issue.get('issue_id')}: {context_err}")
+                rendered_desc = desc
+
             # Intro text builder
             issue_intro_parts.append(f"{idx} discrepancies") # Just a placeholder count really
             
@@ -505,7 +524,7 @@ class ASMT10Generator:
                 <div style="font-weight: bold; margin-top: 20px; margin-bottom: 5px; font-size: 11pt; page-break-after: avoid;">Issue {idx} – {name}</div>
                 <div style="font-weight: bold; color: #b91c1c; margin-bottom: 10px; page-break-after: avoid;">Estimated Tax: ₹ {format_indian_number(shortfall, prefix_rs=False)}</div>
                 
-                <div style="margin-bottom: 15px; text-align: justify;">{desc}</div>
+                <div style="margin-bottom: 15px; text-align: justify;">{rendered_desc}</div>
                 
                 {table_html}
             """

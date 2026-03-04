@@ -1188,11 +1188,12 @@ class ComplianceDashboard(QScrollArea):
             
             for item in catalog:
                 num = item['sop_point']
+                issue_id = item['issue_id']
                 title = item['issue_name']
                 desc = item['description']
                 
                 card = CompliancePointCard(num, title, desc)
-                self.cards[num] = card
+                self.cards[issue_id] = card
                 self.list_layout.addWidget(card)
                 
         except Exception as e:
@@ -1208,13 +1209,11 @@ class ComplianceDashboard(QScrollArea):
         
         self.setWidget(self.container)
 
-    def update_point(self, num, status, value_text=None, details=None):
-        print(f"[DEBUG UI] update_point called with num={num} (type: {type(num)}), keys in cards: {[type(k) for k in self.cards.keys()]}")
-        if num in self.cards:
-            print(f"[DEBUG UI] Key matched. Updating card {num} to {status}")
-            self.cards[num].set_status(status, value_text, details)
+    def update_point(self, issue_id, status, value_text=None, details=None):
+        if issue_id in self.cards:
+            self.cards[issue_id].set_status(status, value_text, details)
         else:
-            print(f"[DEBUG UI] KEY MISMATCH for {num}. Card not found. Available keys: {list(self.cards.keys())}")
+            print(f"[DEBUG UI] KEY MISMATCH for {issue_id}. Card not found. Available keys: {list(self.cards.keys())}")
             
     def reset_all(self):
         # [ROBUSTNESS] Guard against crashes if DB load failed
@@ -3257,26 +3256,6 @@ class ScrutinyTab(QWidget):
         # DIAGNOSTIC LOGGING
         print(f"DEBUG: enrich_issues_with_templates received {len(issues)} issues.")
 
-        # STATIC FALLBACK REGISTRY (Safety Net for DB Failures)
-        SOP_FALLBACK_MAP = {
-            'LIABILITY_3B_R1': 1,
-            'RCM_LIABILITY_ITC': 2,
-            'ISD_CREDIT_MISMATCH': 3,
-            'ITC_3B_2B_OTHER': 4,
-            'TDS_TCS_MISMATCH': 5,
-            'EWAY_BILL_MISMATCH': 6,
-            'CANCELLED_SUPPLIERS': 7,
-            'NON_FILER_SUPPLIERS': 8,
-            'SEC_16_4_VIOLATION': 9,
-            'IMPORT_ITC_MISMATCH': 10,
-            'RULE_42_43_VIOLATION': 11,
-            'ITC_3B_2B_9X4': 12,
-            'RCM_3B_VS_CASH': 13,
-            'RCM_ITC_VS_CASH': 14,
-            'RCM_ITC_VS_2B': 15,
-            'RCM_CASH_VS_2B': 16
-        }
-
         enriched = []
         for issue in issues:
             # DEFENSIVE GUARD
@@ -3312,15 +3291,9 @@ class ScrutinyTab(QWidget):
                 issue['issue_name'] = resolved_issue_name
                 issue['sop_point'] = resolved_sop_point 
                 
-            # 2. Static Fallback (If DB missing or incomplete)
+            # 2. FATAL ASSERTION
             if not resolved_sop_point:
-                resolved_sop_point = SOP_FALLBACK_MAP.get(issue_id)
-                if resolved_sop_point:
-                     print(f"WARNING: Issue '{issue_id}' resolved via STATIC FALLBACK (DB missing sop_point).")
-
-            # 3. FATAL ASSERTION
-            if not resolved_sop_point:
-                 err = f"FATAL INVARIANT FAILURE: Issue '{issue_id}' cannot be mapped to an SOP Point. DB and Fallback failed."
+                 err = f"FATAL INVARIANT FAILURE: Issue '{issue_id}' cannot be mapped to an SOP Point. Database Missing."
                  print(err)
                  QMessageBox.critical(self, "System Integrity Error", err)
                  raise RuntimeError(err) # Crash Fast
@@ -3493,37 +3466,32 @@ class ScrutinyTab(QWidget):
                 issue_idx += 1
             
             # Update Dashboard Status
+            issue_id = issue.get('issue_id')
             point_num = issue.get('sop_point')
             
-            if point_num:
-                found_points.add(point_num)
+            if issue_id:
+                found_points.add(issue_id)
                 # Check for explicit status message from parser
                 if issue.get("status_msg"):
                     status = issue.get("status", "info")
                     msg = issue.get("status_msg")
-                    
-                    # User Request: If PASS, show value (Rs. 0) not "Matched" or "0"
-                    # We override ONLY if the parser didn't already format it as "Rs. ..."
-                    # Actually, requirement says "All zero-value cards display exactly: Rs. 0".
-                    # If status_msg is "Matched" (from legacy parser logic), we should overwrite it?
-                    # "Mandatory fix: Remove all special-casing for zero... Enforce badge_text = format_indian_number(amount, prefix_rs=True)"
                     
                     if status == 'pass':
                         # Force numeric display
                         val = issue.get('total_shortfall', 0)
                         msg = format_indian_number(val, prefix_rs=True)
 
-                    print(f"UPDATING CARD: {point_num} STATUS: {status} MSG: {msg}")
-                    self.compliance_dashboard.update_point(point_num, status, msg, details=issue)
+                    print(f"UPDATING ISSUE: {issue_id} (SOP {point_num})")
+                    self.compliance_dashboard.update_point(issue_id, status, msg, details=issue)
                     updated_cards_count += 1
                 else:
                     status = "fail" if shortfall > 100 else "alert" if shortfall > 0 else "pass"
-                    print(f"UPDATING CARD: {point_num} STATUS: {status} SHORTFALL: {shortfall}")
+                    print(f"UPDATING ISSUE: {issue_id} (SOP {point_num})")
                     msg = format_indian_number(shortfall, prefix_rs=True)
-                    self.compliance_dashboard.update_point(point_num, status, msg, details=issue)
+                    self.compliance_dashboard.update_point(issue_id, status, msg, details=issue)
                     updated_cards_count += 1
             else:
-                print(f"INTEGRITY ERROR: Issue '{issue.get('issue_id')}' has no 'sop_point' in DB. Cannot map to Dashboard.")
+                print(f"INTEGRITY ERROR: Issue missing 'issue_id'. Cannot map to Dashboard.")
 
         # 4. MAPPING INVARIANT CHECK
         # We can't easily check self.dashboard.cards direct status without access to its internals, 

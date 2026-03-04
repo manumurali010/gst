@@ -1646,23 +1646,58 @@ class AdjudicationWizard(QWidget):
                 templates = issue.get('templates', {})
                 
                 # Construct formatted content
-                content_parts = []
+            content_parts = []
+            
+            # --- PHASE 3: Context-Aware Template Rendering ---
+            # 1. Build Case Context
+            case_data = {
+                'legal_name': self.legal_name_input.text(),
+                'trade_name': self.trade_name_input.text(),
+                'gstin': self.gstin_input.text(),
+                'address': self.address_input.toPlainText(),
+                'financial_year': self.fy_combo.currentText(),
+                'case_id': self.current_case_id,
+                'initiating_section': self.drc_section_combo.currentText() if not self.drc_section_combo.isHidden() else ""
+            }
+            
+            # Extract Grid computation results if available
+            grid_results = issue.get('grid_data') or issue.get('tables')
+            
+            from src.utils.issue_context_builder import IssueContextBuilder
+            from src.utils.template_engine import TemplateEngine
+            
+            issue_id = issue.get('issue_id') or getattr(self.template_combo.itemData(idx), 'get', lambda x: '')('issue_id', 'unknown')
+            
+            try:
+                render_context = IssueContextBuilder.build_issue_context(
+                    issue_id=issue_id,
+                    case_data=case_data,
+                    grid_results=grid_results,
+                    issue_metadata=issue
+                )
+            except Exception as context_err:
+                print(f"Warning: Failed to build context for {issue_id}: {context_err}")
+                render_context = {}
+            
+            if templates.get('brief_facts'):
+                clean_facts = self.extract_html_body(templates['brief_facts'])
+                rendered_facts = TemplateEngine.render_issue_template(clean_facts, render_context)
+                content_parts.append(f"<b>Brief Facts:</b><br>{rendered_facts}")
                 
-                if templates.get('brief_facts'):
-                    clean_facts = self.extract_html_body(templates['brief_facts'])
-                    content_parts.append(f"<b>Brief Facts:</b><br>{clean_facts}")
-                    
-                if templates.get('grounds'):
-                    clean_grounds = self.extract_html_body(templates['grounds'])
-                    content_parts.append(f"<b>Grounds:</b><br>{clean_grounds}")
-                    
-                if templates.get('legal'):
-                    clean_legal = self.extract_html_body(templates['legal'])
-                    content_parts.append(f"<b>Legal Provisions:</b><br>{clean_legal}")
-                    
-                if templates.get('conclusion'):
-                    clean_concl = self.extract_html_body(templates['conclusion'])
-                    content_parts.append(f"<b>Conclusion:</b><br>{clean_concl}")
+            if templates.get('grounds'):
+                clean_grounds = self.extract_html_body(templates['grounds'])
+                rendered_grounds = TemplateEngine.render_issue_template(clean_grounds, render_context)
+                content_parts.append(f"<b>Grounds:</b><br>{rendered_grounds}")
+                
+            if templates.get('legal'):
+                clean_legal = self.extract_html_body(templates['legal'])
+                rendered_legal = TemplateEngine.render_issue_template(clean_legal, render_context)
+                content_parts.append(f"<b>Legal Provisions:</b><br>{rendered_legal}")
+                
+            if templates.get('conclusion'):
+                clean_concl = self.extract_html_body(templates['conclusion'])
+                rendered_concl = TemplateEngine.render_issue_template(clean_concl, render_context)
+                content_parts.append(f"<b>Conclusion:</b><br>{rendered_concl}")
                     
                 full_content = "<br><br>".join(content_parts)
                 

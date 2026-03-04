@@ -156,6 +156,19 @@ def init_db(db_file=None):
     );
     """)
 
+    # 6B. Issue Template History (Version Control)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS issue_template_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        issue_id TEXT NOT NULL,
+        template_type TEXT,
+        content TEXT,
+        version TEXT DEFAULT '1.0',
+        edited_by TEXT DEFAULT 'System',
+        edited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
     # 7. Issues Data Table (Full JSON) [RETIRED]
     # cursor.execute("""
     # CREATE TABLE IF NOT EXISTS issues_data (

@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
                              QListWidget, QSplitter, QLineEdit, QComboBox, QTabWidget, 
                              QMessageBox, QFormLayout, QCheckBox, QTableWidget, QTableWidgetItem,
                              QHeaderView, QTextEdit, QPlainTextEdit, QFrame, QScrollArea, QListWidgetItem,
-                             QButtonGroup)
+                             QButtonGroup, QAbstractItemView)
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QFont, QColor, QIcon
 import json
@@ -398,18 +398,17 @@ class IssueManager(QWidget):
         
         self.placeholders_table = QTableWidget()
         self.placeholders_table.setColumnCount(4)
-        self.placeholders_table.setHorizontalHeaderLabels(["Name", "Type", "Required", "Computed"])
+        self.placeholders_table.setHorizontalHeaderLabels(["Name", "Label", "Source", "Type"])
         self.placeholders_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.placeholders_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.placeholders_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         layout.addWidget(self.placeholders_table)
         
         btn_layout = QHBoxLayout()
-        add_btn = QPushButton("Add Placeholder")
-        add_btn.clicked.connect(self.add_placeholder_row)
-        btn_layout.addWidget(add_btn)
-        
-        detect_btn = QPushButton("Auto-Detect from Templates")
-        detect_btn.clicked.connect(self.detect_placeholders)
-        btn_layout.addWidget(detect_btn)
+        refresh_btn = QPushButton("Scan Templates & Refresh Registry")
+        refresh_btn.clicked.connect(self.refresh_placeholder_registry)
+        btn_layout.addWidget(refresh_btn)
+        btn_layout.addStretch()
         
         layout.addLayout(btn_layout)
 
@@ -451,6 +450,43 @@ class IssueManager(QWidget):
             "tables": self.table_builder.get_data(),
             "placeholders": []
         }
+        
+        # --- PHASE 3: Context-Aware Preview ---
+        from src.utils.template_engine import TemplateEngine
+        
+        preview_context = {
+            # Mock Globals
+            "taxpayer_name": "M/s Demo Taxpayer",
+            "trade_name": "Demo Trade",
+            "gstin": "32AABCD1234E1Z5",
+            "address": "123 Demo Street, Kerala",
+            "financial_year": "2023-24",
+            "case_id": "CASE/2026/ADJ/9999",
+            "initiating_section": "61",
+            "adjudication_section": "73",
+            "total_shortfall": 50000,
+            "total_shortfall_formatted": "50,000",
+            "issue_id": self.current_issue_id or "preview",
+            "issue_name": self.issue_name_input.text(),
+            "category": self.category_input.currentText()
+        }
+        
+        # Merge explicitly parsed placeholders with mock values just in case
+        try:
+             import re
+             text = (data['templates']['brief_facts'] + data['templates']['brief_facts_scn'] + 
+                     data['templates']['grounds'] + data['templates']['legal'] + data['templates']['conclusion'])
+             matches = set(re.findall(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}", text))
+             for m in matches:
+                 if m not in preview_context:
+                     preview_context[m] = f"[{m}]"
+        except Exception as e:
+             print(f"Preview extraction error: {e}")
+
+        for k, template_html in data['templates'].items():
+            if isinstance(template_html, str) and template_html.strip():
+                # Render using Jinja safe mode
+                data['templates'][k] = TemplateEngine.render_issue_template(template_html, preview_context)
         
         from src.ui.issue_card import IssueCard
         try:
@@ -606,43 +642,116 @@ class IssueManager(QWidget):
             self.table_builder.status_lbl.setStyleSheet("color: red; font-weight: bold;")
             self.current_issue_is_semantic = True # Prevent overwriting with empty table
         
-        self.placeholders_table.setRowCount(0)
-        for p in issue.get('placeholders', []):
-            self.add_placeholder_row(p)
+        # Auto-refresh registry now instead of manually adding rows
+        self.refresh_placeholder_registry()
 
-    def add_placeholder_row(self, data=None):
-        row = self.placeholders_table.rowCount()
-        self.placeholders_table.insertRow(row)
-        if not data: data = {}
+    def get_grid_variables(self):
+        """Extract all variables defined in the TableBuilder, applying title case for labels."""
+        grid_vars = []
+        data = self.table_builder.get_data()
         
-        self.placeholders_table.setItem(row, 0, QTableWidgetItem(data.get('name', '')))
-        self.placeholders_table.setItem(row, 1, QTableWidgetItem(data.get('type', 'string')))
-        
-        req_cb = QCheckBox()
-        req_cb.setChecked(data.get('required', False))
-        self.placeholders_table.setCellWidget(row, 2, req_cb)
-        
-        comp_cb = QCheckBox()
-        comp_cb.setChecked(data.get('computed', False))
-        self.placeholders_table.setCellWidget(row, 3, comp_cb)
+        if isinstance(data, dict):
+            rows = data.get('rows', [])
+            if isinstance(rows, (list, tuple)):
+                # Semantic Mode
+                for r in rows:
+                    if isinstance(r, dict):
+                        for c_id, c_data in r.items():
+                            if isinstance(c_data, dict) and c_data.get('var'):
+                                var_name = c_data['var']
+                                # Generate Title Case Label
+                                label = " ".join(word.capitalize() for word in var_name.replace("_", " ").split())
+                                grid_vars.append({
+                                    "name": var_name,
+                                    "label": label,
+                                    "type": c_data.get('type', 'string'),
+                                    "source": "grid"
+                                })
+                                
+            elif isinstance(rows, int):
+                # Spreadsheet mode... no internal var fields usually, must be scanned from templates
+                pass
+                
+        # Deduplicate by name
+        seen = set()
+        unique_grid_vars = []
+        for v in grid_vars:
+            if v['name'] not in seen:
+                seen.add(v['name'])
+                unique_grid_vars.append(v)
+        return unique_grid_vars
 
-    def detect_placeholders(self):
+    def refresh_placeholder_registry(self):
+        """Rebuilds the placeholder registry from standard globals, grid variables, and template scanning."""
+        from src.utils.placeholder_registry import get_standard_placeholders, group_placeholders_by_category
         import re
+        
+        placeholders = []
+        
+        print("DEBUG: IssueManager.refresh_placeholder_registry() started.")
+        
+        # 1. Standard Metadata & System Computations
+        placeholders.extend(get_standard_placeholders())
+        
+        # 2. Grid Variables
+        grid_vars = self.get_grid_variables()
+        placeholders.extend(grid_vars)
+        
+        # 3. Detect Manual Placeholders in Editors (Unknowns)
+        known_names = {p['name'] for p in placeholders}
+        
         text = (self.brief_facts_drc_editor.toHtml() + self.brief_facts_scn_editor.toHtml() + 
                 self.grounds_editor.toHtml() + self.legal_editor.toHtml() + self.conclusion_editor.toHtml())
-        matches = set(re.findall(r'\{\{([^}]+)\}\}', text))
+        matches = set(re.findall(r'\{\{\s*([a-zA-Z0-9_]+)\s*\}\}', text))
         
-        current_names = []
-        for row in range(self.placeholders_table.rowCount()):
-            item = self.placeholders_table.item(row, 0)
-            if item: current_names.append(item.text())
-            
-        count = 0
+        # If in spreadsheet mode, we might see A1, B2. We can try to extract those.
+        data = self.table_builder.get_data()
+        is_spreadsheet = isinstance(data, dict) and isinstance(data.get('rows'), int)
+        
         for match in matches:
-            if match not in current_names:
-                self.add_placeholder_row({'name': match, 'type': 'string'})
-                count += 1
-        QMessageBox.information(self, "Detection Complete", f"Found {count} new placeholders.")
+            if match not in known_names:
+                # Basic labeling
+                label = " ".join(word.capitalize() for word in match.replace("_", " ").split())
+                p_type = 'unknown'
+                p_source = 'unknown (template)'
+                
+                # Heuristic for spreadsheet variables
+                if is_spreadsheet and re.match(r"^([A-Z]+)([0-9]+)$", match.upper()):
+                     p_type = 'cell'
+                     p_source = 'grid (inferred)'
+                
+                placeholders.append({
+                    "name": match,
+                    "label": label,
+                    "type": p_type,
+                    "source": p_source
+                })
+        
+        # Update Table UI
+        self.placeholders_table.setRowCount(0)
+        self.placeholders_table.blockSignals(True)
+        for row, p in enumerate(placeholders):
+            self.placeholders_table.insertRow(row)
+            self.placeholders_table.setItem(row, 0, QTableWidgetItem(p.get('name', '')))
+            self.placeholders_table.setItem(row, 1, QTableWidgetItem(p.get('label', '')))
+            self.placeholders_table.setItem(row, 2, QTableWidgetItem(p.get('source', '')))
+            
+            type_item = QTableWidgetItem(p.get('type', ''))
+            if p.get('source').startswith('unknown'):
+                type_item.setForeground(QBrush(QColor("red")))
+                self.placeholders_table.item(row, 0).setForeground(QBrush(QColor("red")))
+            self.placeholders_table.setItem(row, 3, type_item)
+        self.placeholders_table.blockSignals(False)
+        
+        print(f"DEBUG: IssueManager loaded {len(placeholders)} placeholders into registry.")
+        
+        # Group and Sync to Editors
+        grouped = group_placeholders_by_category(placeholders)
+        self.brief_facts_drc_editor.update_placeholders(grouped)
+        self.brief_facts_scn_editor.update_placeholders(grouped)
+        self.grounds_editor.update_placeholders(grouped)
+        self.legal_editor.update_placeholders(grouped)
+        self.conclusion_editor.update_placeholders(grouped)
 
     def save_issue(self):
         if not self.current_issue_id: return
@@ -690,16 +799,38 @@ class IssueManager(QWidget):
             data['tables'] = self.table_builder.get_data()
         
         placeholders = []
+        registered_names = set()
+        unknown_vars = set()
+        
         for row in range(self.placeholders_table.rowCount()):
             name = self.placeholders_table.item(row, 0).text()
             if not name: continue
+            
+            source = self.placeholders_table.item(row, 2).text()
+            if source.startswith("unknown"):
+                unknown_vars.add(name)
+                continue # Do not persist unknown variables
+                
+            registered_names.add(name)
+            
+            # Use QTableWidgetItem instead of cellWidget since we made it read-only
+            p_type_item = self.placeholders_table.item(row, 3)
+            p_type = p_type_item.text() if p_type_item else 'string'
+            
             placeholders.append({
                 "name": name, 
-                "type": self.placeholders_table.item(row, 1).text(),
-                "required": self.placeholders_table.cellWidget(row, 2).isChecked(),
-                "computed": self.placeholders_table.cellWidget(row, 3).isChecked()
+                "label": self.placeholders_table.item(row, 1).text(),
+                "type": p_type,
+                "source": source
             })
         data["placeholders"] = placeholders
+        
+        # Template Save Validation
+        if unknown_vars:
+            msg = f"Unknown placeholders detected: {', '.join(unknown_vars)}\n\nPlease select placeholders using the Insert Data menu.\nDo you want to save anyway?"
+            reply = QMessageBox.warning(self, "Unregistered Placeholders", msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.No:
+                return
         
         success, msg = self.db.save_issue(data)
         if success:

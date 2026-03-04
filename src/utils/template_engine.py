@@ -29,3 +29,30 @@ class TemplateEngine:
         env = cls.get_env()
         template = env.get_template(template_name)
         return template.render(**model_dict)
+
+    @staticmethod
+    def render_issue_template(template_html: str, context: dict) -> str:
+        """
+        Renders a raw HTML template string with a context dictionary.
+        Safely falls back to the original string if context is empty or parsing fails.
+        """
+        if not template_html or not context:
+            return template_html or ""
+            
+        import re
+        from jinja2 import Template
+        
+        try:
+            # Render using Jinja2
+            template = Template(template_html)
+            rendered_html = template.render(**context)
+            
+            # Non-blocking validation for unresolved placeholders
+            unresolved = set(re.findall(r"\{\{([^}]+)\}\}", rendered_html))
+            if unresolved:
+                print(f"WARNING: unresolved placeholders {unresolved} in issue template")
+                
+            return rendered_html
+        except Exception as e:
+            print(f"WARNING: Safe render fallback used due to Jinja engine error: {e}")
+            return template_html
