@@ -226,7 +226,7 @@ class RichTextEditor(QWidget):
         toolbar.addSeparator()
         
         # Placeholder Picker
-        from PyQt6.QtWidgets import QPushButton, QMenu
+        from PyQt6.QtWidgets import QMenu
         self.placeholder_btn = QPushButton("Insert Data ▼")
         self.placeholder_menu = QMenu(self.placeholder_btn)
         self.placeholder_btn.setMenu(self.placeholder_menu)

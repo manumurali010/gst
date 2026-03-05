@@ -491,7 +491,18 @@ class ASMT10Generator:
         
         for idx, issue in enumerate(active_issues, 1):
             shortfall = robust_float(issue.get('total_shortfall', 0))
-            name = issue.get('category') or issue.get('issue_name') or "Unknown Discrepancy"
+            
+            # [CANONICAL RESOLUTION]
+            from src.database.db_manager import DatabaseManager
+            db = DatabaseManager()
+            issue_id = issue.get('issue_id')
+            master_issue = db.get_issue(issue_id) if issue_id else None
+            
+            if master_issue:
+                name = master_issue.get('issue_name', 'Unknown Issue')
+            else:
+                name = issue.get('issue_name') or issue.get('category') or "Unknown Discrepancy"
+            
             desc = issue.get('brief_facts') or issue.get('description') or "Details as per attached calculation sheet."
             
             # --- PHASE 3: Context-Aware Template Rendering ---

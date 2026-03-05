@@ -72,7 +72,12 @@ class SCNRenderer:
                 issues_html += f'<div style="display: block; {page_break_style}">'
                 
                 # Title Para
-                title = issue.get('title', 'Issue')
+                # [RESOLVE CANONICAL NAME]
+                from src.database.db_manager import DatabaseManager
+                db = DatabaseManager()
+                issue_id = issue.get('issue_id')
+                master_issue = db.get_issue(issue_id) if issue_id else None
+                title = master_issue.get('issue_name') if master_issue else issue.get('title', 'Issue')
                 issues_html += f"""
                 <table style="width: 100%; margin-bottom: 10px; border: none;">
                     <tr style="border: none;">
@@ -358,7 +363,14 @@ class SCNRenderer:
             
             for i, issue in enumerate(issues, 1):
                 # Issue Title
-                title_html = f"Issue No. {i}: {issue.get('title', 'Issue')}"
+                # [RESOLVE CANONICAL NAME]
+                from src.database.db_manager import DatabaseManager
+                db = DatabaseManager()
+                issue_id = issue.get('issue_id')
+                master_issue = db.get_issue(issue_id) if issue_id else None
+                resolved_title = master_issue.get('issue_name') if master_issue else issue.get('title', 'Issue')
+                
+                title_html = f"Issue No. {i}: {resolved_title}"
                 html_parts.append(SCNRenderer._make_qt_para(current_num, f"<b>{title_html}</b>", body_style))
                 # current_num += 1 # Standard template doesn't increment main para number for title? 
                 # Template uses issues_content which has its own numbering.

@@ -780,22 +780,32 @@ class IssueManager(QWidget):
         # If the issue was loaded as Semantic (has grid_data), we MUST NOT overwrite it 
         # with the TableBuilder's 2D array.
         
-        # 1. Fetch original to preserve grid_data
+        # 1. Fetch original to preserve grid_data and essential metadata
         original_issue = self.db.get_issue(self.current_issue_id)
-        if original_issue and original_issue.get('grid_data'):
-            # Semantic Mode: Preserve original grid_data
-            data['grid_data'] = original_issue['grid_data']
-            
-            # [PHASE-B] Editing support deferred. Do not implement extracting schema from UI yet.
-            # We explicitly do NOT save 'tables' here to avoid confusion/corruption.
-            # The 'tables' field in DB might remain as is or be ignored if grid_data exists.
-            
-            # Optional: If you want to persist the 'view' state, you could save tables, 
-            # but for safety, we skip it to ensure single source of truth.
-            data['tables'] = original_issue.get('tables', {})
-            
+        if original_issue:
+            # Preserve crucial metadata so ON CONFLICT doesn't overwrite with NULL
+            for key in ['sop_point', 'table_definition', 'analysis_type', 'sop_version', 
+                        'applicable_from_fy', 'liability_config', 'tax_demand_mapping']:
+                if key in original_issue:
+                    data[key] = original_issue[key]
+                    
+            if original_issue.get('grid_data'):
+                # Semantic Mode: Preserve original grid_data
+                data['grid_data'] = original_issue['grid_data']
+                
+                # [PHASE-B] Editing support deferred. Do not implement extracting schema from UI yet.
+                # We explicitly do NOT save 'tables' here to avoid confusion/corruption.
+                # The 'tables' field in DB might remain as is or be ignored if grid_data exists.
+                
+                # Optional: If you want to persist the 'view' state, you could save tables, 
+                # but for safety, we skip it to ensure single source of truth.
+                data['tables'] = original_issue.get('tables', {})
+                
+            else:
+                # Spreadsheet Mode: Save TableBuilder data
+                data['tables'] = self.table_builder.get_data()
         else:
-            # Spreadsheet Mode: Save TableBuilder data
+            # Spreadsheet Mode: Save TableBuilder data (no original issue)
             data['tables'] = self.table_builder.get_data()
         
         placeholders = []

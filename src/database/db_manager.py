@@ -1123,6 +1123,31 @@ class DatabaseManager:
                 # We enforce a hard crash if schema is invalid to prevent silent data corruption
                 raise RuntimeError(f"Database Schema Migration Failed: {e}")
 
+            # --- Diagnostic Logging ---
+            try:
+                conn_diag = sqlite3.connect(self.db_file)
+                cursor_diag = conn_diag.cursor()
+                cursor_diag.execute("SELECT COUNT(*) FROM issues_master")
+                count = cursor_diag.fetchone()[0]
+                
+                # Check for corrupted sop_point
+                cursor_diag.execute("SELECT issue_id FROM issues_master WHERE sop_point IS NULL")
+                corrupt_issues = cursor_diag.fetchall()
+                if corrupt_issues:
+                    print("\n[!] CRITICAL WARNING: Database Integrity Failure [!]")
+                    print(f"[!] Found {len(corrupt_issues)} issues with missing sop_point:")
+                    for issue in corrupt_issues:
+                        print(f"    - {issue[0]}")
+                    print("[!] These issues will cause FATAL INVARIANT FAILURES in the analysis pipeline.\n")
+                    
+                print(f"=== DATABASE DIAGNOSTICS ===")
+                print(f"DB Path: {os.path.abspath(self.db_file)}")
+                print(f"issues_master row count: {count}")
+                print(f"============================")
+                conn_diag.close()
+            except Exception as e:
+                print(f"Diagnostics failed: {e}")
+
             DatabaseManager._initialized = True
 
     def _get_conn(self):
@@ -1920,35 +1945,43 @@ class DatabaseManager:
             sop_version = issue_json.get('sop_version')
             app_fy = issue_json.get('applicable_from_fy')
             
-            # Upsert into issues_master
-            # Note: We are now driving everything from issues_master. 
-            # We don't need issues_data table anymore for the strict binding, 
-            # but legacy code might expect it? 
-            # Safe bet: Update issues_master.
+            # --- Defensive Validation: Reject NULL sop_point if it's a new issue or if we are wiping it ---
+            if sop_point is None:
+                cursor.execute("SELECT sop_point FROM issues_master WHERE issue_id = ?", (issue_id,))
+                existing = cursor.fetchone()
+                if not existing or existing[0] is None:
+                     return False, f"Validation Error: Cannot save issue '{issue_id}'. sop_point is required and cannot be NULL."
             
-            cursor.execute("""
-                INSERT INTO issues_master (
-                    issue_id, issue_name, category, sop_point, templates, grid_data, 
-                    table_definition, analysis_type, sop_version, applicable_from_fy,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(issue_id) DO UPDATE SET
-                    issue_name=excluded.issue_name,
-                    category=excluded.category,
-                    sop_point=excluded.sop_point,
-                    templates=excluded.templates,
-                    grid_data=excluded.grid_data,
-                    table_definition=excluded.table_definition,
-                    analysis_type=excluded.analysis_type,
-                    sop_version=excluded.sop_version,
-                    applicable_from_fy=excluded.applicable_from_fy,
-                    updated_at=excluded.updated_at
-            """, (
-                issue_id, issue_name, category, sop_point, templates_json, grid_data_json, 
-                table_def_json, analysis_type, sop_version, app_fy,
-                datetime.now()
-            ))
+            cursor.execute("SELECT 1 FROM issues_master WHERE issue_id = ?", (issue_id,))
+            exists = cursor.fetchone()
+            
+            if exists:
+                # Targeted UPDATE to protect structural metadata
+                cursor.execute("""
+                    UPDATE issues_master 
+                    SET 
+                        issue_name = ?,
+                        templates = ?,
+                        grid_data = ?,
+                        updated_at = ?
+                    WHERE issue_id = ?
+                """, (
+                    issue_name, templates_json, grid_data_json, datetime.now(), issue_id
+                ))
+            else:
+                # INSERT for new issues
+                cursor.execute("""
+                    INSERT INTO issues_master (
+                        issue_id, issue_name, category, sop_point, templates, grid_data, 
+                        table_definition, analysis_type, sop_version, applicable_from_fy,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    issue_id, issue_name, category, sop_point, templates_json, grid_data_json, 
+                    table_def_json, analysis_type, sop_version, app_fy,
+                    datetime.now()
+                ))
             
             # --- PHASE 3: Template Version History ---
             # Save the new version of templates to the history table
@@ -1962,6 +1995,13 @@ class DatabaseManager:
             # cursor.execute("INSERT OR REPLACE INTO issues_data (issue_id, issue_json) VALUES (?, ?)", (issue_id, json.dumps(issue_json)))
             
             conn.commit()
+            
+            # --- Diagnostic Verification Log ---
+            cursor.execute("SELECT updated_at, length(templates) FROM issues_master WHERE issue_id = ?", (issue_id,))
+            v_row = cursor.fetchone()
+            if v_row:
+                print(f"[DB DIAGNOSTICS] Saved Template '{issue_id}' successfully. Updated At: {v_row[0]}, Template Bytes: {v_row[1]}")
+                
             conn.close()
             return True, "Issue Saved Successfully"
             

@@ -411,7 +411,7 @@ class ProceedingsWorkspace(QWidget):
     def add_drc01a_issue_card(self, template, data=None):
         """Reusable helper to add an issue card to the DRC-01A draft"""
         from src.ui.issue_card import IssueCard
-        card = IssueCard(template, data=data, mode="DRC-01A")
+        card = IssueCard(template, data=data, mode="DRC-01A", case_data=self.proceeding_data)
         
         # Connect signals
         card.removeClicked.connect(lambda: self.remove_issue_card(card))
@@ -2400,7 +2400,7 @@ class ProceedingsWorkspace(QWidget):
             return
             
         from src.ui.issue_card import IssueCard
-        card = IssueCard(template, mode="DRC-01A")
+        card = IssueCard(template, mode="DRC-01A", case_data=self.proceeding_data)
         
         # Connect signals
         card.removeClicked.connect(lambda: self.remove_issue_card(card))
@@ -3622,7 +3622,7 @@ class ProceedingsWorkspace(QWidget):
     def add_scn_issue_card(self, template, data=None, source_type=None, source_id=None, origin="SCN", status="ACTIVE", trigger_eval=True):
         """Add flexible issue card to SCN layout"""
         from src.ui.issue_card import IssueCard
-        card = IssueCard(template, data=data, mode="SCN", content_key="scn_content")
+        card = IssueCard(template, data=data, mode="SCN", content_key="scn_content", case_data=self.proceeding_data)
         
         # Apply flexible classification (informational badge)
         card.set_classification(origin=origin, status=status)

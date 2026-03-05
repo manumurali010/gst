@@ -254,10 +254,11 @@ class IssueCard(QFrame):
         self.toggle_btn.setText("▶" if not is_visible else "▼")
 
 
-    def __init__(self, template, data=None, parent=None, mode="DRC-01A", content_key="content", save_template_callback=None, issue_number=None):
+    def __init__(self, template, data=None, parent=None, mode="DRC-01A", content_key="content", save_template_callback=None, issue_number=None, case_data=None):
         super().__init__(parent)
         # [STATE OWNERSHIP] Enforce Immutability
         self.template = copy.deepcopy(template)
+        self.case_data = case_data # Context caching support
         
         self.mode = mode
         self.content_key = content_key
@@ -270,14 +271,20 @@ class IssueCard(QFrame):
         # [IDENTITY BOOTSTRAP] Minimal state for init_ui
         self.issue_id = self.template.get('issue_id', 'unknown')
         
-        # [INVARIANT] 1. Header Title Derivation (Computed ONCE)
-        # Priority: issue_name > human-readable formatted string
-        raw_name = self.template.get('issue_name', '')
-        if not raw_name or raw_name == 'Issue':
-             # Clean human-readable fallback (No underscore IDs)
-             self.display_title = "Issue Concerning Tax Liability" 
+        # [INVARIANT] 1. Header Title Derivation (Canonical Resolution)
+        # Priority: Database Master Title > issue_name > human-readable fallback
+        from src.database.db_manager import DatabaseManager
+        db = DatabaseManager()
+        master_issue = db.get_issue(self.issue_id) if self.issue_id != 'unknown' else None
+        
+        if master_issue:
+            self.display_title = master_issue.get('issue_name', 'Unknown Issue')
         else:
-             self.display_title = raw_name
+            raw_name = self.template.get('issue_name', '')
+            if not raw_name or raw_name == 'Issue':
+                 self.display_title = "Issue Concerning Tax Liability" 
+            else:
+                 self.display_title = raw_name
              
         self.variables = self.template.get('variables', {}).copy()
         self.calc_logic = self.template.get('calc_logic', "")
@@ -1563,56 +1570,26 @@ class IssueCard(QFrame):
 
         print(f"--- Narrative Sync End: {self.issue_id} ---\n")
         
-        # --- PHASE 3: Context-Aware Template Rendering (Optional Layer) ---
+        # --- PHASE 3: Refined Centralized Template Rendering ---
         from src.utils.template_engine import TemplateEngine
-        
-        def template_contains_placeholders(text):
-            return "{{" in text and "}}" in text
+        from src.utils.issue_context_builder import IssueContextBuilder
 
-        # Prepare context based on current variables
-        render_context = dict(self.variables)
-        
-        # Try Jinja Rendering First, but keep raw on failure/missing
-        if template_contains_placeholders(html):
-             try:
-                 html = TemplateEngine.render_issue_template(html, render_context)
-                 print(f"[TemplateEngine] Rendered via Jinja for {self.issue_id}")
-             except Exception as e:
-                 print(f"[TemplateEngine] Jinja render failed: {e}. Falling back to manual replacement.")
-        else:
-             print(f"[TemplateEngine] No placeholders found in {self.issue_id}")
-             
-        # CLAIM 2 FIX: Placeholder Audit & Enforced Resolution
-        unresolved = self._validate_template_variables(html, self.variables)
-        if unresolved:
-            print(f"DEBUG: Unresolved variables in {self.template.get('issue_id')}: {unresolved}")
-            # Log to a potential UI console or debug log if available
-        
-        # 1. Replace valid placeholders (LEGACY FALLBACK)
-        print(f"[TemplateEngine] Running legacy manual replacement for backward compatibility.")
-        for var_name, var_val in self.variables.items():
-            # Format numbers with commas
-            if isinstance(var_val, (int, float)):
-                val_str = f"{var_val:,.2f}" if var_val != 0 else "0"
-            else:
-                val_str = str(var_val)
-            html = html.replace(f"{{{{{var_name}}}}}", val_str)
-            html = html.replace(f"{{{{ {var_name} }}}}", val_str) # Handle spacing
-            
-        # 2. Inject Display-Only Fallbacks for unresolved placeholders (NO state mutation)
-        for var_name in unresolved:
-            # [DISPLAY FALLBACK] Default to "0" or "-" based on heuristic or just clean "0"
-            fallback_val = "0"
-            
-            placeholder = f"{{{{{var_name}}}}}"
-            if placeholder in html:
-                html = html.replace(placeholder, fallback_val)
-            
-            # Also handle spaced version
-            placeholder_spaced = f"{{{{ {var_name} }}}}"
-            if placeholder_spaced in html:
-                html = html.replace(placeholder_spaced, fallback_val)
-            
+        # Build comprehensive context (Metadata + Grid Variables + Lazy Table)
+        context = IssueContextBuilder.build_issue_context(
+            issue_id=self.issue_id,
+            case_data=self.case_data,
+            grid_results=self.variables, # Note: self.variables contains computed grid values after calculate_grid
+            issue_metadata=self.template,
+            table_generator=(self.generate_table_html, self.template, self.variables)
+        )
+
+        # Delegate rendering to the centralized TemplateEngine
+        try:
+            html = TemplateEngine.render_issue_template(html, context)
+            print(f"[IssueCard] Rendered via Centralized TemplateEngine for {self.issue_id}")
+        except Exception as e:
+            print(f"[IssueCard] Rendering failed for {self.issue_id}: {e}")
+
         self.editor.setHtml(html)
         self.last_rendered_html = html # Update baseline
 

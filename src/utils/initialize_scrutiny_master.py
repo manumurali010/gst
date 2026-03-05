@@ -406,22 +406,39 @@ for issue in issues:
         issue['templates']['scn'] = "Table 8 of the Annual Return (GSTR-9) filed by you shows that the total ITC availed via GSTR-3B (Table 8B + 8C) exceeds the cumulative ITC available as per GSTR-2A (Table 8A) by ₹ {{total_shortfall}}."
         issue['tax_demand_mapping'] = {
             "IGST": "row4_igst",
-            "CGST": "row4_cgst",
-            "SGST": "row4_sgst",
-            "Cess": "row4_cess"
         }
 
-def run_init():
+def initialize():
     conn = sqlite3.connect(db_path)
-    c = conn.cursor()
+    cursor = conn.cursor()
+    
+    # --- Guard to prevent accidental overwrites ---
+    print("\n" + "="*50)
+    print("WARNING: INITIALIZE SCRUTINY MASTER")
+    print("This will drop and recreate the issues_master table.")
+    print("Any user-edited templates or placeholders will be PERMANENTLY LOST.")
+    print("="*50)
+    
+    # If not running in a standard terminal (e.g. IDE execution without stdin), 
+    # we want to prevent wiping data by default.
+    try:
+        confirm = input("Are you sure you want to completely reset issues_master? (y/N): ")
+        if confirm.lower() != 'y':
+            print("Initialization aborted. No data was changed.")
+            return
+    except (EOFError, KeyboardInterrupt):
+        print("\nInitialization aborted due to lack of input.")
+        return
+        
+    print("\nStarting Scrutiny Master Reset...\n")
     
     # [MIGRATION] Schema Update Check (Self-Contained)
     try:
-        c.execute("PRAGMA table_info(issues_master)")
-        columns = [info[1] for info in c.fetchall()]
+        cursor.execute("PRAGMA table_info(issues_master)")
+        columns = [info[1] for info in cursor.fetchall()]
         if "description" not in columns:
             print("[INIT] Adding 'description' column to issues_master...")
-            c.execute("ALTER TABLE issues_master ADD COLUMN description TEXT NOT NULL DEFAULT ''")
+            cursor.execute("ALTER TABLE issues_master ADD COLUMN description TEXT NOT NULL DEFAULT ''")
             conn.commit()
     except Exception as e:
         print(f"[INIT] Schema Check Failed: {e}")
@@ -434,7 +451,7 @@ def run_init():
         sop_ver = issue.get('sop_version')
         app_fy = issue.get('applicable_from_fy')
 
-        c.execute("""
+        cursor.execute("""
             INSERT INTO issues_master (
                 issue_id, issue_name, description, category, sop_point, 
                 table_definition, analysis_type, sop_version, applicable_from_fy,

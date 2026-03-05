@@ -76,7 +76,16 @@ class FinalizationConfirmationDialog(QDialog):
         issue_table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         
         for i, issue in enumerate(issues):
-            name = issue.get('category') or issue.get('issue_name') or "Unknown Issue"
+            from src.database.db_manager import DatabaseManager
+            db = DatabaseManager()
+            issue_id = issue.get('issue_id')
+            master_issue = db.get_issue(issue_id) if issue_id else None
+            
+            if master_issue:
+                name = master_issue.get('issue_name', 'Unknown Issue')
+            else:
+                name = issue.get('category') or issue.get('issue_name') or "Unknown Issue"
+                
             amt = safe_int(issue.get('total_shortfall', 0))
             issue_table.setItem(i, 0, QTableWidgetItem(name))
             issue_table.setItem(i, 1, QTableWidgetItem(format_indian_number(amt, prefix_rs=True)))
@@ -431,11 +440,12 @@ class AnalysisSummaryStrip(QFrame):
 
 
 class IssueCard(QFrame):
-    def __init__(self, issue_data, parent=None, save_template_callback=None, issue_number=None):
+    def __init__(self, issue_data, parent=None, save_template_callback=None, issue_number=None, case_data=None):
         super().__init__(parent)
         self.issue_data = issue_data
         self.save_template_callback = save_template_callback
         self.issue_number = issue_number
+        self.case_data = case_data
         
         # Load persisted inclusion state (Default: True)
         self.is_included = issue_data.get('is_included', True)
@@ -489,13 +499,20 @@ class IssueCard(QFrame):
         header_layout.addWidget(self.icon_lbl)
         
         # Issue Title
-        import re
-        base_title = issue_data.get('category', 'Issue')
-        # Strip "Point X- " prefix
-        base_title = re.sub(r'^Point \d+- ?', '', base_title, flags=re.IGNORECASE)
+        from src.database.db_manager import DatabaseManager
+        db = DatabaseManager()
+        issue_id = issue_data.get('issue_id')
+        master_issue = db.get_issue(issue_id) if issue_id else None
+        
+        if master_issue:
+            base_title = master_issue.get('issue_name', 'Unknown Issue')
+        else:
+            base_title = issue_data.get('category', 'Issue')
+            # Strip "Point X- " prefix for fallback
+            import re
+            base_title = re.sub(r'^Point \d+- ?', '', base_title, flags=re.IGNORECASE)
         
         title_text = base_title
-
         
         # "Issue <n> – <Name>" Format
         if self.issue_number:
@@ -558,8 +575,32 @@ class IssueCard(QFrame):
         
         self.desc_edit = QTextEdit()
         self.desc_edit.setPlaceholderText("Draft the legal grounds for this issue...")
-        # Pre-fill with template text/brief_facts
-        self.desc_edit.setText(issue_data.get('brief_facts') or issue_data.get('description', ''))
+        
+        # --- PHASE 3: Centralized Template Rendering ---
+        from src.utils.template_engine import TemplateEngine
+        from src.utils.issue_context_builder import IssueContextBuilder
+        
+        raw_template = issue_data.get('brief_facts') or issue_data.get('description', '')
+        
+        # Build context (Metadata + Grid Variables)
+        # Scrutiny results uses 'issue_id' as the key
+        issue_id = issue_data.get('issue_id')
+        
+        context = IssueContextBuilder.build_issue_context(
+            issue_id=issue_id,
+            case_data=self.case_data,
+            grid_results=issue_data, # grid variables are in the same dict in scrutiny_tab
+            issue_metadata=issue_data
+        )
+        
+        try:
+            rendered_text = TemplateEngine.render_issue_template(raw_template, context)
+            self.desc_edit.setText(rendered_text)
+            print(f"[ScrutinyTab] Rendered narrative for {issue_id}")
+        except Exception as e:
+            print(f"[ScrutinyTab] Narrative rendering failed: {e}")
+            self.desc_edit.setText(raw_template)
+
         self.desc_edit.setStyleSheet("border: 1px solid #bdc3c7; border-radius: 4px; padding: 8px;")
         self.desc_edit.setFixedHeight(120) # Min height
         self.content_layout.addWidget(self.desc_edit)
@@ -755,8 +796,8 @@ class ResultsContainer(QScrollArea):
             card.deleteLater()
         self.cards = []
 
-    def add_result(self, issue_data, issue_number=None):
-        card = IssueCard(issue_data, parent=self.container, save_template_callback=self.save_template_callback, issue_number=issue_number)
+    def add_result(self, issue_data, issue_number=None, case_data=None):
+        card = IssueCard(issue_data, parent=self.container, save_template_callback=self.save_template_callback, issue_number=issue_number, case_data=case_data)
         # Wrap card in a centering container if needed, but AlignHCenter on layout covers it usually.
         # However, to strictly enforce the AlignHCenter effect on the widget, we ensure the card is added.
         self.layout.addWidget(card)
@@ -2011,7 +2052,7 @@ class ScrutinyTab(QWidget):
             
             # Executive Summary (Results Area)
             if shortfall > 0:
-                self.results_area.add_result(issue, issue_number=issue_idx)
+                self.results_area.add_result(issue, issue_number=issue_idx, case_data=self.current_case_data)
                 issue_idx += 1
             
             # Dashboard Status
@@ -3293,7 +3334,18 @@ class ScrutinyTab(QWidget):
                 
             # 2. FATAL ASSERTION
             if not resolved_sop_point:
-                 err = f"FATAL INVARIANT FAILURE: Issue '{issue_id}' cannot be mapped to an SOP Point. Database Missing."
+                 # Diagnostic Logging
+                 print(f"\n--- DATABASE INTEGRITY DIAGNOSTIC ---")
+                 print(f"Issue ID: {issue_id}")
+                 if master:
+                     print(f"DB Record Exists: Yes")
+                     print(f"DB sop_point: {master.get('sop_point')}")
+                     print(f"Has Templates: {'Yes' if master.get('templates') else 'No'}")
+                 else:
+                     print(f"DB Record Exists: No")
+                 print(f"-------------------------------------\n")
+                 
+                 err = f"FATAL INVARIANT FAILURE: Issue '{issue_id}' cannot be mapped to an SOP Point. Database Missing or Corrupted."
                  print(err)
                  QMessageBox.critical(self, "System Integrity Error", err)
                  raise RuntimeError(err) # Crash Fast
@@ -3462,7 +3514,7 @@ class ScrutinyTab(QWidget):
                     print(f"[SOP-10 PRE-UI] ID(Summary Rows): {id(st.get('rows')) if st else 'N/A'}")
                     print(f"[SOP-10 PRE-UI] Hash: {_safe_hash(issue)}")
 
-                self.results_area.add_result(issue, issue_number=issue_idx)
+                self.results_area.add_result(issue, issue_number=issue_idx, case_data=self.current_case_data)
                 issue_idx += 1
             
             # Update Dashboard Status
@@ -3842,10 +3894,16 @@ class ScrutinyTab(QWidget):
             # issue_id is the primary legal identifier
             issue_id = item.get('issue_master_id') or item.get('sop_point_id') or item.get('category', 'unknown_issue')
             
+            # Resolve Canonical Name for Snapshot
+            from src.database.db_manager import DatabaseManager
+            db = DatabaseManager()
+            master_issue = db.get_issue(issue_id)
+            canonical_name = master_issue.get('issue_name') if master_issue else (item.get('issue_name') or item.get('category'))
+            
             # Legally Frozen Snapshot
             snapshot_data = {
                 'issue_id': issue_id,
-                'issue_name': item.get('issue_name') or item.get('category'),
+                'issue_name': canonical_name,
                 'total_shortfall': safe_int(item.get('total_shortfall', 0)),
                 'brief_facts': item.get('brief_facts'), # The edited ASMT-10 narration
                 'snapshot': item.get('snapshot', {}), # Raw detected values
