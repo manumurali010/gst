@@ -60,7 +60,6 @@ class SCNRenderer:
             current_para_num = 3
             included_issues = snapshot.get('issues', [])
             
-            # print(f"DEBUG: Rendering {len(included_issues)} issues in worker.")
             
             for i, issue in enumerate(included_issues, 1):
                 # Page Break Logic (Disabled in Preview Mode)
@@ -114,7 +113,7 @@ class SCNRenderer:
                     )
                     editor_part = TemplateEngine.render_issue_template(editor_part, render_context)
                 except Exception as context_err:
-                    print(f"Warning: Failed to render context for {issue.get('issue_id')}: {context_err}")
+                    pass
                 
                 # Regex cleanup
                 editor_part = re.sub(r'<p>\s*&nbsp;\s*</p>', '', editor_part)
@@ -380,13 +379,11 @@ class SCNRenderer:
                 raw_content = issue.get('html_content', '')
                 grid_data = issue.get('grid_data')
                 
-                print(f"DEBUG QT RENDER: Issue {i} | Content Len: {len(raw_content)} | Grid Data Present: {bool(grid_data)}")
                 
                 if not grid_data:
                      # [Defensive Log]
                      # [SCN-UX] Silence warning if it is an intentional narrative-only issue
-                     if not issue.get('narrative_only'):
-                          print(f"WARNING: Issue {i} has NO grid_data in snapshot. Tables may be empty.")
+                     pass
                 
                 # [Fix] Enforce Grid Authority
                 grid_data = issue.get('grid_data')
@@ -411,7 +408,7 @@ class SCNRenderer:
                      )
                      stripped_content = TemplateEngine.render_issue_template(stripped_content, render_context)
                 except Exception as context_err:
-                     print(f"Warning: Failed to render context for {issue.get('issue_id')}: {context_err}")
+                     pass
 
                 # [Fix] Div Indentation
                 content_html = f"""
@@ -515,7 +512,7 @@ class SCNRenderer:
                                  raise RuntimeError("Qt Draft Preview failed to map grid_data rows.")
 
                     except Exception as e:
-                        print(f"Direct Grid Render Error: {e}")
+                        pass
                         html_parts.append(f"<div style='color:red;'>Table Error: {str(e)}</div>")
                 
                 # [Fix] REMOVED Fallback Block

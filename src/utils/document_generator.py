@@ -48,9 +48,6 @@ class DocumentGenerator:
             """
             html_content = style + html_content
             
-        # DEBUG: Save HTML to file to inspect
-        with open(os.path.join(OUTPUT_DIR, "debug_last_generated.html"), "w", encoding="utf-8") as f:
-            f.write(html_content)
 
         try:
             from src.utils.preview_generator import PreviewGenerator

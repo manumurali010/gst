@@ -14,8 +14,52 @@ if not logger.handlers:
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
 
-def _clean_amount(amt_str):
-    return safe_int(amt_str)
+def _clean_amount(val_str):
+    """
+    Safely cleans monetary strings (commas, currency symbols) and returns float.
+    """
+    if val_str is None: return 0.0
+    if isinstance(val_str, (int, float)): return float(val_str)
+    
+    # Extract numeric part only (handle trailing decimals or negative signs)
+    # This is a bit safer than just replace()
+    clean = str(val_str).replace(',', '').replace('₹', '').replace('Rs.', '').replace('Rs', '').strip()
+    try:
+        if not clean: return 0.0
+        return float(clean)
+    except (ValueError, TypeError):
+        return 0.0
+
+def _validate_token_sanity(tokens, min_expected=3):
+    """Universal sanity check for numeric token extraction."""
+    return len(tokens) >= min_expected
+
+def _detect_token_anomalies(tokens, context_line=""):
+    """Logs warnings for suspicious numeric token patterns."""
+    for t in tokens:
+        # Fragmented Indian grouping check (e.g. "1, 23, 456.78" split into parts)
+        if "," in t:
+            parts = t.split(",")
+            # If intermediate parts are only 1 digit, it's highly suspicious for Indian/Intl formats
+            if any(len(p) == 1 for p in parts[1:-1]):
+                logger.warning(f"SUSPICIOUS TOKEN GROUPING: '{t}' in line '{context_line.strip()}'")
+        
+        # Tiny tokens (e.g. ".00" or single digits) isolated from labels
+        if len(t.replace(".", "")) <= 2:
+            logger.debug(f"TINY TOKEN DETECTED: '{t}' in line '{context_line.strip()}'")
+
+def _extract_numbers_from_text(text):
+    if not text: return []
+    # Normalize spaces around commas and dots to prevent number fragmentation
+    # Example: "1, 01, 90, 410. 82" -> "1,01,90,410.82"
+    clean_text = re.sub(r"\s*,\s*", ",", text)
+    clean_text = re.sub(r"\s*\.\s*", ".", clean_text)
+    
+    p = r"\d[\d,]*\.?\d*"
+    tokens = re.findall(p, clean_text)
+    if tokens:
+        _detect_token_anomalies(tokens, clean_text)
+    return tokens
 
 def _extract_fy_from_text(text):
     """
@@ -45,485 +89,325 @@ def _extract_fy_from_text(text):
     
     return None
 
-def _extract_numbers_from_text(text):
-    r"""
-    Unified/Deterministic numeric extraction for SOP 11.
-    Strictly enforces Indian Numbering System OR Integers.
-    Regex: ((?:\d{1,3}(?:,\s*\d{2})*,\s*\d{3}|\d+)\.\d{2})
-    Selection: Longest match wins.
+# Global cache for GSTR-3B PDF text to avoid redundant parsing
+_GSTR3B_TEXT_CACHE = {}
+
+def find_anchor_window(lines, anchor_terms, window_size=5):
     """
-    # Strict Indian Regex mandated by user
-    pattern = r"((?:\d{1,3}(?:,\s*\d{2})*,\s*\d{3}|\d+)\.\d{2})"
-    
-    # We find all matches in the text chunk
-    matches = re.findall(pattern, text)
-    
-    if not matches:
-        return []
-        
-    # [DETERMINISTIC SELECTION]
-    # If the text chunk contains multiple numbers (e.g. a row with Taxable, IGST, etc),
-    # re.findall returns them in order.
-    # However, if we are parsing a *single* value context or need to be robust against partials:
-    # Use re.finditer to get positions if needed, OR trust that findall returns non-overlapping matches from left to right.
-    # For table parsers that expect a list of columns (Taxable, IGST, CGST...), we typically match numeric tokens.
-    # The requirement "Always select the longest numeric token" applies when we are extracting a *single* entity or disambiguating.
-    # But tables have multiple columns.
-    # WAIT: The prompt said "If re.findall() is used... You MUST confirm... Selection must be: the longest match".
-    # This implies we are extracting ONE value or tokenizing.
-    # For table rows, we expect MULTIPLE values (Cols 1..5).
-    # So we return ALL valid tokens found, but ensure each token captured is the "longest" version of itself (which regex greedy quantifiers handle).
-    # IF the intent is to avoid splitting "1,12" and "77,521", the Regex structure `(?:\d{1,3}...` handles that validation.
-    # The `max(matches, key=len)` rule seems specific to "Selection" of a single value?
-    # Actually, let's look at `_parse_3_1_row`. It gets `post_text` (all columns).
-    # It expects `nums` list.
-    # So we return the list of matches. The Regex itself guarantees we don't pick "77,521" if "1,12,77,521" is present because `findall` consumes the full string if it matches the complex pattern.
-    
-    return matches
+    Scans lines for proximity-based anchor detection.
+    Returns the line index where the FIRST term was found if all terms are 
+    present within 'window_size' lines from that point.
+    """
+    for i in range(len(lines)):
+        # Check if the primary (first) term exists in current line
+        if anchor_terms[0].lower() in lines[i].lower():
+            # Check window for all other terms
+            found_all = True
+            for term in anchor_terms[1:]:
+                term_found_in_window = False
+                for j in range(i, min(len(lines), i + window_size)):
+                    if term.lower() in lines[j].lower():
+                        term_found_in_window = True
+                        break
+                if not term_found_in_window:
+                    found_all = False
+                    break
+            
+            if found_all:
+                return i
+    return -1
+
+def parse_full_gstr3b(file_path):
+    """Parses full text of GSTR-3B and caches it."""
+    if file_path in _GSTR3B_TEXT_CACHE:
+        return _GSTR3B_TEXT_CACHE[file_path]
+    try:
+        import fitz
+        doc = fitz.open(file_path)
+        full_text = ""
+        for page in doc:
+            full_text += page.get_text() + "\n"
+        doc.close()
+        _GSTR3B_TEXT_CACHE[file_path] = full_text
+        return full_text
+    except Exception as e:
+        print(f"Error reading GSTR-3B {file_path}: {e}")
+        return ""
 
 def parse_gstr3b_pdf_table_3_1_a(file_path):
     """
     Extracts Table 3.1(a) Outward taxable supplies.
-    Uses robust dynamic column mapping to handle variations in tax head order.
-    Returns: {taxable_value, igst, cgst, sgst, cess}
+    Uses line-bounded scanning for robustness.
+    Returns: {"parsed": bool, "data": dict}
     """
-    results = {"taxable_value": 0, "igst": 0, "cgst": 0, "sgst": 0, "cess": 0}
-    if not file_path: return results
+    full_text = parse_full_gstr3b(file_path)
+    if not full_text: return {"parsed": False, "data": None}
 
-    try:
-        import fitz
-        doc = fitz.open(file_path)
-        full_text = ""
-        for page in doc:
-            full_text += page.get_text() + "\n"
-        doc.close()
-        
-        # 1. Dynamic Header Mapping
-        def find_header(pattern, text):
-            m = re.search(pattern, text, re.IGNORECASE)
-            return m.start() if m else 999999
-
-        headers = [
-            ("igst", find_header(r"integrated\s*tax", full_text)),
-            ("cgst", find_header(r"central\s*tax", full_text)),
-            ("sgst", find_header(r"state(/ut)?\s*tax", full_text)),
-            ("cess", find_header(r"cess", full_text))
-        ]
-        
-        headers.sort(key=lambda x: x[1])
-        detected_order = [h[0] for h in headers if h[1] < 999999]
-        
-        if len(detected_order) < 4:
-            detected_order = ["igst", "cgst", "sgst", "cess"]
-
-        # 2. Extract Data Row - Strict anchoring to "(a) Outward taxable supplies"
-        pattern = r"\(a\)\s*Outward\s*taxable\s*supplies.*?((?:[\d,]+\.?\d*\s+){4}[\d,]+\.?\d*)"
-        match = re.search(pattern, full_text, re.IGNORECASE | re.DOTALL)
-        
-        if match:
-            nums = _extract_numbers_from_text(match.group(1))
-            if len(nums) >= 5:
-                # Column 0: Taxable Value
-                results["taxable_value"] = _clean_amount(nums[0])
-                # Columns 1..4: Taxes in detected order
-                for i, tax_type in enumerate(detected_order):
-                    if i+1 < len(nums):
-                        results[tax_type] = _clean_amount(nums[i+1])
-                return results
-
-    except Exception as e:
-        print(f"Error parsing GSTR-3B PDF Table 3.1(a): {e}")
-
-    # Fallback/Not Found
-    return None
+    # 1. Row Detection - Use _parse_3_1_row with relaxed anchor
+    anchor_regex = r"\(a\)\s*Outward\s*taxable\s*supplies"
+    return _parse_3_1_row(full_text, anchor_regex)
 
 def parse_gstr1_pdf_total_liability(file_path):
     """
     Extracts "Total Liability (Outward supplies other than Reverse charge)" from GSTR-1 PDF.
-    Returns: { "igst": float, "cgst": float, "sgst": float, "cess": float }
+    Returns: {"parsed": bool, "data": dict}
     """
     results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
     
     try:
-        import fitz
-        doc = fitz.open(file_path)
-        full_text = ""
-        for page in doc:
-            full_text += page.get_text() + "\n"
-        doc.close()
+        full_text = parse_full_gstr3b(file_path)
+        if not full_text: return {"parsed": False, "data": None}
         
-        target_label = r"Total\s*Liability\s*\(Outward\s*supplies\s*other\s*than\s*Reverse\s*charge\)"
-        pattern = target_label + r".*?((?:[\d,]+\.?\d*\s+){1,10})"
+        lines = [l.strip() for l in full_text.split('\n') if l.strip()]
         
-        match = re.search(pattern, full_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            # Observability: Log Matched Header
-            print(f"DEBUG: [GSTR-1 Parser] Header Found: '{match.group(0)[:50]}...'")
+        anchor_terms = ["Total Liability", "Outward supplies", "Reverse charge"]
+        anchor_idx = find_anchor_window(lines, anchor_terms, window_size=6)
+        
+        if anchor_idx != -1:
+            logger.debug(f"[GSTR1 DEBUG] Anchor index detected: {anchor_idx}")
+            logger.debug(f"[GSTR1 DEBUG] Anchor line: '{lines[anchor_idx]}'")
             
-            numbers_str = match.group(1)
-            # [Audit Fix] Use unified extractor for safety
-            nums = _extract_numbers_from_text(numbers_str)
-            print(f"DEBUG: [GSTR-1 Parser] Raw Tokens Found ({len(nums)}): {nums}")
+            collected_tokens = []
+            # Scan more lines (up to 12) because GSTR-1 rows are often multi-line
+            for j in range(anchor_idx, min(len(lines), anchor_idx + 12)):
+                tokens = _extract_numbers_from_text(lines[j])
+                if tokens:
+                    collected_tokens.extend(tokens)
+                    # Break only after collecting at least 5 tokens to avoid TV-only capture
+                    if len(collected_tokens) >= 5:
+                        break
             
-            if len(nums) == 4:
-                # Exact match for IGST, CGST, SGST, Cess
-                results["igst"] = _clean_amount(nums[0])
-                results["cgst"] = _clean_amount(nums[1])
-                results["sgst"] = _clean_amount(nums[2])
-                results["cess"] = _clean_amount(nums[3])
-                print(f"DEBUG: [GSTR-1 Parser] Extracted (4-token mode): {results}")
-            elif len(nums) >= 5:
-                # 5+ tokens: Assume first is Taxable Value
-                # Map indices 1-4 to Taxes
-                results["igst"] = _clean_amount(nums[1])
-                results["cgst"] = _clean_amount(nums[2])
-                results["sgst"] = _clean_amount(nums[3])
-                results["cess"] = _clean_amount(nums[4])
-                print(f"DEBUG: [GSTR-1 Parser] Extracted (5-token mode): {results}")
+            logger.debug(f"[GSTR1 DEBUG] Raw numeric tokens extracted: {collected_tokens}")
+
+            # Token Sanity: Expected min 3 (IGST, CGST, SGST) - User requirement: loosen validation
+            if not _validate_token_sanity(collected_tokens, 3):
+                logger.warning(f"GSTR-1 Liability Parse Failed: Insufficient tokens ({len(collected_tokens)})")
+                return {"parsed": False, "data": None}
+
+            # Mapping Logic (User Approved):
+            # 5+ Tokens: [Taxable Value, IGST, CGST, SGST, Cess] -> Map idx 1-4
+            if len(collected_tokens) >= 5:
+                results["igst"] = _clean_amount(collected_tokens[1])
+                results["cgst"] = _clean_amount(collected_tokens[2])
+                results["sgst"] = _clean_amount(collected_tokens[3])
+                results["cess"] = _clean_amount(collected_tokens[4]) if len(collected_tokens) > 4 else 0.0
+            # 4 Tokens: [IGST, CGST, SGST, Cess] OR [Taxable, IGST, CGST, SGST]
+            # Mapping idx 0-3 as tax heads for now, as per user's "assumption" concern.
             else:
-                print(f"DEBUG: [GSTR-1 Parser] Parsing Rejected. Insufficient tokens: Found {len(nums)}, Expected >=4.")
-        else:
-            print("DEBUG: [GSTR-1 Parser] Header Pattern NOT found in PDF text.")
+                results["igst"] = _clean_amount(collected_tokens[0])
+                results["cgst"] = _clean_amount(collected_tokens[1])
+                results["sgst"] = _clean_amount(collected_tokens[2])
+                results["cess"] = _clean_amount(collected_tokens[3]) if len(collected_tokens) > 3 else 0.0
             
+            logger.debug(f"[GSTR1 DEBUG] Final mapped IGST/CGST/SGST/CESS values: {results}")
+            return {"parsed": True, "data": results}
+                
     except Exception as e:
-        print(f"Error parsing GSTR-1 PDF: {e}")
+        logger.error(f"Error parsing GSTR-1 PDF: {e}")
         
-    return results
+    return {"parsed": False, "data": None}
 
 def parse_gstr3b_pdf_table_3_1_d(file_path):
     """
-    Extracts RCM Liability from Table 3.1(d) of GSTR-3B PDF.
-    Target Row: "(d) Inward supplies liable to reverse charge"
-    Returns: { "igst": float, "cgst": float, "sgst": float, "cess": float }
+    Extracts Table 3.1(d) Inward supplies Liable to Reverse Charge.
+    Returns: {"parsed": bool, "data": dict}
     """
-    results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
-    
-    try:
-        import fitz
-        doc = fitz.open(file_path)
-        full_text = ""
-        for page in doc:
-            full_text += page.get_text() + "\n"
-        doc.close()
-        
-        # Pattern: "(d) Inward supplies (liable to reverse charge)" or similar variance
-        # Followed by 5 numbers (Taxable, IGST, CGST, SGST, Cess)
-        # Regex needs to be robust to whitespace and potential line breaks.
-        # "Inward supplies \r\n (liable to reverse charge)"
-        
-        pattern = r"\(d\)\s*Inward\s*supplies.*?((?:[\d,]+\.?\d*\s+){4}[\d,]+\.?\d*)"
-        
-        match = re.search(pattern, full_text, re.IGNORECASE | re.DOTALL)
-        if match: # Added this if block to fix indentation
-            # [SOP-11 FIX] Use unified extraction
-            nums = _extract_numbers_from_text(match.group(1))
-            
-            if len(nums) >= 5:
-                # Indices: 0=Taxable, 1=IGST, 2=CGST, 3=SGST, 4=Cess
-                results["taxable_value"] = _clean_amount(nums[0])
-                results["igst"] = _clean_amount(nums[1])
-                results["cgst"] = _clean_amount(nums[2])
-                results["sgst"] = _clean_amount(nums[3])
-                results["cess"] = _clean_amount(nums[4])
-                
-    except Exception as e:
-        print(f"Error parsing GSTR-3B PDF Table 3.1(d): {e}")
-        
-    return results
+    full_text = parse_full_gstr3b(file_path)
+    if not full_text: return {"parsed": False, "data": None}
+    return _parse_3_1_row(full_text, r"\(d\)\s*Inward\s*Supplies\s*\(liable\s*to\s*reverse\s*charge\)")
 
 def parse_gstr3b_pdf_table_4_a_2_3(file_path):
     """
-    Extracts and Sums ITC Availed from Table 4(A)(2) and 4(A)(3).
-    4(A)(2): Import of services
-    4(A)(3): Inward supplies liable to reverse charge (other than 1 & 2 above)
-    Returns: { "igst": float, "cgst": float, "sgst": float, "cess": float }
+    Extracts ITC Availed from Table 4(A)(2) and (3) of GSTR-3B PDF.
+    Returns: {"parsed": bool, "data": dict}
     """
     results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
+    if not file_path: return {"parsed": False, "data": None}
     
     try:
-        import fitz
-        doc = fitz.open(file_path)
-        full_text = ""
-        for page in doc:
-            full_text += page.get_text() + "\n"
-        doc.close()
+        full_text = parse_full_gstr3b(file_path)
+        if not full_text: return {"parsed": False, "data": None}
         
-        # We need to find both rows and sum them.
+        lines = [l.strip() for l in full_text.split('\n') if l.strip()]
         
-        # 4(A)(2) "Import of services"
-        # Usually 4 columns: IGST, CGST, SGST, Cess
-        # Sometimes 5 if Taxable value? 
-        # Requirement says: Extract values per tax head. 
-        # Table 4(A) columns are usually: IGST, CGST, SGST, Cess. (No Taxable Value usually shown in Table 4 summary?)
-        # Let's check standard GSTR-3B PDF format. 
-        # Table 4 ITC Available: (1) Import of Goods, (2) Import of Services, (3) Inward supplies liable to reverse charge...
-        # Columns: Integrated Tax, Central Tax, State/UT Tax, Cess
-        # So 4 numbers expected.
+        any_success = False
         
-        # Pattern for 4(A)(2) "Import of services"
-        p2 = r"\(2\)\s*Import\s*of\s*services.*?((?:[\d,]+\.?\d*\s+){3}[\d,]+\.?\d*)"
+        # We need to collect BOTH (2) and (3)
+        anchors = [
+            ("(2)", ["Import of services"]),
+            ("(3)", ["Inward supplies", "reverse charge", "other than 1 & 2"])
+        ]
         
-        # Pattern for 4(A)(3) "Inward supplies liable to reverse charge"
-        # Note: distinct from 3.1(d) because this is under Table 4 (ITC) section.
-        # But regex search on full text might collide with 3.1(d) if text is similar?
-        # 3.1(d) usually has "(d)" prefix.
-        # 4(A)(3) usually has "(3)" prefix inside Table 4 block.
-        # However, regex global might find either.
-        # Safety: Look for "(3)" followed by "Inward supplies liable to reverse charge"
-        
-        p3 = r"\(3\)\s*Inward\s*supplies\s*liable\s*to\s*reverse\s*charge\s*\(other.*?((?:[\d,]+\.?\d*\s+){3}[\d,]+\.?\d*)"
-        
-        # Extract (2)
-        match2 = re.search(p2, full_text, re.IGNORECASE | re.DOTALL)
-        if match2:
-            # [Audit Fix] Unified extractor
-            nums = _extract_numbers_from_text(match2.group(1))
-            # Expect 4 numbers: IGST, CGST, SGST, Cess
-            if len(nums) >= 4:
-                results["igst"] += _clean_amount(nums[0])
-                results["cgst"] += _clean_amount(nums[1])
-                results["sgst"] += _clean_amount(nums[2])
-                results["cess"] += _clean_amount(nums[3])
-                
-        # Extract (3)
-        match3 = re.search(p3, full_text, re.IGNORECASE | re.DOTALL)
-        if match3:
-             # [Audit Fix] Unified extractor
-             nums = _extract_numbers_from_text(match3.group(1))
-             if len(nums) >= 4:
-                results["igst"] += _clean_amount(nums[0])
-                results["cgst"] += _clean_amount(nums[1])
-                results["sgst"] += _clean_amount(nums[2])
-                results["cess"] += _clean_amount(nums[3])
-                
+        for label, terms in anchors:
+            found_for_anchor = False
+            # Find anchor line
+            for i, line in enumerate(lines):
+                if label in line and all(t.lower() in line.lower() for t in terms):
+                    logger.debug(f"[RCM DEBUG] Found anchor {label} at line {i}: '{line}'")
+                    # Scan next lines for tokens
+                    collected_tokens = []
+                    for j in range(i + 1, min(len(lines), i + 10)):
+                        # If we hit another label, stop
+                        if re.search(r"^\(\d+\)", lines[j]):
+                             break
+                        
+                        tokens = _extract_numbers_from_text(lines[j])
+                        if tokens:
+                            collected_tokens.extend(tokens)
+                            if len(collected_tokens) >= 4:
+                                break
+                    
+                    if _validate_token_sanity(collected_tokens, 3):
+                        logger.debug(f"[RCM DEBUG] Matched {label} | Collected Tokens: {collected_tokens}")
+                        results["igst"] += _clean_amount(collected_tokens[0])
+                        results["cgst"] += _clean_amount(collected_tokens[1])
+                        results["sgst"] += _clean_amount(collected_tokens[2])
+                        if len(collected_tokens) > 3:
+                            results["cess"] += _clean_amount(collected_tokens[3])
+                        
+                        any_success = True
+                        found_for_anchor = True
+                        break # Move to next anchor
+            
+            if not found_for_anchor:
+                logger.debug(f"[RCM DEBUG] Anchor {label} not found in this PDF.")
+
+        if any_success:
+            logger.debug(f"[RCM DEBUG] Final Mapped RCM: {results}")
+            return {"parsed": True, "data": results}
+            
     except Exception as e:
-         print(f"Error parsing GSTR-3B PDF Table 4(A)(2)/(3): {e}")
+         logger.error(f"Error parsing GSTR-3B PDF Table 4(A)(2)/(3): {e}")
          
-    return results
+    return {"parsed": False, "data": None}
 
 def parse_gstr3b_pdf_table_4_a_4(file_path):
     """
     Extracts ITC Availed from Table 4(A)(4) of GSTR-3B PDF.
-    4(A)(4): Inward supplies from ISD
-    
-    STRICT IMPLEMENTATION:
-    1. Locates Table 4 Boundary (Start: "Table 4", End: "Table 5" or "Ineligible")
-    2. Searches strictly within this block.
-    3. Returns None if table/row not found or ambiguous.
+    Returns: {"parsed": bool, "data": dict}
     """
     results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
+    if not file_path: return {"parsed": False, "data": None}
     
     try:
-        import fitz
-        doc = fitz.open(file_path)
-        full_text = ""
-        for page in doc:
-            full_text += page.get_text() + "\n"
-        doc.close()
+        full_text = parse_full_gstr3b(file_path)
+        if not full_text: return {"parsed": False, "data": None}
         
-        # 1. Boundary Detection
-        # Standard 3B Headers
-        start_marker = re.search(r"4\.\s*Eligible\s*ITC", full_text, re.IGNORECASE)
-        if not start_marker:
-            print("DEBUG: [3B-Parser] Table 4 Start Marker not found.")
-            return None
+        lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+        
+        # Proximity-based detection for Table 4(A)(4) ISD
+        anchor_terms = ["(4)", "Inward supplies", "ISD"]
+        anchor_idx = find_anchor_window(lines, anchor_terms, window_size=6)
+        
+        if anchor_idx != -1:
+            # Scan the next 6 lines for numeric tokens
+            collected_tokens = []
+            for j in range(anchor_idx, min(len(lines), anchor_idx + 8)):
+                tokens = _extract_numbers_from_text(lines[j])
+                if tokens:
+                    collected_tokens.extend(tokens)
+                    if len(collected_tokens) >= 4:
+                        break
             
-        # End marker could be "5. Exempt" or "Ineligible ITC" (Section D of Table 4) or "5. Values"
-        # Using "5." as primary delimiter for next table
-        end_marker = re.search(r"5\.\s*Values\s*of\s*exempt", full_text, re.IGNORECASE)
-        
-        start_idx = start_marker.start()
-        end_idx = end_marker.start() if end_marker else len(full_text)
-        
-        table_4_text = full_text[start_idx:end_idx]
-        
-        # 2. Row Detection within Table 4
-        # Pattern: "(4)" followed by "Inward supplies from ISD"
-        # Flexible for newlines: "(4)\nInward..."
-        row_pattern = r"\(4\)\s*Inward\s*supplies\s*from\s*ISD.*?((?:[\d,]+\.?\d*\s+){3}[\d,]+\.?\d*)"
-        
-        match = re.search(row_pattern, table_4_text, re.IGNORECASE | re.DOTALL)
-        if match:
-            # [Audit Fix] Unified extractor
-            nums = _extract_numbers_from_text(match.group(1))
-            # Expect 4 columns: I, C, S, Cess
-            if len(nums) >= 4:
-                results["igst"] = _clean_amount(nums[0])
-                results["cgst"] = _clean_amount(nums[1])
-                results["sgst"] = _clean_amount(nums[2])
-                results["cess"] = _clean_amount(nums[3])
-                return results
+            if _validate_token_sanity(collected_tokens, 3):
+                # CLEAN LABEL INTERFERENCE: Remove (4), Table, 4A, etc. to prevent capturing label index as value
+                # This is safe because _extract_numbers_from_text handles the main numeric extraction.
+                # However, since we collect tokens LINE BY LINE, we must clean the line BEFORE extraction.
+                
+                # RE-SCAN with cleaning
+                collected_tokens = []
+                for j in range(anchor_idx, min(len(lines), anchor_idx + 8)):
+                    clean_line = lines[j].replace("(4)", "").replace("4(A)(4)", "").replace("4(a)(4)", "").strip()
+                    tokens = _extract_numbers_from_text(clean_line)
+                    if tokens:
+                        collected_tokens.extend(tokens)
+                        if len(collected_tokens) >= 4:
+                            break
+                
+                logger.debug(f"[4A4 DEBUG] Anchor Line: {lines[anchor_idx]} | Cleaned Tokens: {collected_tokens}")
+                results["igst"] = _clean_amount(collected_tokens[0])
+                results["cgst"] = _clean_amount(collected_tokens[1])
+                results["sgst"] = _clean_amount(collected_tokens[2])
+                if len(collected_tokens) > 3: results["cess"] = _clean_amount(collected_tokens[3])
+                logger.debug(f"[4A4 DEBUG] Mapped: {results}")
+                return {"parsed": True, "data": results}
             else:
-                 print(f"DEBUG: [3B-Parser] Table 4(A)(4) found but insufficient columns: {nums}")
-                 return None # Silent zero forbidden
-
-        # Fallback: Check if row title exists but regex didn't catch numbers (Parse Failure)
-        if "Inward supplies from ISD" in table_4_text:
-             print("DEBUG: [3B-Parser] 'Inward supplies from ISD' text found but values unparseable.")
-             return None # Unsafe to return 0.0
-
-        print("DEBUG: [3B-Parser] Table 4(A)(4) Row not identified in Table 4 block.")
-        return None # Not found
+                logger.debug(f"Table 4(A)(4) Parse Warning: Insufficient tokens ({len(collected_tokens)}) in block near line {anchor_idx}")
     
     except Exception as e:
-        print(f"Error parsing GSTR-3B PDF Table 4(A)(4): {e}")
-        return None
+        logger.error(f"Error parsing GSTR-3B PDF Table 4(A)(4): {e}")
+    return {"parsed": False, "data": None}
 
 def parse_gstr3b_pdf_table_4_a_5(file_path):
     """
     Extracts ITC Availed from Table 4(A)(5) of GSTR-3B PDF.
-    4(A)(5): All other ITC
-    
-    STRICT IMPLEMENTATION:
-    1. Validates presence of Table 4 headers (Integrated, Central, State, Cess) in correct relative order.
-    2. Uses strict anchoring for row (5) "All other ITC".
-    3. Fails if headers or data are ambiguous (No guessing).
+    Returns: {"parsed": bool, "data": dict}
     """
     results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
+    if not file_path: return {"parsed": False, "data": None}
     
     try:
-        print(f"DEBUG: Starting strict parse of GSTR-3B PDF: {file_path}")
-        doc = fitz.open(file_path)
-        full_text = ""
-        for page in doc:
-            full_text += page.get_text() + "\n"
-        doc.close()
+        full_text = parse_full_gstr3b(file_path)
+        if not full_text: return {"parsed": False, "data": None}
         
-        # 1. Header Validation (Safety Guard)
-        # We need to ensure the columns are in the expected order: IGST, CGST, SGST, Cess
-        # We look for the headers in the text.
-        # Note: PDF text extraction might interleave things, but generally headers appear in block.
-        # Regex to find them appearing in sequence (allowing for some chars in between but not too many)
+        lines = [l.strip() for l in full_text.split('\n') if l.strip()]
         
-        # 1. Header Validation (Safety Guard)
-        # Regex-based search to handle "Integrated\nTax" or extra spaces
+        # Proximity-based detection for Table 4(A)(5) All other ITC
+        anchor_terms = ["(5)", "All other ITC"]
+        anchor_idx = find_anchor_window(lines, anchor_terms, window_size=5)
         
-        # Helper: Find first match index
-        def find_header(pattern, text):
-            m = re.search(pattern, text, re.IGNORECASE)
-            return m.start() if m else -1
+        if anchor_idx != -1:
+            # Scan the next 6 lines for numeric tokens
+            collected_tokens = []
+            for j in range(anchor_idx, min(len(lines), anchor_idx + 8)):
+                # Clean the line of labels to prevent interference
+                clean_line = lines[j].replace("(5)", "").replace("All other ITC", "").strip()
+                tokens = _extract_numbers_from_text(clean_line)
+                if tokens:
+                    collected_tokens.extend(tokens)
+                    if len(collected_tokens) >= 4:
+                        break
             
-        # Patterns with flexible whitespace
-        idx_igst = find_header(r"integrated\s*tax", full_text)
-        idx_cgst = find_header(r"central\s*tax", full_text)
-        idx_sgst = find_header(r"state/ut\s*tax", full_text)
-        if idx_sgst == -1: idx_sgst = find_header(r"state\s*tax", full_text)
-        idx_cess = find_header(r"cess", full_text)
-        
-        # Debug: Print first 500 chars to see layout if failed
-        if idx_igst == -1 or idx_cgst == -1:
-             print("DEBUG: [3B-Parser] Text Dump (Head):")
-             print(full_text[:500].replace('\n', '\\n'))
-        
-        header_valid = (
-            idx_igst != -1 and 
-            idx_cgst != -1 and 
-            idx_sgst != -1 and 
-            idx_cess != -1 and
-            idx_igst < idx_cgst < idx_sgst < idx_cess
-        )
-        
-        if not header_valid:
-            print("WARNING: [3B-Parser] Table 4 headers not found in standard order (Integrated...Central...State...Cess).")
-            print(f"DEBUG Headers Found at: IGST={idx_igst}, CGST={idx_cgst}, SGST={idx_sgst}, Cess={idx_cess}")
-            print("DEBUG: Failing parse to prevent mis-mapping.")
-            return None # Strict Fallback
-            
-        print("DEBUG: [3B-Parser] Header validation successful (Standard Order Verified).")
-
-        # 2. Anchor Detection & Data Extraction
-        lines = full_text.split('\n')
-        start_idx = -1
-        
-        for i, line in enumerate(lines):
-            # Strict Anchor: Must contain "(5)" AND "All other ITC" (case insensitive)
-            # This avoids matching random "5" or "All" texts.
-            l_clean = line.lower().replace(" ", "")
-            if "(5)" in l_clean and "allotheritc" in l_clean:
-                start_idx = i
-                print(f"DEBUG: [3B-Parser] Anchor Found at line {i}: '{line.strip()}'")
-                break
-        
-        if start_idx != -1:
-            collected_nums = []
-            
-            # Scan matches and subsequent lines (limit 10 lines)
-            print("DEBUG: [3B-Parser] Scanning for tokens...")
-            for j in range(start_idx, min(len(lines), start_idx + 10)):
-                raw_line = lines[j]
-                # Remove anchor text to avoid parsing '5' from '(5)' as a value if it wasn't separated well
-                # But be careful not to remove data.
-                # Simplest: Replace known non-digit patterns.
-                
-                # We care about number tokens.
-                # Clean specific anchor strings if present in THIS line
-                # Clean specific anchor strings if present in THIS line
-                curr_line_clean = raw_line.replace("All other ITC", "").replace("(5)", "").strip()
-                
-                # [Audit Fix] Use unified extractor instead of split()
-                # matches will be list of strings "1,234.00", "0.00" etc
-                tokens = _extract_numbers_from_text(curr_line_clean)
-                
-                print(f"DEBUG:   Line {j} tokens: {tokens}")
-                
-                for token in tokens:
-                    # Tokens are already validated by regex in helper
-                    collected_nums.append(token)
-                        
-            print(f"DEBUG: [3B-Parser] Total Tokens Collected: {collected_nums}")
-            
-            if len(collected_nums) >= 4:
-                # We take the first 4 numbers found after the anchor.
-                # Based on header validation, we map them to I-C-S-Ces
-                results["igst"] = _clean_amount(collected_nums[0])
-                results["cgst"] = _clean_amount(collected_nums[1])
-                results["sgst"] = _clean_amount(collected_nums[2])
-                results["cess"] = _clean_amount(collected_nums[3])
-                
-                print(f"DEBUG: [3B-Parser] Final Mapping: {results}")
-                return results
+            if _validate_token_sanity(collected_tokens, 3):
+                logger.debug(f"[4A5 DEBUG] Anchor Line: {lines[anchor_idx]} | Tokens: {collected_tokens}")
+                results["igst"] = _clean_amount(collected_tokens[0])
+                results["cgst"] = _clean_amount(collected_tokens[1])
+                results["sgst"] = _clean_amount(collected_tokens[2])
+                if len(collected_tokens) > 3: results["cess"] = _clean_amount(collected_tokens[3])
+                logger.debug(f"[4A5 DEBUG] Mapped: {results}")
+                return {"parsed": True, "data": results}
             else:
-                 print(f"DEBUG: [3B-Parser] Insufficient data tokens found (Expected 4, Got {len(collected_nums)}).")
-                 return None
-
-        print(f"DEBUG: [3B-Parser] Anchor '(5) All other ITC' NOT found.")
-        return None
-
+                logger.debug(f"Table 4(A)(5) Parse Warning: Insufficient tokens ({len(collected_tokens)}) in block near line {anchor_idx}")
+                
     except Exception as e:
-        print(f"Error parsing GSTR-3B PDF Table 4(A)(5): {e}")
-        import traceback; traceback.print_exc()
-        return None
+        logger.error(f"Error parsing GSTR-3B PDF Table 4(A)(5): {e}")
+    return {"parsed": False, "data": None}
 
 def parse_gstr3b_pdf_table_4_a_1(file_path):
     """
     Extracts ITC from Table 4(A)(1) - Import of Goods.
-    Returns: {igst, cgst, sgst, cess}
+    Returns: {"parsed": bool, "data": dict}
     """
     results = { "igst": 0, "cgst": 0, "sgst": 0, "cess": 0 }
-    if not file_path: return results
-
     try:
-        import fitz
-        doc = fitz.open(file_path)
-        full_text = ""
-        for page in doc: full_text += page.get_text() + "\n"
-        doc.close()
+        full_text = parse_full_gstr3b(file_path)
+        if not full_text: return {"parsed": False, "data": None}
 
-        # Pattern: (1) Import of Goods
         pattern = r"\(1\)\s*Import\s*of\s*goods.*?((?:[\d,]+\.?\d*\s+){3}[\d,]+\.?\d*)"
         match = re.search(pattern, full_text, re.IGNORECASE | re.DOTALL)
         if match:
-            # [Audit Fix] Unified extractor
             nums = _extract_numbers_from_text(match.group(1))
-            if len(nums) >= 4:
+            if _validate_token_sanity(nums, 4):
                 results["igst"] = _clean_amount(nums[0])
                 results["cgst"] = _clean_amount(nums[1])
                 results["sgst"] = _clean_amount(nums[2])
                 results["cess"] = _clean_amount(nums[3])
+                return {"parsed": True, "data": results}
+            else:
+                logger.debug(f"Table 4(A)(1) Parse Warning: Insufficient tokens ({len(nums)})")
     except Exception as e: 
-        print(f"Error parsing 4A1: {e}")
-        pass
-    return results
+        logger.error(f"Error parsing 4A1: {e}")
+    return {"parsed": False, "data": None}
 
 def parse_gstr3b_metadata(file_path):
     """
@@ -573,17 +457,27 @@ def parse_gstr3b_metadata(file_path):
              if rp_match: meta["return_period"] = rp_match.group(1).replace('\n', ' ').strip()
 
         # 3. Total ITC (Aggregation)
-        r1 = parse_gstr3b_pdf_table_4_a_1(file_path)
-        r23 = parse_gstr3b_pdf_table_4_a_2_3(file_path)
-        r4 = parse_gstr3b_pdf_table_4_a_4(file_path)
-        r5 = parse_gstr3b_pdf_table_4_a_5(file_path)
+        def _get_vals(res):
+            if isinstance(res, dict) and res.get("parsed") and res.get("data"):
+                return res.get("data")
+            return {"igst": 0, "cgst": 0, "sgst": 0, "cess": 0}
+
+        res1 = parse_gstr3b_pdf_table_4_a_1(file_path)
+        res23 = parse_gstr3b_pdf_table_4_a_2_3(file_path)
+        res4 = parse_gstr3b_pdf_table_4_a_4(file_path)
+        res5 = parse_gstr3b_pdf_table_4_a_5(file_path)
+        
+        r1 = _get_vals(res1)
+        r23 = _get_vals(res23)
+        r4 = _get_vals(res4)
+        r5 = _get_vals(res5)
         
         for k in meta["itc"]:
-            val = (r1.get(k, 0) if r1 else 0) + (r23.get(k, 0) if r23 else 0) + (r4.get(k, 0) if r4 else 0) + (r5.get(k, 0) if r5 else 0)
-            meta["itc"][k] = safe_int(val)
+            val = r1.get(k, 0) + r23.get(k, 0) + r4.get(k, 0) + r5.get(k, 0)
+            meta["itc"][k] = float(val)
 
     except Exception as e:
-        logger.error(f"Error extracting GSTR-3B metadata from {file_path}: {e}")
+        print(f"Error extracting GSTR-3B metadata from {file_path}: {e}")
 
     return meta
 
@@ -607,15 +501,15 @@ def parse_gstr1_pdf_metadata(file_path):
         meta["fy"] = _extract_fy_from_text(text)
         
         # Best effort for return_period
-        m_match = re.search(r"Month\s*[:\-\s]*([A-Za-z]+)", text, re_IGNORECASE)
+        m_match = re.search(r"Month\s*[:\-\s]*([A-Za-z]+)", text, re.IGNORECASE)
         if m_match and meta["fy"]:
              meta["return_period"] = f"{m_match.group(1)} {meta['fy']}"
         else:
-             rp_match = re.search(r"Return\s*Period\s*[:\-\s]*([A-Za-z]+\s*[\-]?\s*\d{4})", text, re_IGNORECASE)
+             rp_match = re.search(r"Return\s*Period\s*[:\-\s]*([A-Za-z]+\s*[\-]?\s*\d{4})", text, re.IGNORECASE)
              if rp_match: meta["return_period"] = rp_match.group(1).replace('\n', ' ').strip()
                 
     except Exception as e:
-        logger.error(f"Error extracting GSTR-1 metadata from {file_path}: {e}")
+        print(f"Error extracting GSTR-1 metadata from {file_path}: {e}")
     return meta
 
 def parse_gstr9_pdf_metadata(file_path):
@@ -641,108 +535,135 @@ def parse_gstr9_pdf_metadata(file_path):
         logger.error(f"Error extracting GSTR-9 metadata from {file_path}: {e}")
     return meta
 
-def _parse_3_1_row(file_path, row_regex):
+def _parse_3_1_row(full_text, row_regex):
     """
-    Helper to parse a row from Table 3.1.
+    Helper to parse a row from Table 3.1 using line-bounded scanning.
     Expects 5 columns: Taxable, IGST, CGST, SGST, Cess.
-    
-    STRICT NULL HANDLING CONTRACT:
-    1. Returns 'None' if Row Label is NOT found.
-    2. Returns 'None' if Row Label IS found but NO numeric values are extracted.
-    3. Returns dict only if valid data is extracted.
     """
     vals = {'taxable_value': 0, 'igst': 0, 'cgst': 0, 'sgst': 0, 'cess': 0}
     try:
-        import fitz
-        doc = fitz.open(file_path)
-        
-        row_found = False
-        data_found = False
-        
-        for page in doc:
-            text = page.get_text()
+        # Robust Anchor Detection: Find character index in full text first
+        match = re.search(row_regex, full_text, re.IGNORECASE | re.DOTALL)
+        if not match:
+            return {"parsed": False, "data": None}
             
-            # [SOP-11 REGEX] Evidence
-            # print(f"\n[SOP-11 REGEX] File: {file_path}")
-            # print(f"[SOP-11 REGEX] ROW Regex: {row_regex}")
-            
-            match = re.search(row_regex, text, re.IGNORECASE)
-            if match:
-                row_found = True
-                # print(f"[SOP-11 REGEX] MATCH_FOUND=True")
-                post_text = text[match.end():]
-                # [SOP-11 UNIFIED FIX] Use shared helper with strict Indian Regex
-                nums = _extract_numbers_from_text(post_text[:250])
-                
-                # [SOP-11 REGEX] Detailed Payload
-                # print(f"[SOP-11 REGEX] EXTRACTED_TEXT_SNIPPET={post_text[:100]!r}")
-                # print(f"[SOP-11 REGEX] Tokens Found: {nums}")
-                
-                if nums:
-                    data_found = True
-                    if len(nums) >= 1: vals['taxable_value'] = _clean_amount(nums[0])
-                    if len(nums) >= 2: vals['igst'] = _clean_amount(nums[1])
-                    if len(nums) >= 3: vals['cgst'] = _clean_amount(nums[2])
-                    if len(nums) >= 4: vals['sgst'] = _clean_amount(nums[3])
-                    if len(nums) >= 5: vals['cess'] = _clean_amount(nums[4])
-                    
-                    # [SOP-11 REGEX] Raw Value Evidence
-                    # print(f"[SOP-11 REGEX] FINAL_VALUE={vals}")
-                    break # Found and extracted
-                else:
-                     # Row found but no numbers? Logic says return None.
-                     pass 
-            else:
-                # print(f"[SOP-11 REGEX] MATCH_FOUND=False")
-                pass
+        # Determine line index of the match
+        lines = full_text.split('\n')
+        
+        # Adjust start_idx if the anchor itself spans multiple lines (we want to scan AFTER the anchor)
+        # But for GST PDFs, anchors are usually short. 
+        # We start scanning from the line where the anchor ENDS.
+        line_where_anchor_ends = full_text.count('\n', 0, match.end())
+        
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"[3.1 PARSE] Anchor found at line {line_where_anchor_ends}")
 
-        doc.close()
+        collected_nums = []
+        # Generalized Token Scanning (up to 15 lines)
+        for j in range(line_where_anchor_ends, min(len(lines), line_where_anchor_ends + 15)):
+            line = lines[j].strip()
+            if not line: continue
+            
+            # Boundary Detection: Stop if another 3.1 row label is detected
+            # Pattern: 3.1 ( or 3.1( or individual row markers (b), (c), (d), (e)
+            # Safeguard: Skip boundary check for the anchor line itself (j == line_where_anchor_ends)
+            if j > line_where_anchor_ends:
+                if re.search(r"3\.1\s*\(", line, re.IGNORECASE) or re.search(r"^\s*\([a-e]\)\s*", line, re.IGNORECASE):
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"[3.1 PARSE] Row Boundary detected at line {j}: '{line}'")
+                    break
+            
+            tokens = _extract_numbers_from_text(line)
+            if tokens:
+                # Header/Numbering Filter: Ignore single-digit integers at the start of line
+                filtered_tokens = []
+                for idx, t in enumerate(tokens):
+                    if idx == 0 and len(t) == 1 and t.isdigit():
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(f"[3.1 PARSE] Filtering row numbering token: '{t}'")
+                        continue
+                    filtered_tokens.append(t)
+                
+                for t in filtered_tokens:
+                    val = _clean_amount(t)
+                    collected_nums.append(val)
+                
+                # Stop if we have at least 5 tokens
+                if len(collected_nums) >= 5:
+                    break
         
-        if not row_found:
-             return None # Case 1: Label Missing
-             
-        if row_found and not data_found:
-             return None # Case 2: Label Found, Data Missing (Scan failed)
-             
-        return vals # Case 3: Success
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"[3.1 PARSE] Tokens collected: {collected_nums}")
+
+        # Dynamic Column Mapping
+        num_count = len(collected_nums)
+        results_found = False
+        if num_count >= 5:
+            vals['taxable_value'] = collected_nums[0]
+            vals['igst'] = collected_nums[1]
+            vals['cgst'] = collected_nums[2]
+            vals['sgst'] = collected_nums[3]
+            vals['cess'] = collected_nums[4]
+            results_found = True
+        elif num_count == 4:
+            vals['igst'] = collected_nums[0]
+            vals['cgst'] = collected_nums[1]
+            vals['sgst'] = collected_nums[2]
+            vals['cess'] = collected_nums[3]
+            results_found = True
+        elif num_count == 3:
+            vals['igst'] = collected_nums[0]
+            vals['cgst'] = collected_nums[1]
+            vals['sgst'] = collected_nums[2]
+            results_found = True
+
+        if results_found and any(v > 0 for v in vals.values()):
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"[3.1 PARSE] Final mapped values: {vals}")
+            return {"parsed": True, "data": vals}
+            
+        return {"parsed": False, "data": None}
 
     except Exception as e:
-        print(f"Error parsing 3.1 row: {e}")
-        return None # Safety fallback
+        logger.error(f"Error parsing 3.1 row: {e}")
+        return {"parsed": False, "data": None}
 
 def parse_gstr3b_pdf_table_3_1_b(file_path):
     """
     Extracts 3.1(b) Outward taxable supplies (zero rated).
     """
-    return _parse_3_1_row(file_path, r"\(b\)\s*Outward\s*taxable\s*supplies\s*\(zero\s*rated\)")
+    full_text = parse_full_gstr3b(file_path)
+    if not full_text: return {"parsed": False, "data": None}
+    return _parse_3_1_row(full_text, r"\(b\)\s*Outward\s*taxable\s*supplies\s*\(zero\s*rated\)")
 
 def parse_gstr3b_pdf_table_3_1_c(file_path):
     """
     Extracts 3.1(c) Other outward supplies (Nil rated, exempted).
     Regex: Allow whitespace inside (c ).
     """
-    return _parse_3_1_row(file_path, r"\(c\s*\)\s*Other\s*outward\s*supplies\s*\(Nil\s*rated,\s*exempted\)")
+    full_text = parse_full_gstr3b(file_path)
+    if not full_text: return {"parsed": False, "data": None}
+    return _parse_3_1_row(full_text, r"\(c\s*\)\s*Other\s*outward\s*supplies\s*\(Nil\s*rated,\s*exempted\)")
 
 def parse_gstr3b_pdf_table_3_1_e(file_path):
     """
     Extracts 3.1(e) Non-GST outward supplies.
     Regex: Allow whitespace inside (e ).
     """
-    return _parse_3_1_row(file_path, r"\(e\s*\)\s*Non-GST\s*outward\s*supplies")
+    full_text = parse_full_gstr3b(file_path)
+    if not full_text: return {"parsed": False, "data": None}
+    return _parse_3_1_row(full_text, r"\(e\s*\)\s*Non-GST\s*outward\s*supplies")
 
 def parse_gstr3b_pdf_table_4_b_1(file_path):
     """
     Extracts Table 4(B)(1) ITC Reversed (Rule 42 & 43).
     Columns: I, C, S, Cess. (Taxable Value not applicable).
+    Returns: {"parsed": bool, "data": dict}
     """
     vals = {'igst': 0, 'cgst': 0, 'sgst': 0, 'cess': 0}
     try:
-        import fitz
-        doc = fitz.open(file_path)
-        full_text = ""
-        for page in doc:
-            full_text += page.get_text() + "\n"
-        doc.close()
+        full_text = parse_full_gstr3b(file_path)
+        if not full_text: return {"parsed": False, "data": None}
 
         # Anchored Regex for Table 4(B)(1)
         # 1. Anchors to "Table 4" (approximate area) if possible, but definitely anchors to (B) and (1) rules
@@ -766,17 +687,20 @@ def parse_gstr3b_pdf_table_4_b_1(file_path):
         match = re.search(pattern, full_text, re.IGNORECASE | re.DOTALL)
         if match:
             post_text = match.group(1)
-            # [SOP-11 UNIFIED FIX] Use shared helper
             nums = _extract_numbers_from_text(post_text[:250])
             
-            if len(nums) >= 1: vals['igst'] = _clean_amount(nums[0])
-            if len(nums) >= 2: vals['cgst'] = _clean_amount(nums[1])
-            if len(nums) >= 3: vals['sgst'] = _clean_amount(nums[2])
-            if len(nums) >= 4: vals['cess'] = _clean_amount(nums[3])
+            if _validate_token_sanity(nums, 4):
+                vals['igst'] = _clean_amount(nums[0])
+                vals['cgst'] = _clean_amount(nums[1])
+                vals['sgst'] = _clean_amount(nums[2])
+                vals['cess'] = _clean_amount(nums[3])
+                return {"parsed": True, "data": vals}
+            else:
+                logger.debug(f"Table 4(B)(1) Parse Warning: Insufficient tokens ({len(nums)})")
             
     except Exception as e:
-        print(f"Error parsing 4B1: {e}")
-    return vals
+        logger.error(f"Error parsing 4B1: {e}")
+    return {"parsed": False, "data": None}
 
 def parse_gstr3b_sop9_identifiers(file_path):
     """
@@ -855,7 +779,7 @@ def parse_gstr3b_sop9_identifiers(file_path):
             
     except Exception as e:
         meta["error"] = str(e)
-        print(f"SOP-9 Metadata Parse Error: {e}")
+        logger.error(f"SOP-9 Metadata Parse Error: {e}")
 
     return meta
 
@@ -876,7 +800,7 @@ def _extract_period_strict(text):
     
     # 2. Fallback: Search for any YYYY-YY pattern in header area (first 1000 chars)
     header = text[:1000]
-    match = re.search(r"\\b(20\d{2}-\d{2})\\b", header)
+    match = re.search(r"\b(20\d{2}-\d{2})\b", header)
     if match:
         return match.group(1)
         
@@ -885,52 +809,27 @@ def _extract_period_strict(text):
 def parse_gstr3b_pdf_table_6_1_cash(file_path):
     """
     Extracts 'Paid in Cash' columns from Table 6.1 of GSTR-3B.
-    Anchor: '6.1 Payment of Tax'
-    Row: '(B) Reverse charge'
-    Target: Column group for 'Paid in Cash'.
-    
-    Standard 3B 6.1 Row Structure for 'Reverse Charge':
-    1. Description (Text)
-    2. Tax Payable (I)
-    3. Tax Payable (C)
-    4. Tax Payable (S)
-    5. Tax Payable (Cess)
-    6. Paid through ITC (I) [Usually Empty/Zero for RCM]
-    7. Paid through ITC (C)
-    8. Paid through ITC (S)
-    9. Paid through ITC (Cess)
-    10. Paid in Cash (I) [TARGET]
-    11. Paid in Cash (C) [TARGET]
-    12. Paid in Cash (S) [TARGET]
-    13. Paid in Cash (Cess) [TARGET]
-    
-    So indices 10,11,12,13 in 1-based column counting.
-    In 0-indexed number list (excluding description text), we expect:
-    Indices 8, 9, 10, 11 to be Cash.
+    Returns: {"parsed": bool, "data": dict}
     """
     results = {
         "igst": 0, "cgst": 0, "sgst": 0, "cess": 0
     }
     
     try:
-        import fitz
-        doc = fitz.open(file_path)
-        full_text = ""
-        for page in doc: full_text += page.get_text() + "\n"
-        doc.close()
+        full_text = parse_full_gstr3b(file_path)
+        if not full_text: return {"parsed": False, "data": None}
         
         # 1. Period Safeguard
         try:
             full_text_meta = full_text[:2000] 
             results["period"] = _extract_period_strict(full_text_meta)
         except ValueError:
-            print(f"WARNING: Strict Period Check Failed for {file_path}")
-            return None 
+            return {"parsed": False, "data": None}
 
         # 2. Anchor to Table 6.1
         start_marker = re.search(r"6\.1\s*Payment\s*of\s*tax", full_text, re.IGNORECASE)
         if not start_marker:
-            return None
+            return {"parsed": False, "data": None}
             
         table_text = full_text[start_marker.start():]
         
@@ -961,7 +860,7 @@ def parse_gstr3b_pdf_table_6_1_cash(file_path):
                     
                     # RCM Rows have 8 numbers: Pay, ITC(4), Cash, Int, Fee.
                     # Cash is the 6th number (Index 5).
-                    if len(nums) >= 6: 
+                    if _validate_token_sanity(nums, 6): 
                         val_str = nums[5]
                         return int(round(_clean_amount(val_str)))
                 return 0
@@ -971,10 +870,10 @@ def parse_gstr3b_pdf_table_6_1_cash(file_path):
             results["sgst"] = extract_cash_from_row(r"State(?:/UT)?\s*Tax", section_b_text)
             results["cess"] = extract_cash_from_row(r"Cess", section_b_text)
             
-            return results
+            return {"parsed": True, "data": results}
                 
-        return None
+        return {"parsed": False, "data": None}
         
     except Exception as e:
-        print(f"Error parsing 6.1: {e}")
-        return None
+        logger.error(f"Error parsing Table 6.1 (Cash Paid): {e}")
+        return {"parsed": False, "data": None}

@@ -1,42 +1,50 @@
 from src.utils.number_utils import safe_int
 
-def format_indian_number(value, prefix_rs=False):
+def format_indian_number(value, prefix_rs=False, decimals=0):
     """
     Formats a number into Indian Numbering System string.
-    Rounds to nearest integer. No decimals.
     
     Args:
         value: int, float, or numeric string.
         prefix_rs: If True, adds 'Rs. ' prefix.
+        decimals: Number of decimal places to preserve (default 0).
         
     Returns:
-        str: Formatted string (e.g., "1,23,456", "Rs. 1,000", "0", "Rs. 0").
+        str: Formatted string (e.g., "1,23,456.00", "Rs. 1,000", "0", "Rs. 0").
     """
     try:
-        num = safe_int(value)
+        if value is None: return "0"
+        num = float(str(value).replace(',', '').replace('₹', '').replace('Rs.', '').replace('Rs', '').strip())
     except (ValueError, TypeError):
-        return str(value) # Return as-is if not numeric
+        return str(value)
 
-    # Round to nearest integer
-    num = int(round(num))
-    
-    # Handle absolute value for formatting
     is_negative = num < 0
-    s_num = str(abs(num))
+    num = abs(num)
     
-    if len(s_num) <= 3:
-        formatted_num = s_num
+    # Round to specified decimals
+    num = round(num, decimals)
+    
+    # Split whole and decimal parts
+    if decimals > 0:
+        s_base = f"{num:.{decimals}f}"
+        whole_part, decimal_part = s_base.split('.')
     else:
-        # Last 3 digits
-        last_3 = s_num[-3:]
-        # Remaining digits
-        rest = s_num[:-3]
-        # Insert commas every 2 digits from right
-        # Reverse, chunk by 2, join, reverse back
+        whole_part = str(int(round(num)))
+        decimal_part = ""
+    
+    if len(whole_part) <= 3:
+        formatted_whole = whole_part
+    else:
+        last_3 = whole_part[-3:]
+        rest = whole_part[:-3]
         rest_reversed = rest[::-1]
-        chunks = [rest_reversed[i:i+2] for i in range(0, len(rest_reversed), 2)]
+        chunks = [rest_reversed[ii:ii+2] for ii in range(0, len(rest_reversed), 2)]
         rest_formatted = ",".join(chunks)[::-1]
-        formatted_num = f"{rest_formatted},{last_3}"
+        formatted_whole = f"{rest_formatted},{last_3}"
+        
+    formatted_num = formatted_whole
+    if decimal_part:
+        formatted_num += f".{decimal_part}"
         
     if is_negative:
         formatted_num = "-" + formatted_num

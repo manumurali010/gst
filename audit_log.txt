@@ -22,3 +22,57 @@
 [2026-02-13T12:00:11.207867] [INFO] STATE TRANSITION SUCCESS: READY -> ANALYZED | Context: {}
 [2026-02-17T19:57:17.771239] [ERROR] Analysis failed: INTEGRITY ERROR: Scrutiny Issue 'GSTR 3B vs 2B (discrepancy identified from GSTR 9)' has no 'issue_id'. Parser must emit Semantic IDs. | Context: {'error': "INTEGRITY ERROR: Scrutiny Issue 'GSTR 3B vs 2B (discrepancy identified from GSTR 9)' has no 'issue_id'. Parser must emit Semantic IDs."}
 [2026-02-18T00:27:17.022099] [ERROR] Analysis failed: FATAL INVARIANT FAILURE: Issue 'RCM_3B_VS_CASH' cannot be mapped to an SOP Point. DB and Fallback failed. | Context: {'error': "FATAL INVARIANT FAILURE: Issue 'RCM_3B_VS_CASH' cannot be mapped to an SOP Point. DB and Fallback failed."}
+[2026-03-04T11:28:14.229888] [INFO] UPLOAD SUCCESS: Triggering Transition INIT -> READY | Context: {}
+[2026-03-04T11:28:14.229888] [INFO] STATE TRANSITION SUCCESS: INIT -> READY | Context: {}
+[2026-03-04 11:28:20,510] [ERROR] Error extracting GSTR-1 metadata from D:/WORK/Scrutiny 2022-23/amstrad/GSTR-1_IFF_32AACCO7927M1Z4_032023.pdf: name 're_IGNORECASE' is not defined
+[2026-03-04T11:28:50.402996] [INFO] STATE TRANSITION SUCCESS: READY -> ANALYZED | Context: {}
+[2026-03-05T11:22:41.572508] [ERROR] Analysis failed: FATAL INVARIANT FAILURE: Issue 'LIABILITY_3B_R1' cannot be mapped to an SOP Point. Database Missing. | Context: {'error': "FATAL INVARIANT FAILURE: Issue 'LIABILITY_3B_R1' cannot be mapped to an SOP Point. Database Missing."}
+[2026-03-05T11:27:02.024434] [ERROR] Analysis failed: FATAL INVARIANT FAILURE: Issue 'LIABILITY_3B_R1' cannot be mapped to an SOP Point. Database Missing. | Context: {'error': "FATAL INVARIANT FAILURE: Issue 'LIABILITY_3B_R1' cannot be mapped to an SOP Point. Database Missing."}
+[2026-03-05T11:27:45.511066] [ERROR] Analysis failed: FATAL INVARIANT FAILURE: Issue 'LIABILITY_3B_R1' cannot be mapped to an SOP Point. Database Missing. | Context: {'error': "FATAL INVARIANT FAILURE: Issue 'LIABILITY_3B_R1' cannot be mapped to an SOP Point. Database Missing."}
+[2026-03-05T12:16:45.546566] [ERROR] Analysis failed: FATAL INVARIANT FAILURE: Issue 'LIABILITY_3B_R1' cannot be mapped to an SOP Point. Database Missing. | Context: {'error': "FATAL INVARIANT FAILURE: Issue 'LIABILITY_3B_R1' cannot be mapped to an SOP Point. Database Missing."}
+[2026-03-05T12:28:32.384341] [ERROR] Analysis failed: FATAL INVARIANT FAILURE: Issue 'LIABILITY_3B_R1' cannot be mapped to an SOP Point. Database Missing or Corrupted. | Context: {'error': "FATAL INVARIANT FAILURE: Issue 'LIABILITY_3B_R1' cannot be mapped to an SOP Point. Database Missing or Corrupted."}
+[2026-03-06T11:48:59.517563] [INFO] UPLOAD SUCCESS: Triggering Transition INIT -> READY | Context: {}
+[2026-03-06T11:48:59.525069] [INFO] STATE TRANSITION SUCCESS: INIT -> READY | Context: {}
+[2026-03-06 11:49:03,036] [ERROR] Error extracting GSTR-1 metadata from D:/WORK/Scrutiny 2022-23/singaporeairlines/GSTR-1_IFF_32AAACS5269A1ZS_032023.pdf: name 're_IGNORECASE' is not defined
+[2026-03-06T11:49:20.525268] [INFO] STATE TRANSITION SUCCESS: READY -> ANALYZED | Context: {}
+[2026-03-09 15:38:23,968] [ERROR] Error extracting GSTR-1 metadata from D:\gst\GSTR-1_IFF_32AAMFM4610Q1Z0_032023.pdf: name 're_IGNORECASE' is not defined
+[2026-03-09 15:39:16,285] [ERROR] Error extracting GSTR-1 metadata from D:\gst\GSTR-1_IFF_32AAMFM4610Q1Z0_032023.pdf: name 're_IGNORECASE' is not defined
+[2026-03-09 15:46:09,253] [ERROR] Error extracting GSTR-1 metadata from D:\gst\GSTR-1_IFF_32AAMFM4610Q1Z0_032023.pdf: name 're_IGNORECASE' is not defined
+[2026-03-10 10:37:32,991] [ERROR] Error parsing 3.1 row: name '_clean_amount' is not defined
+[2026-03-10 10:37:32,993] [ERROR] Error parsing GSTR-3B PDF Table 4(A)(5): name '_clean_amount' is not defined
+[2026-03-10 10:37:32,994] [ERROR] Error parsing Table 6.1 (Cash Paid): name '_clean_amount' is not defined
+[2026-03-10 10:37:32,998] [ERROR] Error parsing 4A1: name '_clean_amount' is not defined
+[2026-03-10 10:37:32,998] [ERROR] Error parsing GSTR-3B PDF Table 4(A)(4): name '_clean_amount' is not defined
+[2026-03-10 10:37:33,001] [ERROR] Error parsing GSTR-3B PDF Table 4(A)(5): name '_clean_amount' is not defined
+[2026-03-10 10:37:33,001] [ERROR] Error parsing 3.1 row: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,001] [ERROR] Error parsing 3.1 row: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,008] [ERROR] Error parsing 4A1: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,009] [ERROR] Error parsing GSTR-3B PDF Table 4(A)(4): name '_clean_amount' is not defined
+[2026-03-10 10:37:33,009] [ERROR] Error parsing GSTR-3B PDF Table 4(A)(5): name '_clean_amount' is not defined
+[2026-03-10 10:37:33,009] [ERROR] Error parsing 3.1 row: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,010] [ERROR] Error parsing 3.1 row: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,011] [ERROR] Error parsing 3.1 row: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,011] [ERROR] Error parsing 3.1 row: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,011] [ERROR] Error parsing 3.1 row: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,011] [ERROR] Error parsing 3.1 row: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,011] [ERROR] Error parsing 4A1: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,012] [ERROR] Error parsing GSTR-3B PDF Table 4(A)(4): name '_clean_amount' is not defined
+[2026-03-10 10:37:33,012] [ERROR] Error parsing GSTR-3B PDF Table 4(A)(5): name '_clean_amount' is not defined
+[2026-03-10 10:37:33,024] [ERROR] Error parsing 4A1: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,024] [ERROR] Error parsing GSTR-3B PDF Table 4(A)(4): name '_clean_amount' is not defined
+[2026-03-10 10:37:33,024] [ERROR] Error parsing GSTR-3B PDF Table 4(A)(5): name '_clean_amount' is not defined
+[2026-03-10 10:37:33,025] [ERROR] Error parsing 3.1 row: name '_clean_amount' is not defined
+[2026-03-10 10:37:33,025] [ERROR] Error parsing Table 6.1 (Cash Paid): name '_clean_amount' is not defined
+[2026-03-10T15:30:13.106023] [INFO] UPLOAD SUCCESS: Triggering Transition INIT -> READY | Context: {}
+[2026-03-10T15:30:13.106023] [INFO] STATE TRANSITION SUCCESS: INIT -> READY | Context: {}
+[2026-03-10T15:30:35.307020] [INFO] STATE TRANSITION SUCCESS: READY -> ANALYZED | Context: {}
+[2026-03-10T17:08:32.140163] [ERROR] Analysis failed: name 'safe_int' is not defined | Context: {'error': "name 'safe_int' is not defined"}
+[2026-03-10T17:12:31.141990] [INFO] UPLOAD SUCCESS: Triggering Transition INIT -> READY | Context: {}
+[2026-03-10T17:12:31.142995] [INFO] STATE TRANSITION SUCCESS: INIT -> READY | Context: {}
+[2026-03-10T17:12:47.232485] [INFO] STATE TRANSITION SUCCESS: READY -> ANALYZED | Context: {}
+[2026-03-10T17:13:36.124239] [INFO] UPLOAD SUCCESS: Triggering Transition INIT -> READY | Context: {}
+[2026-03-10T17:13:36.125246] [INFO] STATE TRANSITION SUCCESS: INIT -> READY | Context: {}
+[2026-03-10T17:13:53.269332] [INFO] STATE TRANSITION SUCCESS: READY -> ANALYZED | Context: {}
+[2026-03-10T17:15:06.812106] [INFO] UPLOAD SUCCESS: Triggering Transition INIT -> READY | Context: {}
+[2026-03-10T17:15:06.813108] [INFO] STATE TRANSITION SUCCESS: INIT -> READY | Context: {}
+[2026-03-10T17:15:22.916287] [INFO] STATE TRANSITION SUCCESS: READY -> ANALYZED | Context: {}

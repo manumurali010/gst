@@ -1783,7 +1783,6 @@ class ScrutinyTab(QWidget):
                 "additional_details": json.dumps(details)
             }
         )
-        print(f"Persisted additional_details for Case {self.current_case_id}")
 
     def _transition_case_state(self, new_state: str):
         """Phase 3: Strict Lifecycle Transition Enforcement."""
@@ -1835,9 +1834,8 @@ class ScrutinyTab(QWidget):
         if asmt_status == 'finalised':
             return "FINALIZED"
 
-        # B. Illegal State Normalization (Analysis without files -> INIT)
         if analysis_completed and not file_paths:
-            print(f"WARNING: Illegal State detected for Case {proc.get('proceeding_id')}. Analysis flagged w/o files. Forcing INIT.")
+            self.log_event("WARNING", f"Illegal State detected for Case {proc.get('proceeding_id')}. Analysis flagged w/o files. Forcing INIT.")
             return "INIT"
 
         # C. Normal Lifecycle
@@ -2147,20 +2145,15 @@ class ScrutinyTab(QWidget):
         self._persist_additional_details()
 
         self.case_state = state 
-        
-        print(f"DEBUG: resume_case after BIND: ID={self.current_case_id}")
 
         # 3. Hard Reset (Clean Slate)
         # MUST NOT clear current_case_id
         self.hard_reset_for_resume()
-        print(f"DEBUG: resume_case after hard_reset: ID={self.current_case_id}")
 
         self.switch_section(0) 
-        print(f"DEBUG: resume_case after switch_section: ID={self.current_case_id}")
 
         # 4. APPLY UI STATE (Strict Single Authority)
         self.apply_case_state()
-        print(f"DEBUG: resume_case after apply_case_state: ID={self.current_case_id}")
 
         # 5. Strict State Machine
         if self.case_state == "INIT":
@@ -2177,19 +2170,14 @@ class ScrutinyTab(QWidget):
             self.analyze_btn.setText("Analyze SOP Points")
             
         elif self.case_state == "ANALYZED":
-            print(f"DEBUG: Entering ANALYZED block. ID={self.current_case_id}")
             self._restore_identity_only(proc)
-            print(f"DEBUG: After _restore_identity_only. ID={self.current_case_id}")
             
             add_details = self._parse_additional_details(proc)
             self._restore_uploader_states(add_details.get('file_paths', {}), add_details)
-            print(f"DEBUG: After _restore_uploader_states. ID={self.current_case_id}")
             
             self.hydrate_case_details_form(proc, readonly=False)
-            print(f"DEBUG: After hydrate_case_details_form. ID={self.current_case_id}")
             
             self.scrutiny_results = self._load_issues_from_db(proc)
-            print(f"DEBUG: calling populate_results_view with current_case_id={self.current_case_id}")
             
             self.populate_results_view(self.scrutiny_results)
             
@@ -2778,8 +2766,9 @@ class ScrutinyTab(QWidget):
         # CHECK: Only enable analysis if primary files are present
         has_primary = 'tax_liability_yearly' in self.file_paths
         has_gstr9 = any(k.startswith('gstr9') for k in self.file_paths)
+        has_3b = any(k.startswith('gstr3b') and v for k, v in self.file_paths.items())
         
-        if has_primary or has_gstr9:
+        if has_primary or has_gstr9 or has_3b:
             self.analyze_btn.setEnabled(True)
             
         # [FIX - PHASE 22] Proactive Transition to READY
@@ -3294,14 +3283,10 @@ class ScrutinyTab(QWidget):
            
            CRITICAL INVARIANT: Every issue MUST have a valid sop_point.
         """
-        # DIAGNOSTIC LOGGING
-        print(f"DEBUG: enrich_issues_with_templates received {len(issues)} issues.")
-
         enriched = []
         for issue in issues:
             # DEFENSIVE GUARD
             if not isinstance(issue, dict):
-                print(f"ERROR: Invalid issue payload (not a dict): {issue}")
                 continue
 
             desc = issue.get("description") or issue.get("category")
@@ -3312,7 +3297,6 @@ class ScrutinyTab(QWidget):
             if not issue_id:
                  # REQUIREMENT: Fail Loudly if parser lacks ID
                  error_msg = f"INTEGRITY ERROR: Scrutiny Issue '{desc}' has no 'issue_id'. Parser must emit Semantic IDs."
-                 print(error_msg)
                  raise RuntimeError(error_msg)
 
             # Step 2: Fetch Master Record
@@ -3334,19 +3318,7 @@ class ScrutinyTab(QWidget):
                 
             # 2. FATAL ASSERTION
             if not resolved_sop_point:
-                 # Diagnostic Logging
-                 print(f"\n--- DATABASE INTEGRITY DIAGNOSTIC ---")
-                 print(f"Issue ID: {issue_id}")
-                 if master:
-                     print(f"DB Record Exists: Yes")
-                     print(f"DB sop_point: {master.get('sop_point')}")
-                     print(f"Has Templates: {'Yes' if master.get('templates') else 'No'}")
-                 else:
-                     print(f"DB Record Exists: No")
-                 print(f"-------------------------------------\n")
-                 
                  err = f"FATAL INVARIANT FAILURE: Issue '{issue_id}' cannot be mapped to an SOP Point. Database Missing or Corrupted."
-                 print(err)
                  QMessageBox.critical(self, "System Integrity Error", err)
                  raise RuntimeError(err) # Crash Fast
                  
@@ -3360,7 +3332,6 @@ class ScrutinyTab(QWidget):
             
             if table_def and facts:
                 # NEW PATH: Hydrate from Facts (Canonical Dict)
-                print(f"DEBUG: Hydrating {issue_id} via New Path.")
                 issue['grid_data'] = self._hydrate_grid_from_facts(table_def, facts)
             elif "summary_table" in issue or "tables" in issue:
                 # PRE-PARSED TABLE PATH: Respect pre-calculated summary tables (SOP-2 Robust Path)

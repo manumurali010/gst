@@ -480,19 +480,11 @@ class GSTR2BAnalyzer:
             row_idx_sez = -1
             row_idx_header = -1
             
-            # [SOP-10 DIAG] Deep Inspection of Import Rows
+            # Scan for Import header and components
             for idx, row in df.iterrows():
                 row_text_parts = [str(x).lower().strip() for x in row.values if isinstance(x, str)]
                 row_text = " ".join(row_text_parts)
                 
-                # Check for ANY import related keywords for diagnostics
-                if "import" in row_text or "impg" in row_text:
-                     vals = self._extract_tax_block_strict(row.tolist())
-                     clean_text = (row_text[:50] + '...') if len(row_text) > 50 else row_text
-                     logger.warning(f"[SOP-10 DIAG] Row {idx} VAL_CHECK: {bool(vals)} | '{clean_text}'")
-                     if vals:
-                         logger.warning(f"[SOP-10 DIAG] Row {idx} VALUES: {vals}")
-
                 # 1. Detect Consolidated Header (IV. Import of goods...)
                 # Strict check: "iv" + "import of goods"
                 if "iv" in row_text and "import of goods" in row_text:

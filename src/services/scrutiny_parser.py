@@ -1,16 +1,38 @@
+import re
+import logging
+import warnings
 import pandas as pd
 import os
 import datetime
 import json
 import openpyxl
-import logging
-import warnings
 import fitz # PyMuPDF
-import re
+
+# Set up logger for Scrutiny Parser
+logger = logging.getLogger("scrutiny_parser")
+if not logger.handlers:
+    handler = logging.FileHandler("scrutiny_audit.log")
+    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+
+def _get_vals(res):
+    """Safely extracts data from standardized parser dictionaries."""
+    if isinstance(res, dict):
+        # Handle new format: {"parsed": True, "data": {...}}
+        if res.get("parsed") is True and isinstance(res.get("data"), dict):
+            return res.get("data")
+        # Handle old format: {"igst": ..., "cgst": ..., ...}
+        if any(k in res for k in ["igst", "cgst", "sgst", "cess", "taxable_value"]):
+            return res
+    return {}
+
 from src.utils.date_utils import normalize_financial_year, validate_fy_sanity, get_fy_end_year
 from src.utils.pdf_parsers import parse_gstr3b_pdf_table_3_1_a, parse_gstr1_pdf_total_liability, parse_gstr3b_pdf_table_3_1_d, parse_gstr3b_pdf_table_4_a_2_3, parse_gstr3b_pdf_table_4_a_4, parse_gstr3b_pdf_table_4_a_5, parse_gstr3b_metadata, parse_gstr3b_pdf_table_4_a_1, parse_gstr3b_pdf_table_3_1_b, parse_gstr3b_pdf_table_3_1_c, parse_gstr3b_pdf_table_3_1_e, parse_gstr3b_pdf_table_4_b_1, parse_gstr3b_sop9_identifiers
 from .gstr_2b_analyzer import GSTR2BAnalyzer
 from src.utils.formatting import format_indian_number
+from src.utils.number_utils import safe_int
 
 # Suppress OpenPyXL DrawingML warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
@@ -60,7 +82,7 @@ class ScrutinyParser:
         """
         from src.utils.formatting import format_indian_number
         if status in ['fail', 'alert']:
-             # Strict Amount Only
+             # Strict Amount Only - Standardized Whole Numbers
              return format_indian_number(shortfall, prefix_rs=True)
         elif status == 'info':
              # STRICT LOOKUP - No Free Text
@@ -357,27 +379,30 @@ class ScrutinyParser:
             try:
                 temp_3b = {"igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
                 any_parsed = False
+                processed_periods = set()
                 for p in pdf_list_3b:
                     if not p or not os.path.exists(p): continue
+                    
+                    meta = parse_gstr3b_metadata(p)
+                    period = meta.get("return_period") or hash(p)
+                    if period in processed_periods: continue
+                    processed_periods.add(period)
+                    
                     res = parse_gstr3b_pdf_table_3_1_a(p)
-                    if res:
+                    if isinstance(res, dict) and res.get("parsed") is True and isinstance(res.get("data"), dict):
+                        data = res.get("data")
                         any_parsed = True
-                        for k in temp_3b: temp_3b[k] += res.get(k, 0.0)
+                        for k in temp_3b: temp_3b[k] += data.get(k, 0.0)
                     else:
-                        # Log failure/warn
                         normalized_data["warnings"].append(f"GSTR-3B PDF Parse Failed: {os.path.basename(p)}")
-                        # Strict Policy: One fail invalidates batch? 
-                        # Requirement: "If a PDF cannot be parsed reliably... return WARN/INFO... Do NOT silently return zero"
-                        # Fallback Rule: "When GSTR-1 and 3B PDFs parse successfully... Excel must not be used"
-                        # Implicitly, if one fails, we might fall back.
-                        # For now, if ANY failure, mark success as False to trigger fallback.
-                        any_parsed = False 
-                        break 
-                
                 if any_parsed:
                     normalized_data["gstr3b"] = temp_3b
                     normalized_data["sources_used"]["gstr3b_pdf"] = True
                     pdf_success_3b = True
+                else:
+                    # Log if list was provided but none parsed successfully
+                    if pdf_list_3b:
+                        logger.warning(f"SOP-1 GSTR-3B PDF Aggregation: No files parsed successfully out of {len(pdf_list_3b)}")
             except Exception as e:
                 print(f"SOP-1 3B PDF Aggregation Error: {e}")
                 
@@ -386,17 +411,23 @@ class ScrutinyParser:
             try:
                 temp_1 = {"igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
                 any_parsed = False
+                processed_periods = set()
+                from src.utils.pdf_parsers import parse_gstr1_pdf_metadata
                 for p in pdf_list_1:
                     if not p or not os.path.exists(p): continue
+                    
+                    meta = parse_gstr1_pdf_metadata(p)
+                    period = meta.get("return_period") or hash(p)
+                    if period in processed_periods: continue
+                    processed_periods.add(period)
+                    
                     res = parse_gstr1_pdf_total_liability(p)
-                    # [RISK HARDENING] Trust if non-empty
-                    if res and any(res.values()): 
+                    data = _get_vals(res)
+                    if data:
                         any_parsed = True
-                        for k in temp_1: temp_1[k] += res.get(k, 0.0)
+                        for k in temp_1: temp_1[k] += data.get(k, 0.0)
                     else:
-                         normalized_data["warnings"].append(f"GSTR-1 PDF Parse Failed: {os.path.basename(p)}")
-                         any_parsed = False
-                         break
+                        normalized_data["warnings"].append(f"GSTR-1 PDF Parse Failed: {os.path.basename(p)}")
                 
                 if any_parsed:
                     normalized_data["gstr1"] = temp_1
@@ -406,15 +437,13 @@ class ScrutinyParser:
                 print(f"SOP-1 GSTR-1 PDF Aggregation Error: {e}")
         
         # --- PRIORITY 2: EXCEL FALLBACK ---
-        # Only if PDFs failed or were not provided.
-        # Condition: strict usage of PDF values if BOTH 1 and 3B succeeded.
-        # If either failed, or missing, we TRY Excel.
+        # Logic: Fallback to Excel only if PDF parsing for that SPECIFIC category was unsuccessful.
+        # We don't overwrite successful PDF data with Excel.
         
-        use_excel = True
-        if pdf_success_1 and pdf_success_3b:
-            use_excel = False # Strict Guard
-            
-        if use_excel and file_path and os.path.exists(file_path):
+        use_excel_for_3b = not pdf_success_3b
+        use_excel_for_1 = not pdf_success_1
+        
+        if (use_excel_for_3b or use_excel_for_1) and file_path and os.path.exists(file_path):
             try:
                 # [EXISTING EXCEL LOGIC REUSED]
                 import openpyxl
@@ -441,24 +470,13 @@ class ScrutinyParser:
                         elif "3B" in full: source = "3b"
                         if source != "unknown" and (source, head) not in col_map: col_map[(source, head)] = i
                     
-                    # Accumulate (Only if Excel is needed)
-                    # We reset normalized_data if we are falling back to replace partial PDF data
-                    normalized_data["gstr3b"] = {"igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
-                    normalized_data["gstr1"] = {"igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
-                    
-                    for idx, row in df.iterrows():
-                        period = str(row.iloc[0]).strip()
-                        if pd.isna(row.iloc[0]) or "TOTAL" in period.upper() or period == "nan" or "TAX PERIOD" in period.upper(): continue
-                        def get_val(src, hd):
-                            idx_v = col_map.get((src, hd))
-                            if idx_v is not None and idx_v < len(row):
-                                v = row.iloc[idx_v]
-                                try: return float(v) if pd.notna(v) else 0.0
-                                except: return 0.0
-                            return 0.0
                         for head in ["igst", "cgst", "sgst", "cess"]:
-                            normalized_data["gstr3b"][head] += get_val("3b", head)
-                            normalized_data["gstr1"][head]  += get_val("ref", head)
+                            if use_excel_for_3b:
+                                normalized_data["gstr3b"][head] += get_val("3b", head)
+                                normalized_data["sources_used"]["excel"] = True
+                            if use_excel_for_1:
+                                normalized_data["gstr1"][head]  += get_val("ref", head)
+                                normalized_data["sources_used"]["excel"] = True
                     
                     normalized_data["sources_used"]["excel"] = True
                 else:
@@ -564,14 +582,14 @@ class ScrutinyParser:
             "category": default_category, 
             "description": default_category,
             "original_header": "Outward Liability Mismatch (GSTR-1 vs 3B)",
-            "total_shortfall": round(total_liability),
+            "total_shortfall": safe_int(total_liability),
             "status": status,
             "status_msg": "Analysis Completed" if status == "pass" else status_msg,
             "error": None,
             "facts": {
-                "gstr1": {k: round(v) for k,v in row_1.items()},
-                "gstr3b": {k: round(v) for k,v in row_3b.items()},
-                "shortfall": {k: round(v) for k,v in row_shortfall.items()}
+                "gstr1": {k: round(v, 2) for k,v in row_1.items()},
+                "gstr3b": {k: round(v, 2) for k,v in row_3b.items()},
+                "shortfall": {k: round(v, 2) for k,v in row_shortfall.items()}
             },
             "summary_table": summary_table, # Explicit Payload
             "analysis_meta": {
@@ -638,19 +656,21 @@ class ScrutinyParser:
                 if not pdf_path or not os.path.exists(pdf_path): continue
                 
                 try:
-                    p_rcm = parse_gstr3b_pdf_table_3_1_d(pdf_path)
-                    p_itc = parse_gstr3b_pdf_table_4_a_2_3(pdf_path)
+                    p_rcm_raw = parse_gstr3b_pdf_table_3_1_d(pdf_path)
+                    p_itc_raw = parse_gstr3b_pdf_table_4_a_2_3(pdf_path)
+                    p_rcm = _get_vals(p_rcm_raw)
+                    p_itc = _get_vals(p_itc_raw)
                     
                     for k in rcm_totals: rcm_totals[k] += p_rcm.get(k, 0.0)
                     for k in itc_totals: itc_totals[k] += p_itc.get(k, 0.0)
-                    parse_any_success = True
+                    if p_rcm_raw.get("parsed") or p_itc_raw.get("parsed"): parse_any_success = True
                 except Exception as ex:
                     print(f"SOP-2 Partial Parse Error ({pdf_path}): {ex}")
 
             # Final Calculation & Table Population (Aggregated)
             rows, total_liab = build_summary_rows(rcm_totals, itc_totals)
             res_payload["summary_table"]["rows"] = rows
-            res_payload["total_shortfall"] = round(total_liab)
+            res_payload["total_shortfall"] = safe_int(total_liab)
             
             if parse_any_success:
                 # [RISK HARDENING] Use Helper
@@ -896,10 +916,17 @@ class ScrutinyParser:
                 
                 t_itc = {"igst": 0.0, "cgst": 0.0, "sgst": 0.0, "cess": 0.0}
                 
-                p1 = parse_gstr3b_pdf_table_4_a_1(path)
-                p23 = parse_gstr3b_pdf_table_4_a_2_3(path)
-                p4 = parse_gstr3b_pdf_table_4_a_4(path) # Returns dict or None
-                p5 = parse_gstr3b_pdf_table_4_a_5(path) # Returns dict or None
+                p1_raw = parse_gstr3b_pdf_table_4_a_1(path)
+                p23_raw = parse_gstr3b_pdf_table_4_a_2_3(path)
+                p4_raw = parse_gstr3b_pdf_table_4_a_4(path)
+                p5_raw = parse_gstr3b_pdf_table_4_a_5(path)
+                
+                
+
+                p1 = _get_vals(p1_raw)
+                p23 = _get_vals(p23_raw)
+                p4 = _get_vals(p4_raw)
+                p5 = _get_vals(p5_raw)
                 
                 for d in [p1, p23, p4, p5]:
                     if d:
@@ -958,7 +985,7 @@ class ScrutinyParser:
 
         # 3. Final Result Construction
         result["summary_table"]["rows"] = details_rows
-        result["total_shortfall"] = round(total_violation)
+        result["total_shortfall"] = safe_int(total_violation)
         
         status, status_msg = self._determine_status(total_violation, "SECTION_16_4_VIOLATION")
         result["status"] = status
@@ -972,8 +999,7 @@ class ScrutinyParser:
         # Inject Meta
         self._inject_meta(result, "GSTR-3B PDFs", "Section 16(4) Logic", "high" if processed_periods else "low")
         
-        return result
-
+    def _parse_group_b_itc_summary(self, file_path, sheet_keyword, default_category, template_type, target_cols, ref_cols, diff_cols, issue_id=None, gstr2a_analyzer=None, gstr2b_analyzer=None, db_schema=None):
         """
         Group B Analysis: ITC Comparison (3B vs 2B).
         Supports 3-level headers and corrected sign logic for ITC.
@@ -1209,7 +1235,7 @@ class ScrutinyParser:
                     if diff_val > 1: 
                         has_issue = True
                         liability = diff_val
-                        vals_diff[head] = round(liability)
+                        vals_diff[head] = float(f"{liability:.2f}")
                         row_shortfall += liability
                         
                         vals_3b[head] = round(get_val("3b", head))
@@ -1406,7 +1432,6 @@ class ScrutinyParser:
         Phase-2 Handler for SOP 3 (ISD Credit). 
         Strict Logic: 3B PDF (Claimed) vs 2B Summary (Available).
         """
-        print("DISPATCH_MARKER: Calling analyzer for SOP-3")
         
         # 1. Get Available Credit (2B)
         # Prioritizes Summary Sheet inside analyzer
@@ -1440,12 +1465,12 @@ class ScrutinyParser:
             found_any = False
             
             for pdf in gstr3b_pdf_paths:
-                # Use the new STRICT parser
                 res = parse_gstr3b_pdf_table_4_a_4(pdf)
-                if res:
+                data = _get_vals(res)
+                if data:
                     found_any = True
                     for k in pdf_total_comps:
-                        pdf_total_comps[k] += res.get(k, 0.0)
+                        pdf_total_comps[k] += data.get(k, 0.0)
                 else:
                     print(f"WARN: Failed to parse Table 4(A)(4) in {os.path.basename(pdf)}")
                     # One failure tends to invalidate the set for safety? Or we proceed with others?
@@ -1717,7 +1742,6 @@ class ScrutinyParser:
         Legacy Adapter: SOP-5 now strictly uses Phase 2 logic (Dual Table).
         Attempts to create GSTR2AAnalyzer from the provided file_path (if Excel).
         """
-        print("[FIRE] EXECUTING _parse_tds_tcs_phase1 [FIRE]")
         try:
             from src.services.gstr_2a_analyzer import GSTR2AAnalyzer
             # Assuming file_path contains the 2A data in legacy workflow
@@ -1752,18 +1776,14 @@ class ScrutinyParser:
         - Logic: Liability = max(0, 2A - 3B), calculated separately for TDS and TCS.
         - Status: FAIL if any shortfall > 0, else PASS (or INFO if partial data).
         """
-        print("[FIRE] EXECUTING _parse_tds_tcs_phase2 [FIRE]")
+        
         
         # --- RESOLVE VALID GSTR-3B SOURCE ---
         # Fix: Use central PDF list passed from parse_file
         target_3b_paths = gstr3b_pdf_paths or []
         
-        print(f"[TRACE] SOP-5 FINAL 3B PATHS: {target_3b_paths}")
+        
 
-        try:
-             print("[FIRE] USING parse_gstr3b_pdf_table_3_1_a FROM:", parse_gstr3b_pdf_table_3_1_a.__code__.co_filename)
-        except:
-             print("[FIRE] USING parse_gstr3b_pdf_table_3_1_a (Cannot resolve filename) [FIRE]")
 
         if not target_3b_paths or not gstr2a_analyzer:
             return {
@@ -1779,26 +1799,29 @@ class ScrutinyParser:
         val_3b_taxable = 0.0
         found_any_3b_data = False
         
+        processed_periods = set()
         for path in target_3b_paths:
             try:
-                 res_3b = parse_gstr3b_pdf_table_3_1_a(path)
-                 if res_3b and 'taxable_value' in res_3b:
-                     val_3b_taxable += float(res_3b.get('taxable_value', 0.0))
-                     found_any_3b_data = True
-                     print(f"[FIRE] SOP-5 3.1(a) VALUE from {os.path.basename(path)} = {float(res_3b.get('taxable_value', 0.0))}")
-                 else:
-                     print(f"[FIRE] SOP-5 3.1(a) VALUE from {os.path.basename(path)} = None (Not Found)")
+                meta = parse_gstr3b_metadata(path)
+                period = meta.get("return_period") or hash(path)
+                if period in processed_periods: continue
+                processed_periods.add(period)
+                
+                res_3b = parse_gstr3b_pdf_table_3_1_a(path)
+                if isinstance(res_3b, dict) and res_3b.get("parsed") is True and isinstance(res_3b.get("data"), dict):
+                    data_3b = res_3b["data"]
+                    val_3b_taxable += float(data_3b.get('taxable_value', 0.0))
+                    found_any_3b_data = True
             except Exception as e:
-                 print(f"Error parsing GSTR-3B Table 3.1(a) from {path}: {e}")
+                print(f"Error parsing GSTR-3B Table 3.1(a) from {path}: {e}")
 
-        print(f"[FIRE] SOP-5 AGGREGATED 3.1(a) VALUE = {val_3b_taxable}")
+        
 
         # Check for Critical Data Missing (3B Taxable Value)
         # If 3B is strictly missing (no PDFs or all failed), we report INFO.
+        # If aggregation loop ran but found_any_3b_data is False -> Parser failed on all files or no Taxable Value found.
+        # We treat it as Data Not Available if we couldn't confirm 'taxable_value' key in any file.
         if not found_any_3b_data and not val_3b_taxable:
-             # Decide: If files existed but parsing returned 0/None -> Is it INFO or 0?
-             # If aggregation loop ran but found_any_3b_data is False -> Parser failed on all files or no Taxable Value found.
-             # We treat it as Data Not Available if we couldn't confirm 'taxable_value' key in any file.
              return {
                 "issue_id": "TDS_TCS_MISMATCH",
                 "category": "TDS/TCS (GSTR 3B vs GSTR 2B)",
@@ -1862,10 +1885,10 @@ class ScrutinyParser:
              total_shortfall += liab_tds
              
              rows_payload.extend([
-                 {"col0": {"value": "Taxable Value (TDS Credit) – from GSTR-2A"}, "col1": {"value": round(val_2a_tds)}},
-                 {"col0": {"value": "Taxable Value as per Table 3.1(a) of GSTR-3B"}, "col1": {"value": round(val_3b_taxable)}},
-                 {"col0": {"value": "Difference (2A - 3B)"}, "col1": {"value": round(diff_tds), "style": "bold"}},
-                 {"col0": {"value": "Liability"}, "col1": {"value": round(liab_tds), "style": "red_bold" if liab_tds > 0 else ""}}
+                 {"col0": {"value": "Taxable Value (TDS Credit) – from GSTR-2A"}, "col1": {"value": round(val_2a_tds, 2)}},
+                 {"col0": {"value": "Taxable Value as per Table 3.1(a) of GSTR-3B"}, "col1": {"value": round(val_3b_taxable, 2)}},
+                 {"col0": {"value": "Difference (2A - 3B)"}, "col1": {"value": round(diff_tds, 2), "style": "bold"}},
+                 {"col0": {"value": "Liability"}, "col1": {"value": round(liab_tds, 2), "style": "red_bold" if liab_tds > 0 else ""}}
              ])
              status_msgs.append(f"TDS: {format_indian_number(liab_tds, prefix_rs=True) if liab_tds > 0 else 'Matched'}")
         else:
@@ -1891,10 +1914,10 @@ class ScrutinyParser:
              total_shortfall += liab_tcs
              
              rows_payload.extend([
-                 {"col0": {"value": "Net Amount Liable for TCS – from GSTR-2A"}, "col1": {"value": round(val_2a_tcs)}},
-                 {"col0": {"value": "Taxable Value as per Table 3.1(a) of GSTR-3B"}, "col1": {"value": round(val_3b_taxable)}},
-                 {"col0": {"value": "Difference (2A - 3B)"}, "col1": {"value": round(diff_tcs), "style": "bold"}},
-                 {"col0": {"value": "Liability"}, "col1": {"value": round(liab_tcs), "style": "red_bold" if liab_tcs > 0 else ""}}
+                 {"col0": {"value": "Net Amount Liable for TCS – from GSTR-2A"}, "col1": {"value": round(val_2a_tcs, 2)}},
+                 {"col0": {"value": "Taxable Value as per Table 3.1(a) of GSTR-3B"}, "col1": {"value": round(val_3b_taxable, 2)}},
+                 {"col0": {"value": "Difference (2A - 3B)"}, "col1": {"value": round(diff_tcs, 2), "style": "bold"}},
+                 {"col0": {"value": "Liability"}, "col1": {"value": round(liab_tcs, 2), "style": "red_bold" if liab_tcs > 0 else ""}}
              ])
              status_msgs.append(f"TCS: {format_indian_number(liab_tcs, prefix_rs=True) if liab_tcs > 0 else 'Matched'}")
         else:
@@ -1923,7 +1946,7 @@ class ScrutinyParser:
             "issue_id": "TDS_TCS_MISMATCH",
             "category": "TDS/TCS (GSTR 3B vs GSTR 2B)",
             "description": "Point 5- TDS/TCS (GSTR 3B vs GSTR 2B)",
-            "total_shortfall": total_shortfall,
+            "total_shortfall": safe_int(total_shortfall),
             "status_msg": " | ".join(status_msgs),
             "status": final_status,
             "template_type": "comparison_2col",
@@ -2044,7 +2067,7 @@ class ScrutinyParser:
                 "issue_id": "ITC_3B_2B_9X4",
                 "category": "GSTR 3B vs 2B (discrepancy identified from GSTR 9)",
                 "description": "GSTR 3B vs 2B (discrepancy identified from GSTR 9)",
-                "total_shortfall": float(f"{total_shortfall:.2f}"),
+                "total_shortfall": safe_int(total_shortfall),
                 "status": "fail" if total_shortfall > 0 else "pass",
                 "status_msg": status_msg,
                 "summary_table": summary_table
@@ -2111,7 +2134,6 @@ class ScrutinyParser:
              analyzers_list = []
              if hasattr(gstr2a_analyzer, 'analyzers'):
                  # CompositeGSTR2B detected
-                 print(f"DEBUG: Composite Analyzer detected with {len(gstr2a_analyzer.analyzers)} children.")
                  analyzers_list = gstr2a_analyzer.analyzers
              else:
                  # Single Analyzer or None
@@ -2122,7 +2144,6 @@ class ScrutinyParser:
                  try:
                      # [PART A DIAG] LOG 1: Analyzer Type
                      anz_type = type(anz).__name__
-                     print(f"[SOP-10 DIAG] Analyzer Iteration: Type={anz_type}")
 
                      # Check for specific SOP-10 method (GSTR-2B)
                      if hasattr(anz, 'analyze_sop_10'):
@@ -2131,7 +2152,7 @@ class ScrutinyParser:
                      elif hasattr(anz, 'analyze_sop'):
                          res = anz.analyze_sop(10)
                      else:
-                         print(f"[SOP-10 DIAG] Analyzer {anz_type} skipped (No SOP-10 method)")
+                         logger.warning(f"Analyzer {anz_type} skipped (No SOP-10 method)")
                          continue
 
                      if res:
@@ -2139,30 +2160,22 @@ class ScrutinyParser:
                          igst_val = res.get('igst', 0.0)
                          
                          # [PART A DIAG] LOG 3: Extracted IGST
-                         print(f"[SOP-10 DIAG] Analyzer Result: status={status}, igst={igst_val}")
-                         print(f"[SOP-10 DIAG] Rows Found: {res.get('debug_rows_found', 'N/A')}")
-                         print(f"[SOP-10 DIAG] Failure Reason: {res.get('reason', 'N/A')}")
                          
                          if status == 'pass':
                              val_2a += igst_val
                              found_2a_data = True
-                             print(f"DEBUG: Analyzer {anz} returned IGST: {igst_val}")
                          elif igst_val > 0:
                              val_2a += igst_val
                              found_2a_data = True
-                             print(f"DEBUG: Analyzer {anz} returned partial IGST: {igst_val}")
                          elif res.get('error'):
                               error_details = res.get('error')
-                              print(f"[SOP-10 DIAG] LOG 4: Analyzer Error: {error_details}")
                          else:
                               # IGST is 0 and status is not pass (e.g. info)
                               reason = res.get('reason', 'Unknown reason')
-                              print(f"[SOP-10 DIAG] LOG 4: Zero IGST / Info Status. Reason: {reason}")
                  except Exception as e:
-                     print(f"DEBUG: Analyzer {anz} failed SOP-10: {e}")
+                     logger.debug(f"Analyzer {anz} failed SOP-10: {e}")
 
              if not found_2a_data and error_details:
-                  print(f"[SOP-10 DIAG] No GSTR-2B Data Found. Error: {error_details}")
                   # If no data found and we had an error, return empty/info
                   return {
                      "issue_id": "IMPORT_ITC_MISMATCH",
@@ -2211,14 +2224,21 @@ class ScrutinyParser:
              found_3b_source = False
              
              if gstr3b_pdf_paths:
+                 processed_periods = set()
                  for path in gstr3b_pdf_paths:
                      try:
+                         meta = parse_gstr3b_metadata(path)
+                         period = meta.get("return_period") or hash(path)
+                         if period in processed_periods: continue
+                         processed_periods.add(period)
+                         
                          # Table 4(A)(1) - Import of Goods
                          res_3b_pdf = parse_gstr3b_pdf_table_4_a_1(path)
-                         if res_3b_pdf:
-                             val_3b += float(res_3b_pdf.get('igst', 0.0))
+                         if isinstance(res_3b_pdf, dict) and res_3b_pdf.get("parsed") is True and isinstance(res_3b_pdf.get("data"), dict):
+                             data_3b = res_3b_pdf["data"]
+                             val_3b += float(data_3b.get('igst', 0.0))
                              found_3b_source = True
-                             logging.warning(f"[SOP-10 SRC] 3B_IGST_SOURCE: File={path}, Value={res_3b_pdf.get('igst', 0.0)}")
+                             logging.warning(f"[SOP-10 SRC] 3B_IGST_SOURCE: File={path}, Value={data_3b.get('igst', 0.0)}")
                      except Exception as e:
                          print(f"SOP-10: Error parsing PDF {path}: {e}")
             
@@ -2363,7 +2383,7 @@ class ScrutinyParser:
                 "issue_id": "IMPORT_ITC_MISMATCH",
                 "category": "Import of Goods (3B vs ICEGATE)",
                 "description": "Import of Goods (3B vs ICEGATE)",
-                "total_shortfall": round(shortfall),
+                "total_shortfall": safe_int(shortfall),
                 "rows": [
                     {"col0": row_label_1, "igst": val_3b},
                     {"col0": row_label_2, "igst": val_2a}
@@ -2453,16 +2473,16 @@ class ScrutinyParser:
             }
 
 
-    def _check_sop_guard(self, sop_id, has_3b, has_2a):
+    def _check_sop_guard(self, sop_id, has_3b, has_2a, file_path=None):
         """
         Phase-2 Mandatory Data Guard.
         Returns (allowed: bool, issue_payload: dict|None)
         """
         # Rules: SOP 3, 5, 10 -> Require 3B + 2A
         if sop_id in ['sop_3', 'sop_5', 'sop_10']:
-            if not has_3b and not has_2a:
+            if not has_3b and not has_2a and not file_path:
                 return False, {"status_msg": "GSTR-3B and GSTR-2A not uploaded", "status": "info", "total_shortfall": 0}
-            if not has_3b:
+            if not has_3b and not file_path:
                 return False, {"status_msg": "GSTR-3B not uploaded", "status": "info", "total_shortfall": 0}
             if not has_2a:
                 return False, {"status_msg": "GSTR-2A not uploaded", "status": "info", "total_shortfall": 0}
@@ -2493,9 +2513,11 @@ class ScrutinyParser:
             for pdf in gstr3b_pdf_list:
                 try:
                     res = parse_gstr3b_pdf_table_4_a_5(pdf)
-                    if res:
+                    # User Corrective: Use _get_vals to safely unwrap parser results
+                    data_3b = _get_vals(res)
+                    if data_3b:
                         found_3b = True
-                        for k in val_3b: val_3b[k] += res.get(k, 0.0)
+                        for k in val_3b: val_3b[k] += data_3b.get(k, 0.0)
                 except: pass
         
         # 2. Get 2B Data
@@ -2516,17 +2538,24 @@ class ScrutinyParser:
             liab[k] = max(0, diff[k])
             total_shortfall += liab[k]
             
-        status = "fail" if total_shortfall > 0 else "pass"
-        if not found_3b and not found_2b: status = "info"
+        # [PHASE 16] Robust Normalization (Whole Numbers Only)
+        total_shortfall = safe_int(total_shortfall)
+        if abs(total_shortfall) < 1:
+            total_shortfall = 0
+            
+        status, status_msg = self._determine_status(total_shortfall, "ITC_3B_2B_OTHER")
+        if not found_3b and not found_2b: 
+            status = "info"
+            status_msg = self._format_status_msg("info", 0, "DATA_MISSING")
         
         # 4. Result
         result = {
             "issue_id": issue_id,
             "category": "All Other ITC (GSTR 3B vs GSTR 2B)",
             "description": "Point 4- All Other ITC (GSTR 3B vs GSTR 2B)",
-            "total_shortfall": round(total_shortfall),
+            "total_shortfall": total_shortfall,
             "status": status,
-            "status_msg": self._format_status_msg(status, total_shortfall, "DATA_MISSING"),
+            "status_msg": status_msg,
             "summary_table": {
                 "columns": ["Description", "CGST", "SGST", "IGST", "Cess"],
                 "rows": [
@@ -2574,11 +2603,11 @@ class ScrutinyParser:
             for pdf in gstr3b_pdf_list:
                 try:
                     # Turnover (3.1 a-e)
-                    p_31a = parse_gstr3b_pdf_table_3_1_a(pdf)
-                    p_31b = parse_gstr3b_pdf_table_3_1_b(pdf)
-                    p_31c = parse_gstr3b_pdf_table_3_1_c(pdf)
-                    p_31d = parse_gstr3b_pdf_table_3_1_d(pdf)
-                    p_31e = parse_gstr3b_pdf_table_3_1_e(pdf)
+                    p_31a = _get_vals(parse_gstr3b_pdf_table_3_1_a(pdf))
+                    p_31b = _get_vals(parse_gstr3b_pdf_table_3_1_b(pdf))
+                    p_31c = _get_vals(parse_gstr3b_pdf_table_3_1_c(pdf))
+                    p_31d = _get_vals(parse_gstr3b_pdf_table_3_1_d(pdf))
+                    p_31e = _get_vals(parse_gstr3b_pdf_table_3_1_e(pdf))
                     
                     t_taxable = 0.0
                     for p in [p_31a, p_31b, p_31c, p_31d, p_31e]:
@@ -2590,17 +2619,23 @@ class ScrutinyParser:
                     if p_31e: t_exempt += p_31e.get('taxable_value', 0.0)
                     
                     # ITC Availed (4A 1-5)
-                    p_4a1 = parse_gstr3b_pdf_table_4_a_1(pdf)
-                    p_4a23 = parse_gstr3b_pdf_table_4_a_2_3(pdf)
-                    p_4a4 = parse_gstr3b_pdf_table_4_a_4(pdf)
-                    p_4a5 = parse_gstr3b_pdf_table_4_a_5(pdf)
+                    p1_raw = parse_gstr3b_pdf_table_4_a_1(pdf)
+                    p23_raw = parse_gstr3b_pdf_table_4_a_2_3(pdf)
+                    p4_raw = parse_gstr3b_pdf_table_4_a_4(pdf)
+                    p5_raw = parse_gstr3b_pdf_table_4_a_5(pdf)
+
+
+                    p_4a1 = _get_vals(p1_raw)
+                    p_4a23 = _get_vals(p23_raw)
+                    p_4a4 = _get_vals(p4_raw)
+                    p_4a5 = _get_vals(p5_raw)
                     
                     t_itc = 0.0
                     for p in [p_4a1, p_4a23, p_4a4, p_4a5]:
                         if p: t_itc += (p.get('igst', 0)+p.get('cgst', 0)+p.get('sgst', 0)+p.get('cess', 0))
                         
                     # Reversal Actual (4B1)
-                    p_4b1 = parse_gstr3b_pdf_table_4_b_1(pdf)
+                    p_4b1 = _get_vals(parse_gstr3b_pdf_table_4_b_1(pdf))
                     t_rev = 0.0
                     if p_4b1: t_rev += (p_4b1.get('igst', 0)+p_4b1.get('cgst', 0)+p_4b1.get('sgst', 0)+p_4b1.get('cess', 0))
                     
@@ -2621,17 +2656,16 @@ class ScrutinyParser:
         diff = required_rev - actual_rev
         liability = max(0, diff)
         
-        status = "fail" if liability > 0 else "pass"
-        status_msg = f"Liability: {liability:.2f}" if liability > 0 else "Matched"
+        status, status_msg = self._determine_status(liability, "RULE_42_43_VIOLATION")
         if not found_data:
             status = "info"
-            status_msg = "GSTR-3B PDF not parsing"
+            status_msg = self._format_status_msg("info", 0, "GSTR3B_MISSING")
 
         result = {
             "issue_id": "RULE_42_43_VIOLATION",
             "category": "Rule 42/43 Reversal Mismatch",
             "description": "Point 11- Rule 42/43 Reversal Mismatch",
-            "total_shortfall": round(liability),
+            "total_shortfall": safe_int(liability),
             "status": status,
             "status_msg": status_msg,
             "summary_table": {
@@ -2666,6 +2700,40 @@ class ScrutinyParser:
             
         return result
 
+    def _run_diagnostics(self, gstr3b_pdf_list):
+        """
+        Non-blocking diagnostics for impossible GST conditions.
+        """
+        if not gstr3b_pdf_list: return
+        
+        try:
+            total_liab = 0
+            total_itc = 0
+            total_pay = 0
+            
+            # Use specific parsers to collect baseline data for diagnostics
+            from src.utils.pdf_parsers import parse_gstr3b_pdf_table_3_1_a, parse_gstr3b_pdf_table_4_a_5, parse_gstr3b_pdf_table_6_1_cash
+            
+            for pdf in gstr3b_pdf_list:
+                 res_l = parse_gstr3b_pdf_table_3_1_a(pdf)
+                 res_i = parse_gstr3b_pdf_table_4_a_5(pdf)
+                 res_p = parse_gstr3b_pdf_table_6_1_cash(pdf)
+                 
+                 total_liab += sum(_get_vals(res_l).values())
+                 total_itc += sum(_get_vals(res_i).values())
+                 total_pay += sum(_get_vals(res_p).values())
+                 
+            # Impossible Conditions (User Approved)
+            if total_liab > 1000 and total_pay == 0:
+                 logger.warning(f"DIAGNOSTIC ANOMALY: Total Liability > 0 ({total_liab}) but Table 6.1 Cash Payments = 0. Potential extraction failure.")
+            
+            # Extreme ITC Threshold (Non-blocking)
+            if total_liab > 0 and total_itc > total_liab * 10:
+                 logger.warning(f"DIAGNOSTIC ANOMALY: Extreme ITC detected ({total_itc}) vs Liability ({total_liab}). Threshold exceeded.")
+                    
+        except Exception as e:
+            logger.debug(f"Diagnostics error: {e}")
+
     def parse_file(self, file_path, extra_files=None, configs=None, gstr2a_analyzer=None, db_schemas=None):
         """
         Parses the Excel file and checks for all 11 SOP discrepancies.
@@ -2684,7 +2752,8 @@ class ScrutinyParser:
              configs = configs[0] if configs else {}
         configs = configs or {}
         
-        has_3b = bool(file_path)
+        gstr3b_pdf_list = extra_files.get('gstr3b_yearly', [])
+        has_3b = bool(gstr3b_pdf_list)
         has_2a = bool(gstr2a_analyzer)
         
         # GSTR-2B Initialization (Fail-Fast w/ Aggregation)
@@ -2729,7 +2798,7 @@ class ScrutinyParser:
                             gstr2b_analyzers.append(analyzer)
                             
                        except Exception as e:
-                            print(f"GSTR-2B Validation Failed for {path}: {e}")
+                            logger.error(f"GSTR-2B Validation Failed for {path}: {e}")
                             gstr2b_error = str(e)
                             # Strict: If ANY file fails, abort all? 
                             # Or drop invalid? 
@@ -2927,7 +2996,7 @@ class ScrutinyParser:
             else: gstr3b_pdf_list.append(yearly_3b)
             # Defensive Warning
             if any(k.startswith('gstr3b_monthly') for k in extra_files):
-                print("WARNING: Both yearly and monthly GSTR-3B PDFs detected. Using yearly as authoritative for SOP-1 and SOP-2.")
+                logger.warning("Both yearly and monthly GSTR-3B PDFs detected. Using yearly as authoritative for SOP-1 and SOP-2.")
         else:
             # Aggregate monthly / generic
             # Accepts all GSTR-3B PDFs:
@@ -2939,21 +3008,40 @@ class ScrutinyParser:
                     gstr3b_pdf_list.append(v)
         
         gstr3b_pdf_list = list(set(filter(None, gstr3b_pdf_list)))
-        representative_3b_pdf = gstr3b_pdf_list[0] if gstr3b_pdf_list else None
+        if gstr3b_pdf_list:
+            self._run_diagnostics(gstr3b_pdf_list)
+
+        # 1a. Pdf Resolution (GSTR-1) - Flexible Collection
+        gstr1_pdf_list = []
+        yearly_1 = extra_files.get('gstr1_yearly')
+        if yearly_1:
+            if isinstance(yearly_1, list): gstr1_pdf_list.extend(yearly_1)
+            else: gstr1_pdf_list.append(yearly_1)
+        else:
+            # Aggregate monthly / generic / legacy keys
+            # DynamicUploadGroup keys: gstr1_m0, gstr1_m1, etc.
+            for k, v in extra_files.items():
+                if isinstance(v, str) and 'gstr1' in k.lower() and v.lower().endswith('.pdf'):
+                    gstr1_pdf_list.append(v)
+                elif isinstance(v, list) and 'gstr1' in k.lower():
+                     for item in v:
+                         if isinstance(item, str) and item.lower().endswith('.pdf'):
+                             gstr1_pdf_list.append(item)
+        
+        gstr1_pdf_list = list(set(filter(None, gstr1_pdf_list)))
+        if gstr1_pdf_list:
+             logger.debug(f"[SOP-1 DEBUG] Detected GSTR-1 PDFs: {len(gstr1_pdf_list)}")
 
         # 1. Point 1: Outward Liability
-        # 1. Point 1: Outward Liability
-        gstr1_pdf = extra_files.get("gstr1_pdf")
-        
         # [PHASE 4] DB Schema Injection
         schema_sop1 = db_schemas.get("LIABILITY_3B_R1")
         
         res = self._parse_group_a_liability(file_path, "Tax Liability", "Outward Liability (GSTR 3B vs GSTR 1)", "summary_3x4", [9, 10, 11], 
-                                            gstr3b_pdf_path=representative_3b_pdf, gstr1_pdf_path=gstr1_pdf, db_schema=schema_sop1)
+                                            gstr3b_pdf_path=gstr3b_pdf_list, gstr1_pdf_path=gstr1_pdf_list, db_schema=schema_sop1)
         if isinstance(res, dict): 
             issues.append(res); analyzed_count += 1
         else:
-            print(f"ERROR: Point 1 handler returned {type(res)}: {res}")
+            logger.error(f"ERROR: Point {i} handler returned {type(res)}: {res}")
             issues.append({"issue_id": "LIABILITY_3B_R1", "category": "Outward Liability (GSTR 3B vs GSTR 1)", "description": "Point 1- Outward Liability (GSTR 3B vs GSTR 1)", "status_msg": "data not available", "status": "alert"})
         
         # 2. Point 2: RCM (Unconditional & Aggregated)
@@ -2966,7 +3054,7 @@ class ScrutinyParser:
             if res.get("status") != "info" or res.get("total_shortfall", 0) > 0:
                 analyzed_count += 1
         else:
-            print(f"ERROR: Point 2 handler returned {type(res)}: {res}")
+            logger.error(f"ERROR: Point 2 handler returned {type(res)}: {res}")
             issues.append({"issue_id": "RCM_LIABILITY_ITC", "category": "RCM (GSTR 3B vs GSTR 2B)", "description": "Point 2- RCM (GSTR 3B vs GSTR 2B)", "status": "info", "status_msg": "Analysis error"})
         
         # 3. Point 3: ISD Credit (Requiring 3B + 2A/2B)
@@ -3009,7 +3097,7 @@ class ScrutinyParser:
         
         # 5. Point 5: TDS/TCS (Legacy SOP-5, not requested to move to 2B yet? Plan said SOP-3 and 10)
         # ... logic ...
-        allowed, guard_issue = self._check_sop_guard('sop_5', has_3b, has_2a)
+        allowed, guard_issue = self._check_sop_guard('sop_5', has_3b, has_2a, file_path=file_path)
         # (Existing call) ...
         
         # 10. Point 10: Import of Goods (SOP-10)
@@ -3089,10 +3177,8 @@ class ScrutinyParser:
             analyzed_count += 1
 
         # 7 & 8. Point 7 & 8: Cancelled & Non-Filers (Requiring GSTR-2A)
-        allowed_7, guard_issue_7 = self._check_sop_guard('sop_7', has_3b, has_2a)
+        allowed_7, guard_issue_7 = self._check_sop_guard('sop_7', has_3b, has_2a, file_path=file_path)
         if allowed_7:
-            print("DEBUG: Invoking analyze_sop(7)...")
-            print("DISPATCH_MARKER: Calling analyzer for SOP-7")
             res_7 = gstr2a_analyzer.analyze_sop(7)
             
             if res_7 and 'error' not in res_7:
@@ -3155,7 +3241,7 @@ class ScrutinyParser:
                     "issue_id": "CANCELLED_SUPPLIERS",
                     "category": "ITC passed on by Cancelled TPs",
                     "description": "Point 7- ITC passed on by Cancelled TPs",
-                    "total_shortfall": float(total_liability),
+                    "total_shortfall": safe_int(total_liability),
                     "status_msg": f"Liability: {format_indian_number(total_liability, prefix_rs=True)}" if total_liability > 0 else "Matched",
                     "status": status,
                     "summary_table": summary_table
@@ -3190,10 +3276,8 @@ class ScrutinyParser:
                 **guard_issue_7
             })
 
-        allowed_8, guard_issue_8 = self._check_sop_guard('sop_8', has_3b, has_2a)
+        allowed_8, guard_issue_8 = self._check_sop_guard('sop_8', has_3b, has_2a, file_path=file_path)
         if allowed_8:
-            print("DEBUG: Invoking analyze_sop(8)...")
-            print("DISPATCH_MARKER: Calling analyzer for SOP-8")
             res_8 = gstr2a_analyzer.analyze_sop(8)
             if res_8 and 'error' not in res_8:
                  rows = res_8.get('rows', [])
@@ -3259,7 +3343,7 @@ class ScrutinyParser:
                      "issue_id": "NON_FILER_SUPPLIERS",
                      "category": "ITC passed on by Suppliers who have not filed GSTR 3B",
                      "description": "Point 8- ITC passed on by Suppliers who have not filed GSTR 3B",
-                     "total_shortfall": float(total_liability),
+                     "total_shortfall": safe_int(total_liability),
                      "status_msg": format_indian_number(total_liability, prefix_rs=True) if total_liability > 0 else "Matched",
                      "status": status,
                      "summary_table": summary_table
@@ -3356,14 +3440,7 @@ class ScrutinyParser:
             "analyzed_count": analyzed_count
         }
         
-        # LOG AND SHARE CONTENT (As requested)
-        print(f"DEBUG: parse_file returning {len(issues)} issues.")
-        for idx, issue in enumerate(issues):
-            if issue.get("issue_id") == "TDS_TCS_MISMATCH":
-                 print(f"[FIRE] FINAL SOP-5 ISSUE PAYLOAD [FIRE] {issue}")
-            print(f"DEBUG ISSUE[{idx}]: {type(issue)} -> {str(issue)[:200]}")
 
-        print("DISPATCH_MARKER: Phase-2 parser completed")
         return {
             "metadata": self._extract_metadata(file_path),
             "issues": issues,
@@ -3401,27 +3478,37 @@ class ScrutinyParser:
 
         # 1. GSTR-3B Aggregation
         if gstr3b_pdf_list:
+            processed_periods = set()
             for pdf in gstr3b_pdf_list:
                 try:
+                    meta = parse_gstr3b_metadata(pdf)
+                    period = meta.get("return_period") or hash(pdf)
+                    if period in processed_periods: continue
+                    processed_periods.add(period)
+                    
+                    data["flags"]["3b_found"] = True
+                    
                     # Table 3.1(d) - RCM Liability
-                    r_31d = parse_gstr3b_pdf_table_3_1_d(pdf)
+                    r_31d_raw = parse_gstr3b_pdf_table_3_1_d(pdf)
+                    r_31d = _get_vals(r_31d_raw)
                     if r_31d:
-                        data["flags"]["3b_found"] = True
-                        for k in data["3b_3_1_d"]: data["3b_3_1_d"][k] += int(round(r_31d.get(k, 0.0)))
-
+                        for k in data["3b_3_1_d"]: data["3b_3_1_d"][k] += float(r_31d.get(k, 0.0))
+                    
                     # Table 4(A)(2)+(3) - RCM ITC
-                    r_4a = parse_gstr3b_pdf_table_4_a_2_3(pdf)
+                    r_4a_raw = parse_gstr3b_pdf_table_4_a_2_3(pdf)
+                    r_4a = _get_vals(r_4a_raw)
                     if r_4a:
-                        for k in data["3b_4a_2_3"]: data["3b_4a_2_3"][k] += int(round(r_4a.get(k, 0.0)))
+                        for k in data["3b_4a_2_3"]: data["3b_4a_2_3"][k] += float(r_4a.get(k, 0.0))
 
                     # Table 6.1 - Cash Paid
-                    r_61 = parse_gstr3b_pdf_table_6_1_cash(pdf)
+                    r_61_raw = parse_gstr3b_pdf_table_6_1_cash(pdf)
+                    r_61 = _get_vals(r_61_raw)
                     if r_61:
                         data["flags"]["3b_6_1_found"] = True
-                        for k in data["3b_6_1_cash"]: data["3b_6_1_cash"][k] += int(round(r_61.get(k, 0.0)))
+                        for k in data["3b_6_1_cash"]: data["3b_6_1_cash"][k] += float(r_61.get(k, 0.0))
                         
                 except Exception as e:
-                    print(f"SOP 13-16 3B Parse Warning: {e}")
+                    logger.warning(f"SOP 13-16 3B Parse Warning: {e}")
 
         # 2. GSTR-2B Extraction
         if gstr2b_composite:
@@ -3431,14 +3518,14 @@ class ScrutinyParser:
                     r_2b_inward = gstr2b_composite.get_rcm_inward_supplies()
                     if r_2b_inward:
                         data["flags"]["2b_found"] = True
-                        for k in data["2b_rcm_inward"]: data["2b_rcm_inward"][k] += int(round(r_2b_inward.get(k, 0)))
+                        for k in data["2b_rcm_inward"]: data["2b_rcm_inward"][k] += float(r_2b_inward.get(k, 0.0))
 
                 if hasattr(gstr2b_composite, 'get_rcm_credit_notes'):
                     r_cn = gstr2b_composite.get_rcm_credit_notes()
                     if r_cn:
-                        for k in data["2b_rcm_cn"]: data["2b_rcm_cn"][k] += int(round(r_cn.get(k, 0)))
+                        for k in data["2b_rcm_cn"]: data["2b_rcm_cn"][k] += float(r_cn.get(k, 0.0))
             except Exception as e:
-                print(f"SOP 13-16 2B Parse Warning: {e}")
+                logger.warning(f"SOP 13-16 2B Parse Warning: {e}")
 
         return data
 
@@ -3485,7 +3572,7 @@ class ScrutinyParser:
             "issue_id": issue_id,
             "category": "RCM Payment Verification",
             "description": "Validation of RCM Liability payment via Cash",
-            "total_shortfall": total_sf,
+            "total_shortfall": safe_int(total_sf),
             "status": status,
             "status_msg": msg,
             "summary_table": {"columns": ["Description", "CGST", "SGST", "IGST", "Cess"], "rows": rows}
@@ -3530,7 +3617,7 @@ class ScrutinyParser:
             "issue_id": issue_id,
             "category": "RCM ITC Verification",
             "description": "Validation of RCM ITC claim against Cash Payment",
-            "total_shortfall": total_sf,
+            "total_shortfall": safe_int(total_sf),
             "status": status,
             "status_msg": msg,
             "summary_table": {"columns": ["Description", "CGST", "SGST", "IGST", "Cess"], "rows": rows}
@@ -3589,7 +3676,7 @@ class ScrutinyParser:
             "issue_id": issue_id,
             "category": "RCM ITC vs GSTR-2B",
             "description": "Validation of RCM ITC claim against GSTR-2B",
-            "total_shortfall": total_sf,
+            "total_shortfall": safe_int(total_sf),
             "status": status,
             "status_msg": msg,
             "summary_table": {"columns": ["Description", "CGST", "SGST", "IGST", "Cess"], "rows": rows}
@@ -3646,7 +3733,7 @@ class ScrutinyParser:
             "issue_id": issue_id,
             "category": "RCM Liability vs GSTR-2B",
             "description": "Validation of RCM Liability (GSTR-2B) against Cash Payment",
-            "total_shortfall": total_sf,
+            "total_shortfall": safe_int(total_sf),
             "status": status,
             "status_msg": msg,
             "summary_table": {"columns": ["Description", "CGST", "SGST", "IGST", "Cess"], "rows": rows}

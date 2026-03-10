@@ -2,7 +2,17 @@ import pandas as pd
 import sys
 import re
 import datetime
+import logging
 from PyQt6.QtCore import QObject, pyqtSignal
+
+# Set up logger for GSTR-2A Analyzer
+logger = logging.getLogger("gstr_2a_analyzer")
+if not logger.handlers:
+    handler = logging.FileHandler("analyzer_audit.log")
+    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 class AmbiguityError(Exception):
     def __init__(self, message, details=None):
@@ -76,7 +86,7 @@ class GSTR2AAnalyzer(QObject):
             self.xl_file = pd.ExcelFile(self.file_path)
             return True
         except Exception as e:
-            print(f"GSTR2A Load Error: {e}")
+            logger.error(f"GSTR2A Load Error: {e}")
             return False
 
     def _normalize_header(self, header):
@@ -101,15 +111,7 @@ class GSTR2AAnalyzer(QObject):
              return self._scan_headers_sop_10(sheet_name)
 
         # Pass 1: Standard Scan (Rows 0-15)
-        print(f"DEBUG: Primary Scan (0-15) for {sheet_name}")
         df_scan = self.xl_file.parse(sheet_name, header=None, nrows=15)
-        
-        # Debug Dump
-        print("RAW ROWS (0–9):")
-        for i in range(min(10, len(df_scan))):
-            print(f"ROW {i}:", df_scan.iloc[i].tolist())
-        print("DEBUG: Passed RAW ROWS")
-        sys.stdout.flush()
         
         if sop_id:
              # Ensure sop_string is safe
@@ -122,16 +124,9 @@ class GSTR2AAnalyzer(QObject):
         # Pass 2: Secondary Probe (Condition: Pass 1 failed AND SOP is 5 or 10)
         # STRICT RULE: No keyword matching. Only explicit SOP ID.
         if not headers and sop_id and any(x in str(sop_id) for x in ['sop_5', 'sop_10']):
-            print(f"DEBUG: Secondary Probe (0-30) triggered for {sop_id} on {sheet_name}")
-            sys.stdout.flush()
             df_scan_30 = self.xl_file.parse(sheet_name, header=None, nrows=30)
             headers, row_idx = self._scan_headers_in_df(df_scan_30, sop_str)
             
-            if headers:
-                print(f"DEBUG: Secondary Probe SUCCESS for {sheet_name}")
-            else:
-                print(f"DEBUG: Secondary Probe FAILED for {sheet_name}")
-        
         return headers, row_idx
 
     def _scan_headers_sop_10(self, sheet_name):
@@ -142,7 +137,6 @@ class GSTR2AAnalyzer(QObject):
         2. Verify Child Header: "Integrated Tax" (Row C = P + 1)
         3. Bind 'igst' to the column index of "Integrated Tax".
         """
-        print(f"DEBUG: Structural Scan SOP-10 for {sheet_name}")
         df_scan = self.xl_file.parse(sheet_name, header=None, nrows=30)
         
         parent_row_idx = -1
@@ -150,22 +144,12 @@ class GSTR2AAnalyzer(QObject):
         for i in range(len(df_scan)):
             row_str = " ".join([str(x).strip() for x in df_scan.iloc[i] if pd.notna(x)]).lower()
             
-            # [SOP-10 DIAG] Row Scan
-            safe_str = row_str.encode('ascii', 'replace').decode('ascii')
-            print(f"[SOP-10 DIAG] Row {i} Scan: {safe_str}")
-            if "import of goods from overseas" in row_str:
-                 print(f"[SOP-10 DIAG] MATCH: 'Import of goods from overseas' at Row {i}")
-            if "import of goods from sez" in row_str:
-                 print(f"[SOP-10 DIAG] MATCH: 'Import of goods from SEZ' at Row {i}")
-            
             if "amount" in row_str and "tax" in row_str:
                 # Potential Parent
                 parent_row_idx = i
-                print(f"[SOP-10 DIAG] Parent Candidate 'Amount of tax' found at Row {i}")
                 break
         
         if parent_row_idx == -1:
-             print("[SOP-10 DIAG] FAIL: Parent 'Amount of tax' not found in first 30 rows.")
              return {}, -1
              
         # 2. Search for Child in next row
@@ -190,16 +174,12 @@ class GSTR2AAnalyzer(QObject):
                  # Map normalized key 'igst' to this column
                  header_map['igst'] = col_idx
                  found_igst = True
-                 safe_val = str(cell_val).encode('ascii', 'replace').decode('ascii')
-                 print(f"[SOP-10 DIAG] FOUND IGST at Col {col_idx} (Row {child_row_idx}) - Value: '{safe_val}'")
                  break # One match sufficient
         
         if found_igst:
              # Data starts after child row
              return {'igst': [{'idx': header_map['igst'], 'original': 'Integrated Tax (Structure)'}]}, child_row_idx + 1
         else:
-             print(f"[SOP-10 DIAG] FAIL: Child Row {child_row_idx} content: {child_row.tolist()}")
-             print("[SOP-10 DIAG] FAIL: Child 'Integrated Tax' not found under Parent.")
              return {}, -1
 
     def _scan_headers_in_df(self, df_scan, sop_str=""):
@@ -270,8 +250,6 @@ class GSTR2AAnalyzer(QObject):
             return len(matched_keys), mapping
 
         # Scan Loop
-        print(f"DEBUG: Process Scan Loop. Length={len(df_scan)}")
-        sys.stdout.flush()
         try:
             for i in range(len(df_scan)):
                 if not is_candidate(i): continue
@@ -292,12 +270,9 @@ class GSTR2AAnalyzer(QObject):
                         if match_cnt >= 3: is_valid_probe = True
                     
                     if is_valid_probe or match_cnt >= 3:
-                         print(f"DEBUG: Header detected at Row {i} (Merged with {i+1}). Canonical Matches: {match_cnt}")
-                         sys.stdout.flush()
                          return current_map, i + 2
         except Exception as e:
-            print(f"DEBUG: CRASH IN LOOP: {e}")
-            sys.stdout.flush()
+            pass
             
         return {}, -1
 
@@ -308,10 +283,6 @@ class GSTR2AAnalyzer(QObject):
         """
         aliases = self.HEADER_REGISTRY.get(canonical_key, [])
         matches = []
-        
-        # Debug Logging for SOP-3 Investigation
-        if sop_id == 'sop_3' and canonical_key == 'igst':
-             print(f"DEBUG: Resolving IGST for SOP-3. Sheet Map Keys: {list(sheet_map.keys())}")
         
         # Check regex/alias match
         for norm_h, items in sheet_map.items():
@@ -327,9 +298,6 @@ class GSTR2AAnalyzer(QObject):
                             matches.append((norm_h, idx, original))
                      break # Found valid alias for this header, move to next header
 
-        if sop_id == 'sop_3' and canonical_key == 'igst':
-             print(f"DEBUG: IGST Matches: {matches}")
-             
         if not matches:
             return None
             
@@ -338,7 +306,6 @@ class GSTR2AAnalyzer(QObject):
 
         if require_unique:
              # Strict Determinism Limit: Ambiguity not allowed for this key
-             print(f"DEBUG: Ambiguity found but require_unique=True. Found: {matches}")
              return None
 
         if not allow_ambiguity:
@@ -545,11 +512,9 @@ class GSTR2AAnalyzer(QObject):
         summary_sheet = next((s for s in self.xl_file.sheet_names if "itc available" in s.lower()), None)
         
         if summary_sheet:
-            print(f"DEBUG: SOP-3 using Summary Sheet: {summary_sheet}")
             return self._analyze_sop_3_summary_structure(summary_sheet)
 
         # 2. Legacy Strategy (Invoice Summation) if Summary missing
-        print("DEBUG: SOP-3 Summary Sheet not found. Falling back to Legacy Invoice Summation.")
         target_sheets = [s for s in self.SOP_SHEET_MAP.get('sop_3', []) if s in self.xl_file.sheet_names and "itc available" not in s.lower()]
         
         if not target_sheets:
@@ -624,7 +589,6 @@ class GSTR2AAnalyzer(QObject):
                 igst_indices.append(col_idx)
         
         if len(igst_indices) > 1:
-             print(f"DEBUG: Multiple IGST columns found {igst_indices}. Using LAST one (Consolidated).")
              target_igst_idx = igst_indices[-1]
              # Re-map adjacent columns relative to the Target IGST
              col_map = {} # Reset
@@ -722,9 +686,6 @@ class GSTR2AAnalyzer(QObject):
 
         header_map, start_row = self._scan_headers(target_sheet, sop_id='sop_5')
         
-        # DEBUG: Log Header Keys for SOP-5 (User Request)
-        print(f"DEBUG: SOP-5 TDS Header Keys: {list(header_map.keys())}")
-        
         if not header_map:
              return {"status": "info", "reason": "TDS sheet headers not found"}
 
@@ -735,12 +696,7 @@ class GSTR2AAnalyzer(QObject):
         taxable_val = self._get_column_values(df, header_map, 'taxable_value', 'sop_5_tds', allow_ambiguity=True)
         
         if taxable_val is None:
-             print("SOP5_TDS_DEBUG: header_map keys =", header_map.keys())
-             print("SOP5_TDS_DEBUG: taxable_value resolved =", taxable_val is not None)
              return {"status": "info", "reason": "TDS: Taxable Value column not found"}
-
-        print("SOP5_TDS_DEBUG: header_map keys =", header_map.keys())
-        print("SOP5_TDS_DEBUG: taxable_value resolved =", taxable_val is not None)
 
         return {
             "status": "pass", 
@@ -756,9 +712,6 @@ class GSTR2AAnalyzer(QObject):
 
         header_map, start_row = self._scan_headers(target_sheet, sop_id='sop_5')
 
-        # DEBUG: Log Header Keys for SOP-5 (User Request)
-        print(f"DEBUG: SOP-5 TCS Header Keys: {list(header_map.keys())}")
-
         if not header_map:
              return {"status": "info", "reason": "TCS sheet headers not found"}
 
@@ -771,12 +724,7 @@ class GSTR2AAnalyzer(QObject):
         net_amt = self._get_column_values(df, header_map, 'taxable_value', 'sop_5_tcs', allow_ambiguity=True, require_unique=False)
         
         if net_amt is None:
-             print("SOP5_TCS_DEBUG: header_map keys =", header_map.keys())
-             print("SOP5_TCS_DEBUG: net_amount_liable resolved =", net_amt is not None)
              return {"status": "info", "reason": "TCS: Net Amount Liable column ambiguous or missing"}
-
-        print("SOP5_TCS_DEBUG: header_map keys =", header_map.keys())
-        print("SOP5_TCS_DEBUG: net_amount_liable resolved =", net_amt is not None)
 
         return {
             "status": "pass", 
@@ -799,25 +747,15 @@ class GSTR2AAnalyzer(QObject):
         
         # Priority Search (IMPG first)
         for s in target_sheets:
-             # [SOP-10 DIAG] Sheet Availability
-             print(f"[SOP-10 DIAG] Checking Target Sheet: '{s}'")
-             
              if s in self.xl_file.sheet_names:
-                 print(f"[SOP-10 DIAG] Sheet '{s}' FOUND in Excel.")
                  hm, sr = self._scan_headers(s, sop_id='sop_10')
                  if hm:
-                     print(f"[SOP-10 DIAG] Headers Resolved for '{s}': {hm}")
                      sheet = s
                      header_map = hm
                      start_row = sr
                      break
-                 else:
-                     print(f"[SOP-10 DIAG] Headers FAILED for '{s}'")
-             else:
-                 print(f"[SOP-10 DIAG] Sheet '{s}' NOT FOUND in Excel.")
                       
         if not header_map:
-             print("[SOP-10 DIAG] All target sheets failed. Available sheets:", self.xl_file.sheet_names)
              return {'status': 'info', 'reason': 'Import (IMPG) data not available'}
              
         df = self.xl_file.parse(sheet, header=None, skiprows=start_row)
@@ -833,12 +771,6 @@ class GSTR2AAnalyzer(QObject):
              val = 0.0
         else:
              val = pd.to_numeric(igst_col, errors='coerce').fillna(0.0).sum()
-        
-        # --- USER DEBUG SOP-10 ---
-        print("SOP10_DEBUG: sheet tried =", sheet)
-        print("SOP10_DEBUG: header_map keys =", header_map.keys())
-        print("SOP10_DEBUG: igst resolved =", igst_col is not None)
-        # -------------------------
         
         return {'status': 'pass', 'igst': float(val)}
 
@@ -981,14 +913,11 @@ class GSTR2AAnalyzer(QObject):
         c_status = self._get_column_values(df, header_map, 'filing_status', 'sop_8', allow_ambiguity=False)
         
         if c_status is None:
-             print("DEBUG: SOP-8 Filing Status Column NOT FOUND.")
              return {'error': "Filing Status column missing"}
         
         # 2. Filter Non-Filers
         status_series = c_status.astype(str).str.strip().str.upper()
-        print(f"DEBUG: SOP-8 Status Series: {status_series.tolist()}")
         mask = status_series.isin(['N', 'NO'])
-        print(f"DEBUG: SOP-8 Mask: {mask.tolist()}")
         
         if not mask.any():
              return {'rows': [], 'total_liability': 0}
